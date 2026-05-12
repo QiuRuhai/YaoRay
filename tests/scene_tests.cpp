@@ -71,6 +71,10 @@ fov_y = 45
     );
 }
 
+bool DiagnosticsMention(const std::vector<yr::SceneDiagnostic>& diagnostics, std::string_view text) {
+    return yr::FormatSceneDiagnostics(diagnostics).find(std::string{text}) != std::string::npos;
+}
+
 } // namespace
 
 YR_TEST(scene_defaults_match_schema) {
@@ -318,6 +322,44 @@ YR_TEST(scene_parser_rejects_float_overflow_vector_components) {
 
     YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(!result.scene.has_value());
+}
+
+YR_TEST(scene_parser_rejects_short_required_camera_position) {
+    const std::filesystem::path path = WriteTempScene(
+        "short_camera_position.toml",
+        ValidScene(
+            "[render]\nwidth = 64\nheight = 32\n",
+            "[film]\noutput = \"out/test.png\"\n",
+            "[camera]\ntype = \"perspective\"\nposition = [0, 1]\ntarget = [0, 1, 0]\nfov_y = 45\n"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsMention(result.diagnostics, "camera.position"));
+    YR_EXPECT_TRUE(DiagnosticsMention(result.diagnostics, "expected three numeric values") ||
+                   DiagnosticsMention(result.diagnostics, "invalid"));
+}
+
+YR_TEST(scene_parser_rejects_non_array_required_camera_target) {
+    const std::filesystem::path path = WriteTempScene(
+        "bad_camera_target.toml",
+        ValidScene(
+            "[render]\nwidth = 64\nheight = 32\n",
+            "[film]\noutput = \"out/test.png\"\n",
+            "[camera]\ntype = \"perspective\"\nposition = [0, 1, 4]\ntarget = \"bad\"\nfov_y = 45\n"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsMention(result.diagnostics, "camera.target"));
+    YR_EXPECT_TRUE(DiagnosticsMention(result.diagnostics, "expected three numeric values") ||
+                   DiagnosticsMention(result.diagnostics, "invalid"));
 }
 
 YR_TEST(scene_parser_rejects_empty_asset_names_paths_and_instance_references) {

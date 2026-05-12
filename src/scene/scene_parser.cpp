@@ -119,7 +119,14 @@ std::optional<Vec3f> ReadVec3(
     std::vector<SceneDiagnostic>& diagnostics
 ) {
     const toml::array* array = table[key].as_array();
-    if (array == nullptr || array->size() != 3) {
+    if (array == nullptr) {
+        if (table.contains(key)) {
+            diagnostics.push_back(Error(file, std::move(field), "expected three numeric values"));
+        }
+        return std::nullopt;
+    }
+    if (array->size() != 3) {
+        diagnostics.push_back(Error(file, std::move(field), "expected three numeric values"));
         return std::nullopt;
     }
 
