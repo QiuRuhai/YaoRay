@@ -37,14 +37,21 @@ add_library(yaoray_scene STATIC
 target_include_directories(yaoray_scene PUBLIC include)
 target_link_libraries(yaoray_scene PUBLIC yaoray_core PRIVATE tomlplusplus)
 
+add_library(yaoray_render STATIC
+    src/render/scene_compiler.cpp
+)
+target_include_directories(yaoray_render PUBLIC include)
+target_link_libraries(yaoray_render PUBLIC yaoray_core yaoray_scene)
+
 add_executable(yaoray_tests
     tests/test_main.cpp
     tests/version_tests.cpp
     tests/core_tests.cpp
     tests/film_tests.cpp
     tests/scene_tests.cpp
+    tests/render_scene_tests.cpp
 )
-target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_scene)
+target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_scene yaoray_render)
 
 add_executable(yaoray
     src/app/main.cpp
