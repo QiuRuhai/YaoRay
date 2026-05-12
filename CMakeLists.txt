@@ -26,18 +26,30 @@ add_library(yaoray_film STATIC
 target_include_directories(yaoray_film PUBLIC include)
 target_link_libraries(yaoray_film PUBLIC yaoray_core)
 
+add_library(tomlplusplus INTERFACE)
+target_include_directories(tomlplusplus INTERFACE external/tomlplusplus)
+
+add_library(yaoray_scene STATIC
+    src/scene/diagnostic.cpp
+    src/scene/scene.cpp
+    src/scene/scene_parser.cpp
+)
+target_include_directories(yaoray_scene PUBLIC include)
+target_link_libraries(yaoray_scene PUBLIC yaoray_core PRIVATE tomlplusplus)
+
 add_executable(yaoray_tests
     tests/test_main.cpp
     tests/version_tests.cpp
     tests/core_tests.cpp
     tests/film_tests.cpp
+    tests/scene_tests.cpp
 )
-target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film)
+target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_scene)
 
 add_executable(yaoray
     src/app/main.cpp
 )
-target_link_libraries(yaoray PRIVATE yaoray_core yaoray_film)
+target_link_libraries(yaoray PRIVATE yaoray_core yaoray_film yaoray_scene)
 
 if(BUILD_TESTING)
     add_test(NAME yaoray_tests COMMAND yaoray_tests)
