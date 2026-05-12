@@ -58,3 +58,62 @@ YR_TEST(scene_compiler_copies_render_settings) {
     YR_EXPECT_EQ(compiled.max_depth, 6);
     YR_EXPECT_EQ(compiled.seed, std::uint64_t{123});
 }
+
+YR_TEST(scene_compiler_builds_camera_basis) {
+    const yr::SceneCompileResult result = yr::CompileScene(MakeBaseScene());
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+
+    const yr::RenderCamera& camera = result.scene.value().camera;
+    YR_EXPECT_NEAR(camera.origin.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(camera.origin.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(camera.origin.z, 4.0, 1e-6);
+    YR_EXPECT_NEAR(camera.forward.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(camera.forward.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(camera.forward.z, -1.0, 1e-6);
+    YR_EXPECT_NEAR(camera.right.x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(camera.right.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(camera.right.z, 0.0, 1e-6);
+    YR_EXPECT_NEAR(camera.up.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(camera.up.y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(camera.up.z, 0.0, 1e-6);
+    YR_EXPECT_NEAR(camera.fov_y_radians, 1.04719758, 1e-6);
+}
+
+YR_TEST(scene_compiler_copies_constant_environment) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.environment.type = yr::EnvironmentKind::Constant;
+    scene.environment.radiance = yr::Color3f{0.2f, 0.3f, 0.4f};
+    scene.environment.strength = 2.0f;
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().environment.type, yr::EnvironmentKind::Constant);
+    YR_EXPECT_NEAR(result.scene.value().environment.radiance.x, 0.2, 1e-6);
+    YR_EXPECT_NEAR(result.scene.value().environment.radiance.y, 0.3, 1e-6);
+    YR_EXPECT_NEAR(result.scene.value().environment.radiance.z, 0.4, 1e-6);
+    YR_EXPECT_NEAR(result.scene.value().environment.strength, 2.0, 1e-6);
+}
+
+YR_TEST(scene_compiler_copies_area_lights) {
+    yr::SceneDescription scene = MakeBaseScene();
+    yr::LightDescription light;
+    light.type = yr::LightKind::Area;
+    light.area.position = yr::Point3f{1.0f, 2.0f, 3.0f};
+    light.area.size = {4.0f, 5.0f};
+    light.area.radiance = yr::Color3f{6.0f, 7.0f, 8.0f};
+    scene.lights.push_back(light);
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().area_lights.size(), std::size_t{1});
+    YR_EXPECT_NEAR(result.scene.value().area_lights[0].position.x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(result.scene.value().area_lights[0].width, 4.0, 1e-6);
+    YR_EXPECT_NEAR(result.scene.value().area_lights[0].height, 5.0, 1e-6);
+    YR_EXPECT_NEAR(result.scene.value().area_lights[0].radiance.z, 8.0, 1e-6);
+}
