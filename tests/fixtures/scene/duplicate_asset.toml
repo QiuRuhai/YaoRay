@@ -1,0 +1,23 @@
+[render]
+width = 64
+height = 32
+
+[film]
+output = "out/duplicate_asset.png"
+
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+
+[[assets]]
+name = "model"
+path = "assets/models/model_a.glb"
+
+[[assets]]
+name = "model"
+path = "assets/models/model_b.glb"
+
+[[instances]]
+asset = "model"

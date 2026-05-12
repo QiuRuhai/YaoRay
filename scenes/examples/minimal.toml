@@ -1,0 +1,23 @@
+[render]
+backend = "cpu"
+width = 640
+height = 360
+spp = 1
+max_depth = 5
+seed = 42
+
+[film]
+output = "out/minimal.png"
+tone_mapper = "aces"
+exposure = 0.0
+
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+
+[environment]
+type = "constant"
+radiance = [0.02, 0.025, 0.03]
+strength = 1.0

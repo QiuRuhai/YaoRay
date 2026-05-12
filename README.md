@@ -6,15 +6,16 @@ This repository is a rewrite of the previous ToyRender experiment. The old code 
 
 ## Current Status
 
-The foundation slice provides:
+The foundation slices provide:
 
 - CMake project structure
 - small CTest-based test harness
 - core vector, ray, and bounds primitives
 - Film accumulation and tone mapping basics
 - CLI help/version shell
+- TOML scene parsing and validation through `yaoray render`
 
-Scene files, asset import, path tracing, and CUDA backend support are planned as separate implementation slices.
+Rendering, asset import, BVH construction, PNG output, and CUDA backend support are planned as separate implementation slices.
 
 ## Build
 
@@ -29,4 +30,7 @@ ctest --test-dir build --output-on-failure -C Debug
 ```powershell
 build\Debug\yaoray.exe --help
 build\Debug\yaoray.exe --version
+build\Debug\yaoray.exe render scenes\examples\minimal.toml --backend cpu
 ```
+
+The `render` command currently validates scene files and reports the requested backend. It does not render images yet.

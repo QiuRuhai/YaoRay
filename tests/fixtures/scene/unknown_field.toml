@@ -1,0 +1,17 @@
+[render]
+widht = 1280
+width = 64
+height = 32
+
+[film]
+output = "out/unknown_field.png"
+
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+
+[environment]
+type = "constant"
+radiance = [0.1, 0.1, 0.1]
