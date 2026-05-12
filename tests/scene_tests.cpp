@@ -1,6 +1,7 @@
 #include "yr_test.hpp"
 
 #include <cstdint>
+#include <fstream>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -18,6 +19,56 @@ std::filesystem::path SceneFixture(std::string_view name) {
         return fixture;
     }
     return std::filesystem::path{".."} / fixture;
+}
+
+std::filesystem::path WriteTempScene(std::string_view name, std::string_view text) {
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "yaoray_scene_parser_tests";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / std::string{name};
+    std::ofstream out{path};
+    out << text;
+    return path;
+}
+
+std::string ValidScene(
+    std::string_view render,
+    std::string_view film,
+    std::string_view camera,
+    std::string_view extra = {}
+) {
+    std::string text;
+    text += render;
+    text += film;
+    text += camera;
+    text += R"toml(
+[environment]
+type = "constant"
+radiance = [0.1, 0.1, 0.1]
+)toml";
+    text += extra;
+    return text;
+}
+
+std::string ValidSceneWith(std::string_view extra) {
+    return ValidScene(
+        R"toml(
+[render]
+width = 64
+height = 32
+)toml",
+        R"toml(
+[film]
+output = "out/test.png"
+)toml",
+        R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml",
+        extra
+    );
 }
 
 } // namespace
@@ -143,25 +194,65 @@ YR_TEST(scene_diagnostics_detect_errors) {
 }
 
 YR_TEST(scene_parser_loads_minimal_scene_file) {
-    const yr::SceneLoadResult result = yr::LoadSceneFile(SceneFixture("minimal.toml"));
+    const std::filesystem::path scene_path = SceneFixture("minimal.toml").lexically_normal();
+    const yr::SceneLoadResult result = yr::LoadSceneFile(scene_path);
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
 
     const yr::SceneDescription& scene = result.scene.value();
+    YR_EXPECT_EQ(scene.source_path.generic_string(), scene_path.generic_string());
     YR_EXPECT_EQ(scene.render.backend, yr::RenderBackendKind::Cpu);
     YR_EXPECT_EQ(scene.render.width, 1280);
     YR_EXPECT_EQ(scene.render.height, 720);
     YR_EXPECT_EQ(scene.render.spp, 64);
     YR_EXPECT_EQ(scene.render.max_depth, 8);
     YR_EXPECT_EQ(scene.render.seed, std::uint64_t{42});
-    const std::filesystem::path expected_output = (SceneFixture("minimal.toml").parent_path() / "out" / "example.png").lexically_normal();
+    const std::filesystem::path expected_output = (scene_path.parent_path() / "out" / "example.png").lexically_normal();
     YR_EXPECT_EQ(scene.film.output.generic_string(), expected_output.generic_string());
+    YR_EXPECT_EQ(scene.film.tone_mapper, yr::ToneMapperKind::Aces);
+    YR_EXPECT_NEAR(scene.film.exposure, 0.0, 1e-6);
+    YR_EXPECT_EQ(scene.film.checkpoint_interval_s, 0);
+    YR_EXPECT_EQ(scene.film.checkpoint_path.generic_string(), std::string{});
+    YR_EXPECT_EQ(scene.camera.value().type, yr::CameraKind::Perspective);
+    YR_EXPECT_NEAR(scene.camera.value().position.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(scene.camera.value().position.y, 1.0, 1e-6);
     YR_EXPECT_NEAR(scene.camera.value().position.z, 4.0, 1e-6);
+    YR_EXPECT_NEAR(scene.camera.value().target.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(scene.camera.value().target.y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(scene.camera.value().target.z, 0.0, 1e-6);
+    YR_EXPECT_NEAR(scene.camera.value().fov_y, 45.0, 1e-6);
+    YR_EXPECT_NEAR(scene.camera.value().aperture, 0.0, 1e-6);
+    YR_EXPECT_NEAR(scene.camera.value().focus_distance, 4.0, 1e-6);
     YR_EXPECT_EQ(scene.assets.size(), std::size_t{1});
+    YR_EXPECT_EQ(scene.assets[0].name, std::string{"model"});
+    YR_EXPECT_EQ(scene.assets[0].path.generic_string(), (scene_path.parent_path() / "assets" / "models" / "model.glb").lexically_normal().generic_string());
     YR_EXPECT_EQ(scene.instances.size(), std::size_t{1});
+    YR_EXPECT_EQ(scene.instances[0].asset, std::string{"model"});
+    YR_EXPECT_NEAR(scene.instances[0].transform.translate.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(scene.instances[0].transform.translate.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(scene.instances[0].transform.translate.z, 0.0, 1e-6);
+    YR_EXPECT_NEAR(scene.instances[0].transform.rotate_degrees.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(scene.instances[0].transform.rotate_degrees.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(scene.instances[0].transform.rotate_degrees.z, 0.0, 1e-6);
+    YR_EXPECT_NEAR(scene.instances[0].transform.scale.x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(scene.instances[0].transform.scale.y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(scene.instances[0].transform.scale.z, 1.0, 1e-6);
     YR_EXPECT_EQ(scene.lights.size(), std::size_t{1});
+    YR_EXPECT_EQ(scene.lights[0].type, yr::LightKind::Area);
+    YR_EXPECT_NEAR(scene.lights[0].area.position.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(scene.lights[0].area.position.y, 4.0, 1e-6);
+    YR_EXPECT_NEAR(scene.lights[0].area.position.z, 2.0, 1e-6);
+    YR_EXPECT_NEAR(scene.lights[0].area.size[0], 2.0, 1e-6);
+    YR_EXPECT_NEAR(scene.lights[0].area.size[1], 2.0, 1e-6);
+    YR_EXPECT_NEAR(scene.lights[0].area.radiance.x, 8.0, 1e-6);
+    YR_EXPECT_NEAR(scene.lights[0].area.radiance.y, 7.0, 1e-6);
+    YR_EXPECT_NEAR(scene.lights[0].area.radiance.z, 6.0, 1e-6);
     YR_EXPECT_EQ(scene.environment.type, yr::EnvironmentKind::Constant);
+    YR_EXPECT_NEAR(scene.environment.radiance.x, 0.02, 1e-6);
+    YR_EXPECT_NEAR(scene.environment.radiance.y, 0.025, 1e-6);
+    YR_EXPECT_NEAR(scene.environment.radiance.z, 0.03, 1e-6);
+    YR_EXPECT_NEAR(scene.environment.strength, 1.0, 1e-6);
 }
 
 YR_TEST(scene_parser_applies_defaults) {
@@ -179,4 +270,71 @@ YR_TEST(scene_parser_applies_defaults) {
     YR_EXPECT_EQ(scene.film.checkpoint_interval_s, 0);
     YR_EXPECT_EQ(scene.environment.type, yr::EnvironmentKind::Constant);
     YR_EXPECT_NEAR(scene.environment.strength, 1.0, 1e-6);
+}
+
+YR_TEST(scene_parser_rejects_out_of_range_integer_fields) {
+    const std::filesystem::path path = WriteTempScene(
+        "out_of_range_integer.toml",
+        ValidScene(
+            "[render]\nwidth = 4294967297\nheight = 32\n",
+            "[film]\noutput = \"out/test.png\"\n",
+            "[camera]\ntype = \"perspective\"\nposition = [0, 1, 4]\ntarget = [0, 1, 0]\nfov_y = 45\n"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+}
+
+YR_TEST(scene_parser_rejects_float_overflow_fields) {
+    const std::filesystem::path path = WriteTempScene(
+        "float_overflow.toml",
+        ValidScene(
+            "[render]\nwidth = 64\nheight = 32\n",
+            "[film]\noutput = \"out/test.png\"\nexposure = 3.5e38\n",
+            "[camera]\ntype = \"perspective\"\nposition = [0, 1, 4]\ntarget = [0, 1, 0]\nfov_y = 45\n"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+}
+
+YR_TEST(scene_parser_rejects_float_overflow_vector_components) {
+    const std::filesystem::path path = WriteTempScene(
+        "float_vector_overflow.toml",
+        ValidScene(
+            "[render]\nwidth = 64\nheight = 32\n",
+            "[film]\noutput = \"out/test.png\"\n",
+            "[camera]\ntype = \"perspective\"\nposition = [3.5e38, 1, 4]\ntarget = [0, 1, 0]\nfov_y = 45\n"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+}
+
+YR_TEST(scene_parser_rejects_empty_asset_names_paths_and_instance_references) {
+    const std::filesystem::path path = WriteTempScene(
+        "empty_references.toml",
+        ValidSceneWith(R"toml(
+[[assets]]
+name = ""
+path = ""
+
+[[instances]]
+asset = ""
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
 }
