@@ -22,6 +22,7 @@ target_include_directories(yaoray_core PUBLIC include)
 add_executable(yaoray_tests
     tests/test_main.cpp
     tests/version_tests.cpp
+    tests/core_tests.cpp
 )
 target_link_libraries(yaoray_tests PRIVATE yaoray_core)
 
