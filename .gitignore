@@ -1,0 +1,22 @@
+# Build outputs
+build/
+_build/
+cmake-build-*/
+out/
+
+# Local IDE state
+.vs/
+.vscode/
+.idea/
+
+# Superpowers visual companion scratch files
+.superpowers/brainstorm/
+
+# OS and compiler noise
+*.user
+*.suo
+*.log
+*.obj
+*.pdb
+*.ilk
+*.exe
