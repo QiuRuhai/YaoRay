@@ -1,11 +1,26 @@
 #include "yr_test.hpp"
 
+#include <cstdint>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <yaoray/scene/diagnostic.hpp>
 #include <yaoray/scene/scene.hpp>
+#include <yaoray/scene/scene_parser.hpp>
+
+namespace {
+
+std::filesystem::path SceneFixture(std::string_view name) {
+    const std::filesystem::path fixture = std::filesystem::path{"tests"} / "fixtures" / "scene" / std::string{name};
+    if (std::filesystem::exists(fixture)) {
+        return fixture;
+    }
+    return std::filesystem::path{".."} / fixture;
+}
+
+} // namespace
 
 YR_TEST(scene_defaults_match_schema) {
     const yr::SceneDescription scene;
@@ -125,4 +140,43 @@ YR_TEST(scene_diagnostics_detect_errors) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(warnings));
     YR_EXPECT_TRUE(yr::HasSceneErrors(errors));
+}
+
+YR_TEST(scene_parser_loads_minimal_scene_file) {
+    const yr::SceneLoadResult result = yr::LoadSceneFile(SceneFixture("minimal.toml"));
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+
+    const yr::SceneDescription& scene = result.scene.value();
+    YR_EXPECT_EQ(scene.render.backend, yr::RenderBackendKind::Cpu);
+    YR_EXPECT_EQ(scene.render.width, 1280);
+    YR_EXPECT_EQ(scene.render.height, 720);
+    YR_EXPECT_EQ(scene.render.spp, 64);
+    YR_EXPECT_EQ(scene.render.max_depth, 8);
+    YR_EXPECT_EQ(scene.render.seed, std::uint64_t{42});
+    const std::filesystem::path expected_output = (SceneFixture("minimal.toml").parent_path() / "out" / "example.png").lexically_normal();
+    YR_EXPECT_EQ(scene.film.output.generic_string(), expected_output.generic_string());
+    YR_EXPECT_NEAR(scene.camera.value().position.z, 4.0, 1e-6);
+    YR_EXPECT_EQ(scene.assets.size(), std::size_t{1});
+    YR_EXPECT_EQ(scene.instances.size(), std::size_t{1});
+    YR_EXPECT_EQ(scene.lights.size(), std::size_t{1});
+    YR_EXPECT_EQ(scene.environment.type, yr::EnvironmentKind::Constant);
+}
+
+YR_TEST(scene_parser_applies_defaults) {
+    const yr::SceneLoadResult result = yr::LoadSceneFile(SceneFixture("defaults.toml"));
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+
+    const yr::SceneDescription& scene = result.scene.value();
+    YR_EXPECT_EQ(scene.render.backend, yr::RenderBackendKind::Cpu);
+    YR_EXPECT_EQ(scene.render.spp, 1);
+    YR_EXPECT_EQ(scene.render.max_depth, 5);
+    YR_EXPECT_EQ(scene.film.tone_mapper, yr::ToneMapperKind::Aces);
+    YR_EXPECT_NEAR(scene.film.exposure, 0.0, 1e-6);
+    YR_EXPECT_EQ(scene.film.checkpoint_interval_s, 0);
+    YR_EXPECT_EQ(scene.environment.type, yr::EnvironmentKind::Constant);
+    YR_EXPECT_NEAR(scene.environment.strength, 1.0, 1e-6);
 }
