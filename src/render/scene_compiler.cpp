@@ -136,6 +136,8 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
         compiled.environment.type = scene.environment.type;
         compiled.environment.radiance = scene.environment.radiance;
         compiled.environment.strength = scene.environment.strength;
+    } else if (scene.environment.type == EnvironmentKind::Hdri) {
+        result.diagnostics.push_back(Error(scene, "environment.path", "HDRI environment import not implemented yet"));
     }
 
     CopyAreaLights(scene, compiled);
@@ -151,6 +153,8 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
         const std::string asset_path = asset->second.generic_string();
         if (asset_path == "builtin:triangle") {
             AppendBuiltinTriangle(compiled, instance.transform);
+        } else {
+            result.diagnostics.push_back(Error(scene, "assets.path", "asset import not implemented yet: " + asset_path));
         }
     }
 

@@ -28,6 +28,19 @@ yr::SceneDescription MakeBaseScene() {
     return scene;
 }
 
+bool DiagnosticsContain(
+    const std::vector<yr::SceneDiagnostic>& diagnostics,
+    std::string_view field,
+    std::string_view message
+) {
+    for (const yr::SceneDiagnostic& diagnostic : diagnostics) {
+        if (diagnostic.field == field && diagnostic.message.find(message) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 YR_TEST(render_scene_defaults_are_backend_friendly) {
@@ -162,4 +175,28 @@ YR_TEST(scene_compiler_applies_builtin_triangle_transform) {
     YR_EXPECT_NEAR(triangle.p1.y, 3.0, 1e-5);
     YR_EXPECT_NEAR(triangle.p2.x, 0.0, 1e-5);
     YR_EXPECT_NEAR(triangle.p2.y, 2.0, 1e-5);
+}
+
+YR_TEST(scene_compiler_rejects_external_assets) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"model", "assets/model.glb"});
+    scene.instances.push_back(yr::InstanceDescription{"model", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "assets.path", "asset import not implemented yet"));
+}
+
+YR_TEST(scene_compiler_rejects_hdri_environment) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.environment.type = yr::EnvironmentKind::Hdri;
+    scene.environment.path = "assets/hdri/studio.hdr";
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "environment.path", "HDRI environment import not implemented yet"));
 }
