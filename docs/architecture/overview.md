@@ -11,5 +11,8 @@ Current implemented slices:
 - project structure, tests, core math primitives, Film accumulation, and CLI shell
 - TOML scene parsing, validation diagnostics, and `yaoray render` command shell
 - initial `RenderScene` compilation with temporary `builtin:triangle` asset support
+- CPU debug rendering to PPM for the first image-output loop
 
-Rendering backends, asset import, BVH construction, and image output will be added in focused implementation plans.
+The CPU debug renderer is a simple reference path through camera rays, triangle intersection, Film accumulation, tone mapping, and PPM output. It is useful for smoke tests and future importer/BVH/CUDA comparisons, while final image quality remains the responsibility of later path tracing work.
+
+Rendering backends, asset import, BVH construction, PNG output, and final-quality image output will be added in focused implementation plans.

@@ -1,4 +1,7 @@
+#include <yaoray/backends/cpu/cpu_debug_renderer.hpp>
 #include <yaoray/core/version.hpp>
+#include <yaoray/film/image_writer.hpp>
+#include <yaoray/film/tone_mapping.hpp>
 #include <yaoray/render/scene_compiler.hpp>
 #include <yaoray/scene/diagnostic.hpp>
 #include <yaoray/scene/scene_parser.hpp>
@@ -26,7 +29,19 @@ void PrintRenderHelp() {
         << "Usage:\n"
         << "  yaoray render <scene.toml> [--backend cpu|cuda]\n"
         << '\n'
-        << "The render command currently parses and compiles scene files. Rendering is not implemented yet.\n";
+        << "The render command currently parses, compiles, and renders CPU debug PPM images.\n";
+}
+
+yr::ToneMapper ToFilmToneMapper(yr::ToneMapperKind mapper) {
+    switch (mapper) {
+        case yr::ToneMapperKind::None:
+            return yr::ToneMapper::None;
+        case yr::ToneMapperKind::Reinhard:
+            return yr::ToneMapper::Reinhard;
+        case yr::ToneMapperKind::Aces:
+            return yr::ToneMapper::Aces;
+    }
+    return yr::ToneMapper::Aces;
 }
 
 int RunRender(int argc, char** argv) {
@@ -85,7 +100,29 @@ int RunRender(int argc, char** argv) {
     std::cout << "Scene compiled successfully.\n";
     std::cout << "Requested backend: " << yr::RenderBackendName(render_scene.backend) << '\n';
     std::cout << "Compiled triangles: " << render_scene.triangles.size() << '\n';
-    std::cout << "Rendering is not implemented yet.\n";
+
+    if (render_scene.backend == yr::RenderBackendKind::Cuda) {
+        std::cerr << "CUDA backend not implemented yet.\n";
+        return 1;
+    }
+
+    const yr::CpuDebugRenderResult render_result = yr::RenderCpuDebug(render_scene);
+    const yr::ToneMapSettings tone_map{
+        ToFilmToneMapper(scene.film.tone_mapper),
+        scene.film.exposure
+    };
+    const yr::ImageWriteResult write_result = yr::WritePpm(render_result.film, tone_map, scene.film.output);
+    if (!write_result.ok) {
+        std::cerr << "Image write error: " << write_result.error << '\n';
+        return 1;
+    }
+
+    std::cout << "Rendered image: " << scene.film.output.generic_string() << '\n';
+    std::cout << "Rays traced: " << render_result.stats.rays_traced << '\n';
+    std::cout << "Triangle tests: " << render_result.stats.triangle_tests << '\n';
+    std::cout << "Hits: " << render_result.stats.hits << '\n';
+    std::cout << "Misses: " << render_result.stats.misses << '\n';
+    std::cout << "Elapsed seconds: " << render_result.stats.elapsed_seconds << '\n';
     return 0;
 }
 
