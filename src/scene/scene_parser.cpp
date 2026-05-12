@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <initializer_list>
 #include <limits>
 #include <optional>
 #include <string>
@@ -27,6 +28,39 @@ std::filesystem::path NormalizeScenePath(const std::filesystem::path& scene_dir,
         path = scene_dir / path;
     }
     return path.lexically_normal();
+}
+
+bool IsAllowedField(std::string_view key, std::initializer_list<std::string_view> allowed) {
+    for (std::string_view field : allowed) {
+        if (key == field) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void CheckUnknownFields(
+    const toml::table& table,
+    std::string_view prefix,
+    std::initializer_list<std::string_view> allowed,
+    const std::filesystem::path& file,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    for (const auto& [key, node] : table) {
+        (void)node;
+        const std::string_view field = key.str();
+        if (IsAllowedField(field, allowed)) {
+            continue;
+        }
+
+        std::string qualified;
+        if (!prefix.empty()) {
+            qualified += prefix;
+            qualified += ".";
+        }
+        qualified += field;
+        diagnostics.push_back(Error(file, std::move(qualified), "unknown field"));
+    }
 }
 
 const toml::table* RequiredTable(
@@ -157,7 +191,14 @@ std::optional<std::array<float, 2>> ReadVec2(
     std::vector<SceneDiagnostic>& diagnostics
 ) {
     const toml::array* array = table[key].as_array();
-    if (array == nullptr || array->size() != 2) {
+    if (array == nullptr) {
+        if (table.contains(key)) {
+            diagnostics.push_back(Error(file, std::move(field), "expected two numeric values"));
+        }
+        return std::nullopt;
+    }
+    if (array->size() != 2) {
+        diagnostics.push_back(Error(file, std::move(field), "expected two numeric values"));
         return std::nullopt;
     }
 
@@ -179,6 +220,14 @@ void ParseRender(
     const std::filesystem::path& file,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
+    CheckUnknownFields(
+        table,
+        "render",
+        {"backend", "width", "height", "spp", "max_depth", "seed"},
+        file,
+        diagnostics
+    );
+
     if (const auto backend = ReadValue<std::string>(table, "backend")) {
         if (const auto parsed = ParseRenderBackendName(*backend)) {
             scene.render.backend = *parsed;
@@ -234,6 +283,14 @@ void ParseFilm(
     const std::filesystem::path& file,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
+    CheckUnknownFields(
+        table,
+        "film",
+        {"output", "tone_mapper", "exposure", "checkpoint_interval_s", "checkpoint_path"},
+        file,
+        diagnostics
+    );
+
     if (const auto output = ReadValue<std::string>(table, "output")) {
         if (output->empty()) {
             diagnostics.push_back(Error(file, "film.output", "must not be empty"));
@@ -268,6 +325,14 @@ void ParseCamera(
     const std::filesystem::path& file,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
+    CheckUnknownFields(
+        table,
+        "camera",
+        {"type", "position", "target", "fov_y", "aperture", "focus_distance"},
+        file,
+        diagnostics
+    );
+
     CameraDescription camera;
     if (const auto type = ReadValue<std::string>(table, "type")) {
         if (const auto parsed = ParseCameraKindName(*type)) {
@@ -325,6 +390,7 @@ void ParseAssets(
             diagnostics.push_back(Error(file, "assets", "asset entry must be a table"));
             continue;
         }
+        CheckUnknownFields(*table, "assets", {"name", "path"}, file, diagnostics);
 
         AssetDescription asset;
         if (const auto name = ReadValue<std::string>(*table, "name")) {
@@ -369,6 +435,13 @@ void ParseInstances(
             diagnostics.push_back(Error(file, "instances", "instance entry must be a table"));
             continue;
         }
+        CheckUnknownFields(
+            *table,
+            "instances",
+            {"asset", "translate", "rotate_degrees", "scale"},
+            file,
+            diagnostics
+        );
 
         InstanceDescription instance;
         if (const auto asset = ReadValue<std::string>(*table, "asset")) {
@@ -410,6 +483,7 @@ void ParseLights(
             diagnostics.push_back(Error(file, "lights", "light entry must be a table"));
             continue;
         }
+        CheckUnknownFields(*table, "lights", {"type", "position", "size", "radiance"}, file, diagnostics);
 
         LightDescription light;
         if (const auto type = ReadValue<std::string>(*table, "type")) {
@@ -439,6 +513,8 @@ void ParseEnvironment(
     const std::filesystem::path& file,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
+    CheckUnknownFields(table, "environment", {"type", "radiance", "path", "strength"}, file, diagnostics);
+
     if (const auto type = ReadValue<std::string>(table, "type")) {
         if (const auto parsed = ParseEnvironmentKindName(*type)) {
             scene.environment.type = *parsed;
@@ -471,12 +547,12 @@ void ValidateReferences(
 
     for (const InstanceDescription& instance : scene.instances) {
         if (!instance.asset.empty() && !assets.contains(instance.asset)) {
-            diagnostics.push_back(Error(file, "instances.asset", "missing asset reference"));
+            diagnostics.push_back(Error(file, "instances.asset", "references unknown asset"));
         }
     }
 
     if (scene.instances.empty() && scene.lights.empty() && scene.environment.type == EnvironmentKind::None) {
-        diagnostics.push_back(Error(file, "scene", "must contain at least one instance, light, or environment"));
+        diagnostics.push_back(Error(file, "scene", "must contain at least one instance, light, or non-none environment"));
     }
 }
 
@@ -502,6 +578,8 @@ SceneLoadResult LoadSceneFile(const std::filesystem::path& path) {
     SceneDescription scene;
     scene.source_path = file;
     const std::filesystem::path scene_dir = file.parent_path();
+
+    CheckUnknownFields(root, "", {"render", "film", "camera", "assets", "instances", "lights", "environment"}, file, result.diagnostics);
 
     const toml::table* render = RequiredTable(root, "render", file, result.diagnostics);
     const toml::table* film = RequiredTable(root, "film", file, result.diagnostics);

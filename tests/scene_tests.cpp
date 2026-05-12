@@ -75,6 +75,19 @@ bool DiagnosticsMention(const std::vector<yr::SceneDiagnostic>& diagnostics, std
     return yr::FormatSceneDiagnostics(diagnostics).find(std::string{text}) != std::string::npos;
 }
 
+bool DiagnosticsContain(
+    const std::vector<yr::SceneDiagnostic>& diagnostics,
+    std::string_view field,
+    std::string_view message
+) {
+    for (const yr::SceneDiagnostic& diagnostic : diagnostics) {
+        if (diagnostic.field == field && diagnostic.message.find(message) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 YR_TEST(scene_defaults_match_schema) {
@@ -379,4 +392,88 @@ asset = ""
 
     YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(!result.scene.has_value());
+}
+
+YR_TEST(scene_parser_rejects_missing_render) {
+    const yr::SceneLoadResult result = yr::LoadSceneFile(SceneFixture("missing_render.toml"));
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render", "missing required table"));
+}
+
+YR_TEST(scene_parser_rejects_missing_camera) {
+    const yr::SceneLoadResult result = yr::LoadSceneFile(SceneFixture("missing_camera.toml"));
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "camera", "missing required table"));
+}
+
+YR_TEST(scene_parser_rejects_invalid_width) {
+    const yr::SceneLoadResult result = yr::LoadSceneFile(SceneFixture("invalid_width.toml"));
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.width", "must be positive"));
+}
+
+YR_TEST(scene_parser_rejects_short_vectors) {
+    const yr::SceneLoadResult result = yr::LoadSceneFile(SceneFixture("short_position.toml"));
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "camera.position", "expected three numeric values"));
+}
+
+YR_TEST(scene_parser_rejects_unknown_fields) {
+    const yr::SceneLoadResult result = yr::LoadSceneFile(SceneFixture("unknown_field.toml"));
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.widht", "unknown field"));
+}
+
+YR_TEST(scene_parser_rejects_duplicate_assets) {
+    const yr::SceneLoadResult result = yr::LoadSceneFile(SceneFixture("duplicate_asset.toml"));
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "assets.name", "duplicate asset name"));
+}
+
+YR_TEST(scene_parser_rejects_missing_asset_references) {
+    const yr::SceneLoadResult result = yr::LoadSceneFile(SceneFixture("missing_asset_reference.toml"));
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "instances.asset", "references unknown asset"));
+}
+
+YR_TEST(scene_parser_rejects_empty_scene) {
+    const yr::SceneLoadResult result = yr::LoadSceneFile(SceneFixture("empty_scene.toml"));
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(
+        result.diagnostics,
+        "scene",
+        "must contain at least one instance, light, or non-none environment"
+    ));
+}
+
+YR_TEST(scene_parser_reports_missing_files) {
+    const yr::SceneLoadResult result = yr::LoadSceneFile(SceneFixture("does_not_exist.toml"));
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "", "scene file not found"));
+}
+
+YR_TEST(scene_parser_reports_bad_toml) {
+    const yr::SceneLoadResult result = yr::LoadSceneFile(SceneFixture("bad_syntax.toml"));
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "", "invalid TOML"));
 }

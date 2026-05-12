@@ -1,0 +1,12 @@
+[render]
+width = 64
+height = 32
+
+[film]
+output = "out/empty_scene.png"
+
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
