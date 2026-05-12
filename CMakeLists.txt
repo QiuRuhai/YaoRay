@@ -19,12 +19,20 @@ add_library(yaoray_core STATIC
 )
 target_include_directories(yaoray_core PUBLIC include)
 
+add_library(yaoray_film STATIC
+    src/film/film.cpp
+    src/film/tone_mapping.cpp
+)
+target_include_directories(yaoray_film PUBLIC include)
+target_link_libraries(yaoray_film PUBLIC yaoray_core)
+
 add_executable(yaoray_tests
     tests/test_main.cpp
     tests/version_tests.cpp
     tests/core_tests.cpp
+    tests/film_tests.cpp
 )
-target_link_libraries(yaoray_tests PRIVATE yaoray_core)
+target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film)
 
 if(BUILD_TESTING)
     add_test(NAME yaoray_tests COMMAND yaoray_tests)
