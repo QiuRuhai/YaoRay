@@ -9,7 +9,7 @@ std::string_view RenderBackendName(RenderBackendKind backend) {
         case RenderBackendKind::Cuda:
             return "cuda";
     }
-    return "cpu";
+    return "unknown";
 }
 
 std::optional<RenderBackendKind> ParseRenderBackendName(std::string_view name) {
@@ -31,7 +31,7 @@ std::string_view ToneMapperName(ToneMapperKind mapper) {
         case ToneMapperKind::Aces:
             return "aces";
     }
-    return "aces";
+    return "unknown";
 }
 
 std::optional<ToneMapperKind> ParseToneMapperName(std::string_view name) {
@@ -52,7 +52,7 @@ std::string_view CameraKindName(CameraKind kind) {
         case CameraKind::Perspective:
             return "perspective";
     }
-    return "perspective";
+    return "unknown";
 }
 
 std::optional<CameraKind> ParseCameraKindName(std::string_view name) {
@@ -67,7 +67,7 @@ std::string_view LightKindName(LightKind kind) {
         case LightKind::Area:
             return "area";
     }
-    return "area";
+    return "unknown";
 }
 
 std::optional<LightKind> ParseLightKindName(std::string_view name) {
@@ -86,7 +86,7 @@ std::string_view EnvironmentKindName(EnvironmentKind kind) {
         case EnvironmentKind::Hdri:
             return "hdri";
     }
-    return "none";
+    return "unknown";
 }
 
 std::optional<EnvironmentKind> ParseEnvironmentKindName(std::string_view name) {

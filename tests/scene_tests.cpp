@@ -54,6 +54,14 @@ YR_TEST(scene_enum_parsers_reject_unknown_names) {
     YR_EXPECT_TRUE(!yr::ParseEnvironmentKindName("sky").has_value());
 }
 
+YR_TEST(scene_enum_names_return_unknown_for_invalid_values) {
+    YR_EXPECT_EQ(yr::RenderBackendName(static_cast<yr::RenderBackendKind>(999)), std::string_view{"unknown"});
+    YR_EXPECT_EQ(yr::ToneMapperName(static_cast<yr::ToneMapperKind>(999)), std::string_view{"unknown"});
+    YR_EXPECT_EQ(yr::CameraKindName(static_cast<yr::CameraKind>(999)), std::string_view{"unknown"});
+    YR_EXPECT_EQ(yr::LightKindName(static_cast<yr::LightKind>(999)), std::string_view{"unknown"});
+    YR_EXPECT_EQ(yr::EnvironmentKindName(static_cast<yr::EnvironmentKind>(999)), std::string_view{"unknown"});
+}
+
 YR_TEST(scene_diagnostics_format_field_messages) {
     const yr::SceneDiagnostic diagnostic{
         yr::DiagnosticSeverity::Error,
