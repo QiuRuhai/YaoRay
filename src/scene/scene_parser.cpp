@@ -76,6 +76,24 @@ const toml::table* RequiredTable(
     return table;
 }
 
+const toml::array* OptionalTableArray(
+    const toml::table& root,
+    std::string_view name,
+    const std::filesystem::path& file,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const toml::node* node = root.get(name);
+    if (node == nullptr) {
+        return nullptr;
+    }
+
+    const toml::array* array = node->as_array();
+    if (array == nullptr) {
+        diagnostics.push_back(Error(file, std::string{name}, "must be an array of tables"));
+    }
+    return array;
+}
+
 template <typename T>
 std::optional<T> ReadValue(const toml::table& table, std::string_view key) {
     return table[key].value<T>();
@@ -378,7 +396,7 @@ void ParseAssets(
     const std::filesystem::path& file,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
-    const toml::array* assets = root["assets"].as_array();
+    const toml::array* assets = OptionalTableArray(root, "assets", file, diagnostics);
     if (assets == nullptr) {
         return;
     }
@@ -424,7 +442,7 @@ void ParseInstances(
     const std::filesystem::path& file,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
-    const toml::array* instances = root["instances"].as_array();
+    const toml::array* instances = OptionalTableArray(root, "instances", file, diagnostics);
     if (instances == nullptr) {
         return;
     }
@@ -472,7 +490,7 @@ void ParseLights(
     const std::filesystem::path& file,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
-    const toml::array* lights = root["lights"].as_array();
+    const toml::array* lights = OptionalTableArray(root, "lights", file, diagnostics);
     if (lights == nullptr) {
         return;
     }

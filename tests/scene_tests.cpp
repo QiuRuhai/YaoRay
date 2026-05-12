@@ -434,6 +434,63 @@ YR_TEST(scene_parser_rejects_unknown_fields) {
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.widht", "unknown field"));
 }
 
+YR_TEST(scene_parser_rejects_unknown_fields_inside_table_arrays) {
+    const std::filesystem::path path = WriteTempScene(
+        "unknown_asset_field.toml",
+        ValidSceneWith(R"toml(
+[[assets]]
+name = "model"
+path = "assets/model.glb"
+colour = "red"
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "assets.colour", "unknown field"));
+}
+
+YR_TEST(scene_parser_rejects_misdeclared_table_array_sections) {
+    const std::filesystem::path assets_path = WriteTempScene(
+        "misdeclared_assets.toml",
+        ValidSceneWith(R"toml(
+[assets]
+name = "model"
+path = "assets/model.glb"
+)toml")
+    );
+    const std::filesystem::path instances_path = WriteTempScene(
+        "misdeclared_instances.toml",
+        ValidSceneWith(R"toml(
+[instances]
+asset = "model"
+)toml")
+    );
+    const std::filesystem::path lights_path = WriteTempScene(
+        "misdeclared_lights.toml",
+        ValidSceneWith(R"toml(
+[lights]
+type = "area"
+)toml")
+    );
+
+    const yr::SceneLoadResult assets_result = yr::LoadSceneFile(assets_path);
+    const yr::SceneLoadResult instances_result = yr::LoadSceneFile(instances_path);
+    const yr::SceneLoadResult lights_result = yr::LoadSceneFile(lights_path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(assets_result.diagnostics));
+    YR_EXPECT_TRUE(!assets_result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(assets_result.diagnostics, "assets", "must be an array of tables"));
+    YR_EXPECT_TRUE(yr::HasSceneErrors(instances_result.diagnostics));
+    YR_EXPECT_TRUE(!instances_result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(instances_result.diagnostics, "instances", "must be an array of tables"));
+    YR_EXPECT_TRUE(yr::HasSceneErrors(lights_result.diagnostics));
+    YR_EXPECT_TRUE(!lights_result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(lights_result.diagnostics, "lights", "must be an array of tables"));
+}
+
 YR_TEST(scene_parser_rejects_duplicate_assets) {
     const yr::SceneLoadResult result = yr::LoadSceneFile(SceneFixture("duplicate_asset.toml"));
 
