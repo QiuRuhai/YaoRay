@@ -4,6 +4,7 @@ build-*/
 _build/
 cmake-build-*/
 out/
+.cache/
 
 # Local IDE state
 .vs/
