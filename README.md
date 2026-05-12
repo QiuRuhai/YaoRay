@@ -16,8 +16,9 @@ The foundation slices provide:
 - TOML scene parsing and validation through `yaoray render`
 - initial `RenderScene` compilation through the `yaoray_render` module
 - temporary `builtin:triangle` scenes for compiler and CLI verification
+- CPU debug rendering of compiled triangle scenes to ASCII PPM
 
-Rendering, asset import, BVH construction, PNG output, and CUDA backend support are planned as separate implementation slices.
+Final path tracing quality, asset import, BVH construction, PNG output, and CUDA backend support are planned as separate implementation slices.
 
 ## Build
 
@@ -35,4 +36,4 @@ build\Debug\yaoray.exe --version
 build\Debug\yaoray.exe render scenes\examples\minimal.toml --backend cpu
 ```
 
-The `render` command currently parses and compiles scene files, then reports the requested backend and compiled triangle count. It does not render images yet.
+The `render` command currently parses, compiles, and renders CPU debug images to ASCII PPM. This is a correctness and smoke-test renderer, not the final path tracer or final image-quality target.
