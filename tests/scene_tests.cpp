@@ -534,3 +534,24 @@ YR_TEST(scene_parser_reports_bad_toml) {
     YR_EXPECT_TRUE(!result.scene.has_value());
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "", "invalid TOML"));
 }
+
+YR_TEST(scene_parser_preserves_builtin_asset_paths) {
+    const std::filesystem::path path = WriteTempScene(
+        "builtin_asset.toml",
+        ValidSceneWith(R"toml(
+[[assets]]
+name = "triangle"
+path = "builtin:triangle"
+
+[[instances]]
+asset = "triangle"
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().assets.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().assets[0].path.generic_string(), std::string{"builtin:triangle"});
+}

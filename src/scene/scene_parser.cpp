@@ -30,6 +30,17 @@ std::filesystem::path NormalizeScenePath(const std::filesystem::path& scene_dir,
     return path.lexically_normal();
 }
 
+bool IsBuiltinAssetPath(std::string_view value) {
+    return value.starts_with("builtin:");
+}
+
+std::filesystem::path NormalizeAssetPath(const std::filesystem::path& scene_dir, const std::string& value) {
+    if (IsBuiltinAssetPath(value)) {
+        return std::filesystem::path{value};
+    }
+    return NormalizeScenePath(scene_dir, value);
+}
+
 bool IsAllowedField(std::string_view key, std::initializer_list<std::string_view> allowed) {
     for (std::string_view field : allowed) {
         if (key == field) {
@@ -424,7 +435,7 @@ void ParseAssets(
             if (path->empty()) {
                 diagnostics.push_back(Error(file, "assets.path", "must not be empty"));
             } else {
-                asset.path = NormalizeScenePath(scene_dir, *path);
+                asset.path = NormalizeAssetPath(scene_dir, *path);
             }
         } else {
             diagnostics.push_back(Error(file, "assets.path", "missing required field"));

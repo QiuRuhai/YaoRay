@@ -1,0 +1,17 @@
+[render]
+width = 64
+height = 32
+
+[film]
+output = "out/hdri.png"
+
+[camera]
+type = "perspective"
+position = [0, 0, 4]
+target = [0, 0, 0]
+fov_y = 60
+
+[environment]
+type = "hdri"
+path = "assets/hdri/studio.hdr"
+strength = 1.0

@@ -1,4 +1,5 @@
 #include <yaoray/core/version.hpp>
+#include <yaoray/render/scene_compiler.hpp>
 #include <yaoray/scene/diagnostic.hpp>
 #include <yaoray/scene/scene_parser.hpp>
 
@@ -25,7 +26,7 @@ void PrintRenderHelp() {
         << "Usage:\n"
         << "  yaoray render <scene.toml> [--backend cpu|cuda]\n"
         << '\n'
-        << "The render command currently parses and validates scene files. Rendering is not implemented yet.\n";
+        << "The render command currently parses and compiles scene files. Rendering is not implemented yet.\n";
 }
 
 int RunRender(int argc, char** argv) {
@@ -73,8 +74,17 @@ int RunRender(int argc, char** argv) {
         yr::ApplyBackendOverride(scene, *backend_override);
     }
 
+    const yr::SceneCompileResult compile_result = yr::CompileScene(scene);
+    if (yr::HasSceneErrors(compile_result.diagnostics) || !compile_result.scene.has_value()) {
+        std::cerr << yr::FormatSceneDiagnostics(compile_result.diagnostics) << '\n';
+        return 1;
+    }
+
+    const yr::RenderScene& render_scene = compile_result.scene.value();
     std::cout << "Scene parsed successfully: " << scene.source_path.generic_string() << '\n';
-    std::cout << "Requested backend: " << yr::RenderBackendName(scene.render.backend) << '\n';
+    std::cout << "Scene compiled successfully.\n";
+    std::cout << "Requested backend: " << yr::RenderBackendName(render_scene.backend) << '\n';
+    std::cout << "Compiled triangles: " << render_scene.triangles.size() << '\n';
     std::cout << "Rendering is not implemented yet.\n";
     return 0;
 }
