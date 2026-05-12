@@ -34,6 +34,15 @@ add_executable(yaoray_tests
 )
 target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film)
 
+add_executable(yaoray
+    src/app/main.cpp
+)
+target_link_libraries(yaoray PRIVATE yaoray_core yaoray_film)
+
 if(BUILD_TESTING)
     add_test(NAME yaoray_tests COMMAND yaoray_tests)
+    add_test(NAME yaoray_cli_help COMMAND yaoray --help)
+    set_tests_properties(yaoray_cli_help PROPERTIES PASS_REGULAR_EXPRESSION "YaoRay")
+    add_test(NAME yaoray_cli_version COMMAND yaoray --version)
+    set_tests_properties(yaoray_cli_version PROPERTIES PASS_REGULAR_EXPRESSION "0.1.0")
 endif()
