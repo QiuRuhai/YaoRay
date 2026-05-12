@@ -56,7 +56,7 @@ target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_scene 
 add_executable(yaoray
     src/app/main.cpp
 )
-target_link_libraries(yaoray PRIVATE yaoray_core yaoray_film yaoray_scene)
+target_link_libraries(yaoray PRIVATE yaoray_core yaoray_film yaoray_scene yaoray_render)
 
 if(BUILD_TESTING)
     add_test(NAME yaoray_tests COMMAND yaoray_tests)
@@ -66,10 +66,14 @@ if(BUILD_TESTING)
     set_tests_properties(yaoray_cli_version PROPERTIES PASS_REGULAR_EXPRESSION "0.1.0")
     add_test(NAME yaoray_cli_render_help COMMAND yaoray render --help)
     set_tests_properties(yaoray_cli_render_help PROPERTIES PASS_REGULAR_EXPRESSION "yaoray render")
-    add_test(NAME yaoray_cli_render_cpu COMMAND yaoray render ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/minimal.toml --backend cpu)
-    set_tests_properties(yaoray_cli_render_cpu PROPERTIES PASS_REGULAR_EXPRESSION "Requested backend: cpu")
-    add_test(NAME yaoray_cli_render_cuda COMMAND yaoray render ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/minimal.toml --backend cuda)
+    add_test(NAME yaoray_cli_render_cpu COMMAND yaoray render ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/builtin_triangle.toml --backend cpu)
+    set_tests_properties(yaoray_cli_render_cpu PROPERTIES PASS_REGULAR_EXPRESSION "Compiled triangles: 1")
+    add_test(NAME yaoray_cli_render_cuda COMMAND yaoray render ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/builtin_triangle.toml --backend cuda)
     set_tests_properties(yaoray_cli_render_cuda PROPERTIES PASS_REGULAR_EXPRESSION "Requested backend: cuda")
+    add_test(NAME yaoray_cli_render_unsupported_asset
+        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
+            "$out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/minimal.toml' 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -eq 0) { exit 1 }; if ($out -notmatch 'asset import not implemented yet') { exit 1 }"
+    )
     add_test(NAME yaoray_cli_render_missing_file
         COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
             "$out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/nope.toml' 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -eq 0) { exit 1 }; if ($out -notmatch 'scene file not found') { exit 1 }"

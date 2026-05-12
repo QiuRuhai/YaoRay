@@ -13,9 +13,19 @@ exposure = 0.0
 
 [camera]
 type = "perspective"
-position = [0, 1, 4]
-target = [0, 1, 0]
-fov_y = 45
+position = [0, 0, 4]
+target = [0, 0, 0]
+fov_y = 60
+
+[[assets]]
+name = "triangle"
+path = "builtin:triangle"
+
+[[instances]]
+asset = "triangle"
+translate = [0, 0, 0]
+rotate_degrees = [0, 0, 0]
+scale = [1, 1, 1]
 
 [environment]
 type = "constant"
