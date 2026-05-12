@@ -1,7 +1,9 @@
 #include <yaoray/render/scene_compiler.hpp>
 
 #include <cmath>
+#include <filesystem>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace yr {
@@ -50,6 +52,68 @@ void CopyAreaLights(const SceneDescription& scene, RenderScene& compiled) {
     }
 }
 
+Vec3f RotateX(Vec3f value, float radians) {
+    const float c = std::cos(radians);
+    const float s = std::sin(radians);
+    return Vec3f{value.x, value.y * c - value.z * s, value.y * s + value.z * c};
+}
+
+Vec3f RotateY(Vec3f value, float radians) {
+    const float c = std::cos(radians);
+    const float s = std::sin(radians);
+    return Vec3f{value.x * c + value.z * s, value.y, -value.x * s + value.z * c};
+}
+
+Vec3f RotateZ(Vec3f value, float radians) {
+    const float c = std::cos(radians);
+    const float s = std::sin(radians);
+    return Vec3f{value.x * c - value.y * s, value.x * s + value.y * c, value.z};
+}
+
+Point3f ApplyTransform(Point3f point, const TransformDescription& transform) {
+    Vec3f value{
+        point.x * transform.scale.x,
+        point.y * transform.scale.y,
+        point.z * transform.scale.z
+    };
+    value = RotateX(value, DegreesToRadians(transform.rotate_degrees.x));
+    value = RotateY(value, DegreesToRadians(transform.rotate_degrees.y));
+    value = RotateZ(value, DegreesToRadians(transform.rotate_degrees.z));
+    return Point3f{
+        value.x + transform.translate.x,
+        value.y + transform.translate.y,
+        value.z + transform.translate.z
+    };
+}
+
+std::unordered_map<std::string, std::filesystem::path> BuildAssetMap(const SceneDescription& scene) {
+    std::unordered_map<std::string, std::filesystem::path> assets;
+    for (const AssetDescription& asset : scene.assets) {
+        assets.emplace(asset.name, asset.path);
+    }
+    return assets;
+}
+
+void AppendBuiltinTriangle(RenderScene& compiled, const TransformDescription& transform) {
+    constexpr Point3f p0{-0.5f, 0.0f, 0.0f};
+    constexpr Point3f p1{0.5f, 0.0f, 0.0f};
+    constexpr Point3f p2{0.0f, 1.0f, 0.0f};
+
+    const Point3f world_p0 = ApplyTransform(p0, transform);
+    const Point3f world_p1 = ApplyTransform(p1, transform);
+    const Point3f world_p2 = ApplyTransform(p2, transform);
+
+    const int material_index = static_cast<int>(compiled.materials.size());
+    compiled.materials.push_back(RenderMaterial{});
+    compiled.triangles.push_back(RenderTriangle{
+        world_p0,
+        world_p1,
+        world_p2,
+        Normalize(Cross(world_p1 - world_p0, world_p2 - world_p0)),
+        material_index
+    });
+}
+
 } // namespace
 
 SceneCompileResult CompileScene(const SceneDescription& scene) {
@@ -75,6 +139,20 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
     }
 
     CopyAreaLights(scene, compiled);
+
+    const std::unordered_map<std::string, std::filesystem::path> assets = BuildAssetMap(scene);
+    for (const InstanceDescription& instance : scene.instances) {
+        const auto asset = assets.find(instance.asset);
+        if (asset == assets.end()) {
+            result.diagnostics.push_back(Error(scene, "instances.asset", "references unknown asset"));
+            continue;
+        }
+
+        const std::string asset_path = asset->second.generic_string();
+        if (asset_path == "builtin:triangle") {
+            AppendBuiltinTriangle(compiled, instance.transform);
+        }
+    }
 
     if (HasSceneErrors(result.diagnostics)) {
         return result;

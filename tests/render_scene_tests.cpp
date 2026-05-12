@@ -117,3 +117,49 @@ YR_TEST(scene_compiler_copies_area_lights) {
     YR_EXPECT_NEAR(result.scene.value().area_lights[0].height, 5.0, 1e-6);
     YR_EXPECT_NEAR(result.scene.value().area_lights[0].radiance.z, 8.0, 1e-6);
 }
+
+YR_TEST(scene_compiler_expands_builtin_triangle) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"triangle", "builtin:triangle"});
+    scene.instances.push_back(yr::InstanceDescription{"triangle", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().materials.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{1});
+
+    const yr::RenderTriangle& triangle = result.scene.value().triangles[0];
+    YR_EXPECT_NEAR(triangle.p0.x, -0.5, 1e-6);
+    YR_EXPECT_NEAR(triangle.p0.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(triangle.p1.x, 0.5, 1e-6);
+    YR_EXPECT_NEAR(triangle.p2.y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(triangle.normal.z, 1.0, 1e-6);
+    YR_EXPECT_EQ(triangle.material_index, 0);
+}
+
+YR_TEST(scene_compiler_applies_builtin_triangle_transform) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"triangle", "builtin:triangle"});
+    yr::InstanceDescription instance;
+    instance.asset = "triangle";
+    instance.transform.translate = yr::Vec3f{1.0f, 2.0f, 3.0f};
+    instance.transform.rotate_degrees = yr::Vec3f{0.0f, 0.0f, 90.0f};
+    instance.transform.scale = yr::Vec3f{2.0f, 1.0f, 1.0f};
+    scene.instances.push_back(instance);
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{1});
+    const yr::RenderTriangle& triangle = result.scene.value().triangles[0];
+    YR_EXPECT_NEAR(triangle.p0.x, 1.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p0.y, 1.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p0.z, 3.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p1.x, 1.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p1.y, 3.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p2.x, 0.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p2.y, 2.0, 1e-5);
+}
