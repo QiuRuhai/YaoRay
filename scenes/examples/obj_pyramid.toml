@@ -27,6 +27,12 @@ translate = [0, 0, 0]
 rotate_degrees = [0, 0, 0]
 scale = [1, 1, 1]
 
+[[lights]]
+type = "area"
+position = [0, 2.5, 3]
+size = [2, 2]
+radiance = [8, 8, 8]
+
 [environment]
 type = "constant"
 radiance = [0.02, 0.025, 0.03]

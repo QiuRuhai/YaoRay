@@ -16,13 +16,13 @@ The foundation slices provide:
 - TOML scene parsing and validation through `yaoray render`
 - initial `RenderScene` compilation through the `yaoray_render` module
 - temporary `builtin:triangle` scenes for compiler and CLI verification
-- CPU debug rendering of compiled triangle scenes to ASCII PPM
+- CPU rendering with deterministic area-light direct lighting and BVH shadow rays
 - PNG output for renderable scenes, with PPM still available for debug/test output
 - render backend dispatch through a common backend interface
 - geometry-only OBJ asset import for small mesh scenes
 - BVH acceleration over compiled render triangles for the CPU debug renderer
 
-Final path tracing quality, material and texture import, advanced BVH split methods, glTF/GLB import, HDR output, and real CUDA backend support are planned as separate implementation slices.
+Final path tracing quality, material and texture import, soft shadows, advanced BVH split methods, glTF/GLB import, HDR output, and real CUDA backend support are planned as separate implementation slices.
 
 ## Build
 
@@ -41,4 +41,4 @@ build\Debug\yaoray.exe render scenes\examples\minimal.toml --backend cpu
 build\Debug\yaoray.exe render scenes\examples\obj_pyramid.toml --backend cpu
 ```
 
-The `render` command currently parses, compiles, builds a BVH, and renders CPU debug images to PNG or ASCII PPM based on `film.output`. The example scenes write PNG by default. This is a correctness and smoke-test renderer, not the final path tracer or final image-quality target.
+The `render` command currently parses, compiles, builds a BVH, and renders deterministic CPU direct-lighting images to PNG or ASCII PPM based on `film.output`. The example scenes write PNG by default and include simple center-sampled area lights. This is still a correctness and smoke-test renderer, not the final path tracer or final image-quality target.

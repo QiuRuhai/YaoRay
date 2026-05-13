@@ -11,14 +11,14 @@ Current implemented slices:
 - project structure, tests, core math primitives, Film accumulation, and CLI shell
 - TOML scene parsing, validation diagnostics, and `yaoray render` command shell
 - initial `RenderScene` compilation with temporary `builtin:triangle` asset support
-- CPU debug rendering to PPM for the first image-output loop
+- CPU rendering with deterministic area-light direct lighting and BVH shadow rays
 - PNG output for renderable scenes, with PPM still available for debug/test output
 - common render backend interface with CPU debug and CUDA not-implemented backends
 - geometry-only OBJ asset import through the `yaoray_assets` module
 - BVH acceleration over compiled render triangles
 
-The CPU debug renderer is a simple reference path through camera rays, BVH traversal, triangle intersection, Film accumulation, tone mapping, and PNG/PPM output. It is useful for smoke tests and future importer/BVH/CUDA comparisons, while final image quality remains the responsibility of later path tracing work.
+The CPU renderer is a simple reference path through camera rays, BVH traversal, triangle intersection, deterministic center-sampled area-light direct lighting, BVH shadow rays, Film accumulation, tone mapping, and PNG/PPM output. It is useful for smoke tests and future importer/BVH/CUDA comparisons, while final image quality remains the responsibility of later path tracing work.
 
 The OBJ importer converts small Wavefront OBJ meshes into flat world-space triangles during scene compilation. It ignores materials, textures, UVs, imported normals, and smoothing data in this slice; those concerns are deferred until the asset and material boundaries are more mature.
 
-Material and texture import, glTF/GLB import, advanced BVH split methods, HDR output, a real CPU path tracer, real CUDA rendering, and final-quality image output will be added in focused implementation plans.
+Material and texture import, soft shadows, glTF/GLB import, advanced BVH split methods, HDR output, a real CPU path tracer, real CUDA rendering, and final-quality image output will be added in focused implementation plans.
