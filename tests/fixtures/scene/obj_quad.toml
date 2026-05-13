@@ -4,7 +4,7 @@ width = 64
 height = 32
 
 [film]
-output = "out/obj_quad.ppm"
+output = "out/obj_quad.png"
 
 [camera]
 type = "perspective"

@@ -7,7 +7,7 @@ max_depth = 5
 seed = 1
 
 [film]
-output = "out/obj_pyramid.ppm"
+output = "out/obj_pyramid.png"
 tone_mapper = "aces"
 exposure = 0.0
 

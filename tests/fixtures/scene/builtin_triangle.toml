@@ -4,7 +4,7 @@ width = 64
 height = 32
 
 [film]
-output = "out/builtin.ppm"
+output = "out/builtin.png"
 
 [camera]
 type = "perspective"

@@ -29,7 +29,7 @@ void PrintRenderHelp() {
         << "Usage:\n"
         << "  yaoray render <scene.toml> [--backend cpu|cuda]\n"
         << '\n'
-        << "The render command currently parses, compiles, and renders CPU debug PPM images.\n";
+        << "The render command currently parses, compiles, and renders CPU debug PNG/PPM images.\n";
 }
 
 yr::ToneMapper ToFilmToneMapper(yr::ToneMapperKind mapper) {
@@ -123,7 +123,7 @@ int RunRender(int argc, char** argv) {
         ToFilmToneMapper(scene.film.tone_mapper),
         scene.film.exposure
     };
-    const yr::ImageWriteResult write_result = yr::WritePpm(*render_result.film, tone_map, scene.film.output);
+    const yr::ImageWriteResult write_result = yr::WriteImage(*render_result.film, tone_map, scene.film.output);
     if (!write_result.ok) {
         std::cerr << "Image write error: " << write_result.error << '\n';
         return 1;

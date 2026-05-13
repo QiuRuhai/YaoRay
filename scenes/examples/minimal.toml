@@ -7,7 +7,7 @@ max_depth = 5
 seed = 42
 
 [film]
-output = "out/minimal.ppm"
+output = "out/minimal.png"
 tone_mapper = "aces"
 exposure = 0.0
 
