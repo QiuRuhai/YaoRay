@@ -9,6 +9,8 @@ namespace yr {
 
 struct CpuDebugRenderStats {
     std::uint64_t rays_traced = 0;
+    std::uint64_t shadow_rays = 0;
+    std::uint64_t occluded_shadow_rays = 0;
     std::uint64_t triangle_tests = 0;
     std::uint64_t bvh_node_tests = 0;
     int bvh_nodes = 0;

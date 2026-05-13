@@ -46,6 +46,8 @@ YR_TEST(cpu_debug_renderer_traces_one_ray_per_pixel) {
     const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(scene);
 
     YR_EXPECT_EQ(result.stats.rays_traced, std::uint64_t{12});
+    YR_EXPECT_EQ(result.stats.shadow_rays, std::uint64_t{0});
+    YR_EXPECT_EQ(result.stats.occluded_shadow_rays, std::uint64_t{0});
     YR_EXPECT_TRUE(result.stats.triangle_tests <= result.stats.rays_traced);
     YR_EXPECT_TRUE(result.stats.bvh_node_tests > 0);
     YR_EXPECT_EQ(result.stats.bvh_nodes, 1);

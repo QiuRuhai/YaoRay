@@ -10,6 +10,8 @@ namespace {
 RenderStats ToRenderStats(const CpuDebugRenderStats& stats) {
     RenderStats result;
     result.rays_traced = stats.rays_traced;
+    result.shadow_rays = stats.shadow_rays;
+    result.occluded_shadow_rays = stats.occluded_shadow_rays;
     result.triangle_tests = stats.triangle_tests;
     result.bvh_node_tests = stats.bvh_node_tests;
     result.bvh_nodes = stats.bvh_nodes;

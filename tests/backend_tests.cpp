@@ -62,6 +62,8 @@ YR_TEST(cpu_backend_renders_film_and_stats) {
     YR_EXPECT_EQ(result.film->Width(), 4);
     YR_EXPECT_EQ(result.film->Height(), 3);
     YR_EXPECT_EQ(result.stats.rays_traced, std::uint64_t{12});
+    YR_EXPECT_EQ(result.stats.shadow_rays, std::uint64_t{0});
+    YR_EXPECT_EQ(result.stats.occluded_shadow_rays, std::uint64_t{0});
     YR_EXPECT_TRUE(result.stats.triangle_tests <= result.stats.rays_traced);
     YR_EXPECT_TRUE(result.stats.bvh_node_tests > 0);
     YR_EXPECT_EQ(result.stats.bvh_nodes, 1);
