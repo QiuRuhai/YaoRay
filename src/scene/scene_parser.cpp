@@ -447,6 +447,53 @@ void ParseAssets(
     }
 }
 
+void ParseMaterials(
+    const toml::table& root,
+    SceneDescription& scene,
+    const std::filesystem::path& file,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const toml::array* materials = OptionalTableArray(root, "materials", file, diagnostics);
+    if (materials == nullptr) {
+        return;
+    }
+
+    std::unordered_set<std::string> names;
+    for (const toml::node& node : *materials) {
+        const toml::table* table = node.as_table();
+        if (table == nullptr) {
+            diagnostics.push_back(Error(file, "materials", "material entry must be a table"));
+            continue;
+        }
+        CheckUnknownFields(*table, "materials", {"name", "albedo", "emission"}, file, diagnostics);
+
+        MaterialDescription material;
+        if (const auto name = ReadValue<std::string>(*table, "name")) {
+            if (name->empty()) {
+                diagnostics.push_back(Error(file, "materials.name", "must not be empty"));
+            } else {
+                material.name = *name;
+            }
+        } else if (table->contains("name")) {
+            diagnostics.push_back(Error(file, "materials.name", "must be a string"));
+        } else {
+            diagnostics.push_back(Error(file, "materials.name", "missing required field"));
+        }
+
+        if (const auto albedo = ReadVec3(*table, "albedo", file, "materials.albedo", diagnostics)) {
+            material.albedo = *albedo;
+        }
+        if (const auto emission = ReadVec3(*table, "emission", file, "materials.emission", diagnostics)) {
+            material.emission = *emission;
+        }
+
+        if (!material.name.empty() && !names.insert(material.name).second) {
+            diagnostics.push_back(Error(file, "materials.name", "duplicate material name"));
+        }
+        scene.materials.push_back(std::move(material));
+    }
+}
+
 void ParseInstances(
     const toml::table& root,
     SceneDescription& scene,
@@ -467,7 +514,7 @@ void ParseInstances(
         CheckUnknownFields(
             *table,
             "instances",
-            {"asset", "translate", "rotate_degrees", "scale"},
+            {"asset", "translate", "rotate_degrees", "scale", "material"},
             file,
             diagnostics
         );
@@ -481,6 +528,15 @@ void ParseInstances(
             }
         } else {
             diagnostics.push_back(Error(file, "instances.asset", "missing required field"));
+        }
+        if (const auto material = ReadValue<std::string>(*table, "material")) {
+            if (material->empty()) {
+                diagnostics.push_back(Error(file, "instances.material", "must not be empty"));
+            } else {
+                instance.material = *material;
+            }
+        } else if (table->contains("material")) {
+            diagnostics.push_back(Error(file, "instances.material", "must be a string"));
         }
         if (const auto translate = ReadVec3(*table, "translate", file, "instances.translate", diagnostics)) {
             instance.transform.translate = *translate;
@@ -608,7 +664,13 @@ SceneLoadResult LoadSceneFile(const std::filesystem::path& path) {
     scene.source_path = file;
     const std::filesystem::path scene_dir = file.parent_path();
 
-    CheckUnknownFields(root, "", {"render", "film", "camera", "assets", "instances", "lights", "environment"}, file, result.diagnostics);
+    CheckUnknownFields(
+        root,
+        "",
+        {"render", "film", "camera", "assets", "materials", "instances", "lights", "environment"},
+        file,
+        result.diagnostics
+    );
 
     const toml::table* render = RequiredTable(root, "render", file, result.diagnostics);
     const toml::table* film = RequiredTable(root, "film", file, result.diagnostics);
@@ -628,6 +690,7 @@ SceneLoadResult LoadSceneFile(const std::filesystem::path& path) {
         ParseEnvironment(*environment, scene, scene_dir, file, result.diagnostics);
     }
     ParseAssets(root, scene, scene_dir, file, result.diagnostics);
+    ParseMaterials(root, scene, file, result.diagnostics);
     ParseInstances(root, scene, file, result.diagnostics);
     ParseLights(root, scene, file, result.diagnostics);
     ValidateReferences(scene, file, result.diagnostics);

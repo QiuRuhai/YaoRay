@@ -74,9 +74,16 @@ struct TransformDescription {
     Vec3f scale{1.0f, 1.0f, 1.0f};
 };
 
+struct MaterialDescription {
+    std::string name;
+    Color3f albedo{0.8f, 0.8f, 0.8f};
+    Color3f emission;
+};
+
 struct InstanceDescription {
     std::string asset;
     TransformDescription transform;
+    std::string material;
 };
 
 struct AreaLightDescription {
@@ -103,6 +110,7 @@ struct SceneDescription {
     FilmSettings film;
     std::optional<CameraDescription> camera;
     std::vector<AssetDescription> assets;
+    std::vector<MaterialDescription> materials;
     std::vector<InstanceDescription> instances;
     std::vector<LightDescription> lights;
     EnvironmentDescription environment;

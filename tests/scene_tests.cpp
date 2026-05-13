@@ -101,6 +101,7 @@ YR_TEST(scene_defaults_match_schema) {
     YR_EXPECT_EQ(scene.film.tone_mapper, yr::ToneMapperKind::Aces);
     YR_EXPECT_NEAR(scene.film.exposure, 0.0, 1e-6);
     YR_EXPECT_EQ(scene.environment.type, yr::EnvironmentKind::None);
+    YR_EXPECT_TRUE(scene.materials.empty());
 }
 
 YR_TEST(scene_enum_names_are_stable) {
@@ -244,8 +245,10 @@ YR_TEST(scene_parser_loads_minimal_scene_file) {
     YR_EXPECT_EQ(scene.assets.size(), std::size_t{1});
     YR_EXPECT_EQ(scene.assets[0].name, std::string{"model"});
     YR_EXPECT_EQ(scene.assets[0].path.generic_string(), (scene_path.parent_path() / "assets" / "models" / "model.glb").lexically_normal().generic_string());
+    YR_EXPECT_TRUE(scene.materials.empty());
     YR_EXPECT_EQ(scene.instances.size(), std::size_t{1});
     YR_EXPECT_EQ(scene.instances[0].asset, std::string{"model"});
+    YR_EXPECT_EQ(scene.instances[0].material, std::string{});
     YR_EXPECT_NEAR(scene.instances[0].transform.translate.x, 0.0, 1e-6);
     YR_EXPECT_NEAR(scene.instances[0].transform.translate.y, 0.0, 1e-6);
     YR_EXPECT_NEAR(scene.instances[0].transform.translate.z, 0.0, 1e-6);
@@ -287,6 +290,134 @@ YR_TEST(scene_parser_applies_defaults) {
     YR_EXPECT_EQ(scene.film.checkpoint_interval_s, 0);
     YR_EXPECT_EQ(scene.environment.type, yr::EnvironmentKind::Constant);
     YR_EXPECT_NEAR(scene.environment.strength, 1.0, 1e-6);
+}
+
+YR_TEST(scene_parser_loads_materials_and_instance_material_binding) {
+    const std::filesystem::path path = WriteTempScene(
+        "materials_and_instance_binding.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "warm_white"
+albedo = [0.8, 0.75, 0.65]
+emission = [1.0, 0.5, 0.25]
+
+[[assets]]
+name = "triangle"
+path = "builtin:triangle"
+
+[[instances]]
+asset = "triangle"
+material = "warm_white"
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::SceneDescription& scene = result.scene.value();
+    YR_EXPECT_EQ(scene.materials.size(), std::size_t{1});
+    const yr::MaterialDescription& material = scene.materials[0];
+    YR_EXPECT_EQ(material.name, std::string{"warm_white"});
+    YR_EXPECT_NEAR(material.albedo.x, 0.8, 1e-6);
+    YR_EXPECT_NEAR(material.albedo.y, 0.75, 1e-6);
+    YR_EXPECT_NEAR(material.albedo.z, 0.65, 1e-6);
+    YR_EXPECT_NEAR(material.emission.x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.emission.y, 0.5, 1e-6);
+    YR_EXPECT_NEAR(material.emission.z, 0.25, 1e-6);
+    YR_EXPECT_EQ(scene.instances.size(), std::size_t{1});
+    YR_EXPECT_EQ(scene.instances[0].material, std::string{"warm_white"});
+}
+
+YR_TEST(scene_parser_applies_material_defaults) {
+    const std::filesystem::path path = WriteTempScene(
+        "material_defaults.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "defaulted"
+
+[[assets]]
+name = "triangle"
+path = "builtin:triangle"
+
+[[instances]]
+asset = "triangle"
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::MaterialDescription& material = result.scene.value().materials[0];
+    YR_EXPECT_EQ(material.name, std::string{"defaulted"});
+    YR_EXPECT_NEAR(material.albedo.x, 0.8, 1e-6);
+    YR_EXPECT_NEAR(material.albedo.y, 0.8, 1e-6);
+    YR_EXPECT_NEAR(material.albedo.z, 0.8, 1e-6);
+    YR_EXPECT_NEAR(material.emission.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(material.emission.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(material.emission.z, 0.0, 1e-6);
+}
+
+YR_TEST(scene_parser_rejects_bad_material_entries) {
+    const std::filesystem::path path = WriteTempScene(
+        "bad_material_entries.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "red"
+roughness = 0.5
+
+[[materials]]
+name = "red"
+
+[[materials]]
+name = ""
+
+[[materials]]
+albedo = [0.8, 0.8]
+emission = "bright"
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.roughness", "unknown field"));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.name", "duplicate material name"));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.name", "must not be empty"));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.name", "missing required field"));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.albedo", "expected three numeric values"));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.emission", "expected three numeric values"));
+}
+
+YR_TEST(scene_parser_rejects_empty_and_non_string_instance_material) {
+    const std::filesystem::path path = WriteTempScene(
+        "bad_instance_material.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "white"
+
+[[assets]]
+name = "triangle"
+path = "builtin:triangle"
+
+[[instances]]
+asset = "triangle"
+material = ""
+
+[[instances]]
+asset = "triangle"
+material = 42
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "instances.material", "must not be empty"));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "instances.material", "must be a string"));
 }
 
 YR_TEST(scene_parser_rejects_out_of_range_integer_fields) {
@@ -436,8 +567,12 @@ YR_TEST(scene_parser_rejects_unknown_fields) {
 
 YR_TEST(scene_parser_rejects_unknown_fields_inside_table_arrays) {
     const std::filesystem::path path = WriteTempScene(
-        "unknown_asset_field.toml",
+        "unknown_table_array_field.toml",
         ValidSceneWith(R"toml(
+[[materials]]
+name = "white"
+shader = "lambert"
+
 [[assets]]
 name = "model"
 path = "assets/model.glb"
@@ -449,10 +584,18 @@ colour = "red"
 
     YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.shader", "unknown field"));
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "assets.colour", "unknown field"));
 }
 
 YR_TEST(scene_parser_rejects_misdeclared_table_array_sections) {
+    const std::filesystem::path materials_path = WriteTempScene(
+        "misdeclared_materials.toml",
+        ValidSceneWith(R"toml(
+[materials]
+name = "white"
+)toml")
+    );
     const std::filesystem::path assets_path = WriteTempScene(
         "misdeclared_assets.toml",
         ValidSceneWith(R"toml(
@@ -476,10 +619,14 @@ type = "area"
 )toml")
     );
 
+    const yr::SceneLoadResult materials_result = yr::LoadSceneFile(materials_path);
     const yr::SceneLoadResult assets_result = yr::LoadSceneFile(assets_path);
     const yr::SceneLoadResult instances_result = yr::LoadSceneFile(instances_path);
     const yr::SceneLoadResult lights_result = yr::LoadSceneFile(lights_path);
 
+    YR_EXPECT_TRUE(yr::HasSceneErrors(materials_result.diagnostics));
+    YR_EXPECT_TRUE(!materials_result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(materials_result.diagnostics, "materials", "must be an array of tables"));
     YR_EXPECT_TRUE(yr::HasSceneErrors(assets_result.diagnostics));
     YR_EXPECT_TRUE(!assets_result.scene.has_value());
     YR_EXPECT_TRUE(DiagnosticsContain(assets_result.diagnostics, "assets", "must be an array of tables"));
