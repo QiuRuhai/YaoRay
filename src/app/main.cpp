@@ -1,4 +1,4 @@
-#include <yaoray/backends/cpu/cpu_debug_renderer.hpp>
+#include <yaoray/backends/backend.hpp>
 #include <yaoray/core/version.hpp>
 #include <yaoray/film/image_writer.hpp>
 #include <yaoray/film/tone_mapping.hpp>
@@ -101,17 +101,27 @@ int RunRender(int argc, char** argv) {
     std::cout << "Requested backend: " << yr::RenderBackendName(render_scene.backend) << '\n';
     std::cout << "Compiled triangles: " << render_scene.triangles.size() << '\n';
 
-    if (render_scene.backend == yr::RenderBackendKind::Cuda) {
-        std::cerr << "CUDA backend not implemented yet.\n";
+    const auto backend = yr::CreateRenderBackend(render_scene.backend);
+    if (!backend) {
+        std::cerr << "Render backend not available: " << yr::RenderBackendName(render_scene.backend) << '\n';
         return 1;
     }
 
-    const yr::CpuDebugRenderResult render_result = yr::RenderCpuDebug(render_scene);
+    const yr::RenderResult render_result = backend->Render(render_scene, yr::RenderRequest{});
+    if (!render_result.ok) {
+        std::cerr << render_result.error << '\n';
+        return 1;
+    }
+    if (!render_result.film.has_value()) {
+        std::cerr << "Render backend completed without a film.\n";
+        return 1;
+    }
+
     const yr::ToneMapSettings tone_map{
         ToFilmToneMapper(scene.film.tone_mapper),
         scene.film.exposure
     };
-    const yr::ImageWriteResult write_result = yr::WritePpm(render_result.film, tone_map, scene.film.output);
+    const yr::ImageWriteResult write_result = yr::WritePpm(*render_result.film, tone_map, scene.film.output);
     if (!write_result.ok) {
         std::cerr << "Image write error: " << write_result.error << '\n';
         return 1;
