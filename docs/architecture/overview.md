@@ -16,9 +16,10 @@ Current implemented slices:
 - common render backend interface with CPU debug and CUDA not-implemented backends
 - geometry-only OBJ asset import through the `yaoray_assets` module
 - BVH acceleration over compiled render triangles
+- TOML named diffuse/emissive materials with instance-level material binding
 
 The CPU renderer is a simple reference path through camera rays, BVH traversal, triangle intersection, deterministic center-sampled area-light direct lighting, BVH shadow rays, Film accumulation, tone mapping, and PNG/PPM output. It is useful for smoke tests and future importer/BVH/CUDA comparisons, while final image quality remains the responsibility of later path tracing work.
 
-The OBJ importer converts small Wavefront OBJ meshes into flat world-space triangles during scene compilation. It ignores materials, textures, UVs, imported normals, and smoothing data in this slice; those concerns are deferred until the asset and material boundaries are more mature.
+The OBJ importer converts small Wavefront OBJ meshes into flat world-space triangles during scene compilation. It ignores OBJ `.mtl` files, textures, UVs, imported normals, and smoothing data in this slice; scene-authored named materials can still bind to a whole imported instance.
 
-Material and texture import, soft shadows, glTF/GLB import, advanced BVH split methods, HDR output, a real CPU path tracer, real CUDA rendering, and final-quality image output will be added in focused implementation plans.
+Texture import, imported material files, soft shadows, glTF/GLB import, advanced BVH split methods, HDR output, a real CPU path tracer, real CUDA rendering, and final-quality image output will be added in focused implementation plans.

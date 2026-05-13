@@ -16,8 +16,14 @@ fov_y = 60
 name = "quad"
 path = "../assets/quad.obj"
 
+[[materials]]
+name = "matte_quad"
+albedo = [0.55, 0.7, 0.85]
+emission = [0, 0, 0]
+
 [[instances]]
 asset = "quad"
+material = "matte_quad"
 translate = [0, 0, 0]
 rotate_degrees = [0, 0, 0]
 scale = [1, 1, 1]

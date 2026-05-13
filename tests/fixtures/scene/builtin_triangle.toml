@@ -16,8 +16,14 @@ fov_y = 60
 name = "triangle"
 path = "builtin:triangle"
 
+[[materials]]
+name = "debug_white"
+albedo = [0.8, 0.78, 0.72]
+emission = [0, 0, 0]
+
 [[instances]]
 asset = "triangle"
+material = "debug_white"
 translate = [0, 0, 0]
 rotate_degrees = [0, 0, 0]
 scale = [1, 1, 1]
