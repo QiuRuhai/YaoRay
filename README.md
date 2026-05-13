@@ -17,8 +17,9 @@ The foundation slices provide:
 - initial `RenderScene` compilation through the `yaoray_render` module
 - temporary `builtin:triangle` scenes for compiler and CLI verification
 - CPU debug rendering of compiled triangle scenes to ASCII PPM
+- render backend dispatch through a common backend interface
 
-Final path tracing quality, asset import, BVH construction, PNG output, and CUDA backend support are planned as separate implementation slices.
+Final path tracing quality, asset import, BVH construction, PNG output, and real CUDA backend support are planned as separate implementation slices.
 
 ## Build
 
