@@ -131,6 +131,8 @@ int RunRender(int argc, char** argv) {
 
     std::cout << "Rendered image: " << scene.film.output.generic_string() << '\n';
     std::cout << "Rays traced: " << render_result.stats.rays_traced << '\n';
+    std::cout << "Shadow rays: " << render_result.stats.shadow_rays << '\n';
+    std::cout << "Occluded shadow rays: " << render_result.stats.occluded_shadow_rays << '\n';
     std::cout << "BVH node tests: " << render_result.stats.bvh_node_tests << '\n';
     std::cout << "Triangle tests: " << render_result.stats.triangle_tests << '\n';
     std::cout << "Hits: " << render_result.stats.hits << '\n';
