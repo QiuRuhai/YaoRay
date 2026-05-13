@@ -11,6 +11,9 @@ RenderStats ToRenderStats(const CpuDebugRenderStats& stats) {
     RenderStats result;
     result.rays_traced = stats.rays_traced;
     result.triangle_tests = stats.triangle_tests;
+    result.bvh_node_tests = stats.bvh_node_tests;
+    result.bvh_nodes = stats.bvh_nodes;
+    result.bvh_max_depth = stats.bvh_max_depth;
     result.hits = stats.hits;
     result.misses = stats.misses;
     result.elapsed_seconds = stats.elapsed_seconds;

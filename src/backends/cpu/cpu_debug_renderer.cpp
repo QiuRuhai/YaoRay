@@ -1,23 +1,14 @@
 #include <yaoray/backends/cpu/cpu_debug_renderer.hpp>
 
 #include <yaoray/core/ray.hpp>
+#include <yaoray/render/bvh.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <limits>
 
 namespace yr {
 namespace {
-
-constexpr float MinHitT = 1.0e-5f;
-constexpr float ParallelEpsilon = 1.0e-8f;
-
-struct TriangleHit {
-    bool hit = false;
-    float t = std::numeric_limits<float>::infinity();
-    const RenderTriangle* triangle = nullptr;
-};
 
 Ray3f MakeCameraRay(const RenderScene& scene, int x, int y) {
     const float width = static_cast<float>(scene.width);
@@ -32,51 +23,6 @@ Ray3f MakeCameraRay(const RenderScene& scene, int x, int y) {
         scene.camera.up * screen_y
     );
     return Ray3f{scene.camera.origin, direction};
-}
-
-bool IntersectTriangle(const Ray3f& ray, const RenderTriangle& triangle, float& t_out) {
-    const Vec3f edge1 = triangle.p1 - triangle.p0;
-    const Vec3f edge2 = triangle.p2 - triangle.p0;
-    const Vec3f pvec = Cross(ray.direction, edge2);
-    const float det = Dot(edge1, pvec);
-    if (std::fabs(det) < ParallelEpsilon) {
-        return false;
-    }
-
-    const float inv_det = 1.0f / det;
-    const Vec3f tvec = ray.origin - triangle.p0;
-    const float u = Dot(tvec, pvec) * inv_det;
-    if (u < 0.0f || u > 1.0f) {
-        return false;
-    }
-
-    const Vec3f qvec = Cross(tvec, edge1);
-    const float v = Dot(ray.direction, qvec) * inv_det;
-    if (v < 0.0f || u + v > 1.0f) {
-        return false;
-    }
-
-    const float t = Dot(edge2, qvec) * inv_det;
-    if (t <= MinHitT) {
-        return false;
-    }
-
-    t_out = t;
-    return true;
-}
-
-TriangleHit FindNearestHit(const RenderScene& scene, const Ray3f& ray, CpuDebugRenderStats& stats) {
-    TriangleHit nearest;
-    for (const RenderTriangle& triangle : scene.triangles) {
-        ++stats.triangle_tests;
-        float t = 0.0f;
-        if (IntersectTriangle(ray, triangle, t) && t < nearest.t) {
-            nearest.hit = true;
-            nearest.t = t;
-            nearest.triangle = &triangle;
-        }
-    }
-    return nearest;
 }
 
 Color3f EnvironmentColor(const RenderScene& scene) {
@@ -101,6 +47,8 @@ Color3f ShadeHit(const RenderScene& scene, const Ray3f& ray, const RenderTriangl
 
 CpuDebugRenderResult RenderCpuDebug(const RenderScene& scene) {
     CpuDebugRenderResult result{Film{scene.width, scene.height}, {}};
+    result.stats.bvh_nodes = static_cast<int>(scene.bvh.nodes.size());
+    result.stats.bvh_max_depth = scene.bvh.max_depth;
     const auto start = std::chrono::steady_clock::now();
 
     for (int y = 0; y < scene.height; ++y) {
@@ -108,7 +56,10 @@ CpuDebugRenderResult RenderCpuDebug(const RenderScene& scene) {
             const Ray3f ray = MakeCameraRay(scene, x, y);
             ++result.stats.rays_traced;
 
-            const TriangleHit hit = FindNearestHit(scene, ray, result.stats);
+            BvhTraceStats trace_stats;
+            const BvhHit hit = IntersectBvh(scene, ray, trace_stats);
+            result.stats.bvh_node_tests += trace_stats.node_tests;
+            result.stats.triangle_tests += trace_stats.triangle_tests;
             if (hit.hit && hit.triangle != nullptr) {
                 ++result.stats.hits;
                 result.film.AddSample(x, y, ShadeHit(scene, ray, *hit.triangle));

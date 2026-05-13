@@ -38,7 +38,7 @@ struct Bounds3f {
             }
             t_min = std::max(t_min, t0);
             t_max = std::min(t_max, t1);
-            if (t_max <= t_min) {
+            if (t_max < t_min) {
                 return false;
             }
         }

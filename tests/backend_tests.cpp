@@ -2,9 +2,11 @@
 
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include <yaoray/backends/backend.hpp>
+#include <yaoray/render/bvh.hpp>
 #include <yaoray/render/render_scene.hpp>
 
 namespace {
@@ -31,6 +33,11 @@ yr::RenderScene MakeBackendTriangleScene(int width = 4, int height = 3) {
         yr::Vec3f{0.0f, 0.0f, 1.0f},
         0
     });
+    const yr::BvhBuildResult build = yr::BuildBvh(scene.triangles);
+    if (!build.errors.empty()) {
+        throw std::runtime_error(build.errors[0]);
+    }
+    scene.bvh = build.bvh;
     return scene;
 }
 
@@ -55,7 +62,10 @@ YR_TEST(cpu_backend_renders_film_and_stats) {
     YR_EXPECT_EQ(result.film->Width(), 4);
     YR_EXPECT_EQ(result.film->Height(), 3);
     YR_EXPECT_EQ(result.stats.rays_traced, std::uint64_t{12});
-    YR_EXPECT_EQ(result.stats.triangle_tests, std::uint64_t{12});
+    YR_EXPECT_TRUE(result.stats.triangle_tests <= result.stats.rays_traced);
+    YR_EXPECT_TRUE(result.stats.bvh_node_tests > 0);
+    YR_EXPECT_EQ(result.stats.bvh_nodes, 1);
+    YR_EXPECT_EQ(result.stats.bvh_max_depth, 1);
     YR_EXPECT_EQ(result.stats.hits + result.stats.misses, result.stats.rays_traced);
 }
 

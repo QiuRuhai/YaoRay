@@ -53,3 +53,12 @@ YR_TEST(bounds_intersects_ray_interval) {
     YR_EXPECT_TRUE(box.Intersects(hit_ray, 0.001f, 100.0f));
     YR_EXPECT_TRUE(!box.Intersects(miss_ray, 0.001f, 100.0f));
 }
+
+YR_TEST(bounds_intersects_planar_ray_interval) {
+    const yr::Bounds3f box{yr::Point3f{-1.0f, -1.0f, 0.0f}, yr::Point3f{1.0f, 1.0f, 0.0f}};
+    const yr::Ray3f hit_ray{yr::Point3f{0.0f, 0.0f, 1.0f}, yr::Vec3f{0.0f, 0.0f, -1.0f}};
+    const yr::Ray3f miss_ray{yr::Point3f{2.0f, 0.0f, 1.0f}, yr::Vec3f{0.0f, 0.0f, -1.0f}};
+
+    YR_EXPECT_TRUE(box.Intersects(hit_ray, 0.001f, 100.0f));
+    YR_EXPECT_TRUE(!box.Intersects(miss_ray, 0.001f, 100.0f));
+}

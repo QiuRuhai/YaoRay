@@ -12,6 +12,9 @@
 namespace yr {
 namespace {
 
+constexpr float MinHitT = 1.0e-5f;
+constexpr float ParallelEpsilon = 1.0e-8f;
+
 struct BvhPrimitive {
     int triangle_index = -1;
     Bounds3f bounds;
@@ -169,6 +172,37 @@ int BuildRecursive(
     return node_index;
 }
 
+bool IntersectTriangle(const Ray3f& ray, const RenderTriangle& triangle, float& t_out) {
+    const Vec3f edge1 = triangle.p1 - triangle.p0;
+    const Vec3f edge2 = triangle.p2 - triangle.p0;
+    const Vec3f pvec = Cross(ray.direction, edge2);
+    const float det = Dot(edge1, pvec);
+    if (std::fabs(det) < ParallelEpsilon) {
+        return false;
+    }
+
+    const float inv_det = 1.0f / det;
+    const Vec3f tvec = ray.origin - triangle.p0;
+    const float u = Dot(tvec, pvec) * inv_det;
+    if (u < 0.0f || u > 1.0f) {
+        return false;
+    }
+
+    const Vec3f qvec = Cross(tvec, edge1);
+    const float v = Dot(ray.direction, qvec) * inv_det;
+    if (v < 0.0f || u + v > 1.0f) {
+        return false;
+    }
+
+    const float t = Dot(edge2, qvec) * inv_det;
+    if (t <= MinHitT) {
+        return false;
+    }
+
+    t_out = t;
+    return true;
+}
+
 } // namespace
 
 BvhBuildResult BuildBvh(const std::vector<RenderTriangle>& triangles, const BvhBuildOptions& options) {
@@ -210,6 +244,64 @@ BvhBuildResult BuildBvh(const std::vector<RenderTriangle>& triangles, const BvhB
     }
 
     return result;
+}
+
+BvhHit IntersectBvh(const RenderScene& scene, const Ray3f& ray, BvhTraceStats& stats) {
+    BvhHit nearest;
+    if (scene.bvh.nodes.empty()) {
+        return nearest;
+    }
+
+    std::vector<int> stack;
+    stack.push_back(0);
+    while (!stack.empty()) {
+        const int node_index = stack.back();
+        stack.pop_back();
+        if (node_index < 0 || static_cast<std::size_t>(node_index) >= scene.bvh.nodes.size()) {
+            continue;
+        }
+
+        const RenderBvhNode& node = scene.bvh.nodes[static_cast<std::size_t>(node_index)];
+        ++stats.node_tests;
+        if (!node.bounds.Intersects(ray, MinHitT, nearest.t)) {
+            continue;
+        }
+
+        if (node.triangle_count > 0) {
+            for (int i = 0; i < node.triangle_count; ++i) {
+                const int index_position = node.first_triangle + i;
+                if (index_position < 0 ||
+                    static_cast<std::size_t>(index_position) >= scene.bvh.triangle_indices.size()) {
+                    continue;
+                }
+
+                const int triangle_index = scene.bvh.triangle_indices[static_cast<std::size_t>(index_position)];
+                if (triangle_index < 0 ||
+                    static_cast<std::size_t>(triangle_index) >= scene.triangles.size()) {
+                    continue;
+                }
+
+                ++stats.triangle_tests;
+                float t = 0.0f;
+                const RenderTriangle& triangle = scene.triangles[static_cast<std::size_t>(triangle_index)];
+                if (IntersectTriangle(ray, triangle, t) && t < nearest.t) {
+                    nearest.hit = true;
+                    nearest.t = t;
+                    nearest.triangle = &triangle;
+                    nearest.triangle_index = triangle_index;
+                }
+            }
+        } else {
+            if (node.right_child >= 0) {
+                stack.push_back(node.right_child);
+            }
+            if (node.left_child >= 0) {
+                stack.push_back(node.left_child);
+            }
+        }
+    }
+
+    return nearest;
 }
 
 } // namespace yr

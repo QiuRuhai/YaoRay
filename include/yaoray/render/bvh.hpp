@@ -36,6 +36,18 @@ struct RenderBvh {
     int max_depth = 0;
 };
 
+struct BvhTraceStats {
+    std::uint64_t node_tests = 0;
+    std::uint64_t triangle_tests = 0;
+};
+
+struct BvhHit {
+    bool hit = false;
+    float t = std::numeric_limits<float>::infinity();
+    const RenderTriangle* triangle = nullptr;
+    int triangle_index = -1;
+};
+
 struct BvhBuildResult {
     RenderBvh bvh;
     std::vector<std::string> errors;
@@ -44,6 +56,12 @@ struct BvhBuildResult {
 BvhBuildResult BuildBvh(
     const std::vector<RenderTriangle>& triangles,
     const BvhBuildOptions& options = {}
+);
+
+BvhHit IntersectBvh(
+    const RenderScene& scene,
+    const Ray3f& ray,
+    BvhTraceStats& stats
 );
 
 } // namespace yr
