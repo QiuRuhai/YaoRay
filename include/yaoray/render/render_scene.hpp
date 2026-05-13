@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <yaoray/core/vec.hpp>
+#include <yaoray/render/bvh.hpp>
 #include <yaoray/scene/scene.hpp>
 
 namespace yr {
@@ -56,6 +57,7 @@ struct RenderScene {
     std::vector<RenderMaterial> materials;
     std::vector<RenderTriangle> triangles;
     std::vector<RenderAreaLight> area_lights;
+    RenderBvh bvh;
 };
 
 } // namespace yr

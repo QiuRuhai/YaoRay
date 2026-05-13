@@ -60,6 +60,9 @@ YR_TEST(render_scene_defaults_are_backend_friendly) {
     YR_EXPECT_TRUE(scene.triangles.empty());
     YR_EXPECT_TRUE(scene.materials.empty());
     YR_EXPECT_TRUE(scene.area_lights.empty());
+    YR_EXPECT_TRUE(scene.bvh.nodes.empty());
+    YR_EXPECT_TRUE(scene.bvh.triangle_indices.empty());
+    YR_EXPECT_EQ(scene.bvh.max_depth, 0);
 }
 
 YR_TEST(scene_compiler_copies_render_settings) {
@@ -267,4 +270,44 @@ YR_TEST(scene_compiler_expands_two_obj_instances) {
     YR_EXPECT_EQ(result.scene.value().triangles[0].material_index, 0);
     YR_EXPECT_EQ(result.scene.value().triangles[2].material_index, 1);
     YR_EXPECT_NEAR(result.scene.value().triangles[2].p0.x, 1.5, 1e-6);
+}
+
+YR_TEST(scene_compiler_builds_empty_bvh_for_empty_scene) {
+    const yr::SceneCompileResult result = yr::CompileScene(MakeBaseScene());
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_TRUE(result.scene.value().triangles.empty());
+    YR_EXPECT_TRUE(result.scene.value().bvh.nodes.empty());
+    YR_EXPECT_TRUE(result.scene.value().bvh.triangle_indices.empty());
+    YR_EXPECT_EQ(result.scene.value().bvh.max_depth, 0);
+}
+
+YR_TEST(scene_compiler_builds_bvh_for_builtin_triangle) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"triangle", "builtin:triangle"});
+    scene.instances.push_back(yr::InstanceDescription{"triangle", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().bvh.nodes.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().bvh.triangle_indices.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().bvh.triangle_indices[0], 0);
+}
+
+YR_TEST(scene_compiler_builds_bvh_for_obj_quad) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"quad", FixturePath("assets/quad.obj")});
+    scene.instances.push_back(yr::InstanceDescription{"quad", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{2});
+    YR_EXPECT_EQ(result.scene.value().bvh.nodes.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().bvh.triangle_indices.size(), std::size_t{2});
 }

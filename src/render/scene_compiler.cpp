@@ -1,6 +1,7 @@
 #include <yaoray/render/scene_compiler.hpp>
 
 #include <yaoray/assets/obj_loader.hpp>
+#include <yaoray/render/bvh.hpp>
 
 #include <cmath>
 #include <filesystem>
@@ -226,7 +227,17 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
     if (HasSceneErrors(result.diagnostics)) {
         return result;
     }
-    result.scene = compiled;
+
+    BvhBuildResult bvh_result = BuildBvh(compiled.triangles);
+    for (const std::string& error : bvh_result.errors) {
+        result.diagnostics.push_back(Error(scene, "render.bvh", error));
+    }
+    if (HasSceneErrors(result.diagnostics)) {
+        return result;
+    }
+
+    compiled.bvh = std::move(bvh_result.bvh);
+    result.scene = std::move(compiled);
     return result;
 }
 
