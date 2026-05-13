@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -106,7 +107,42 @@ std::unordered_map<std::string, std::filesystem::path> BuildAssetMap(const Scene
     return assets;
 }
 
-void AppendBuiltinTriangle(RenderScene& compiled, const TransformDescription& transform) {
+std::unordered_map<std::string, int> BuildMaterialMap(const SceneDescription& scene, RenderScene& compiled) {
+    std::unordered_map<std::string, int> materials;
+    for (const MaterialDescription& material : scene.materials) {
+        const int material_index = static_cast<int>(compiled.materials.size());
+        compiled.materials.push_back(RenderMaterial{material.albedo, material.emission});
+        materials.emplace(material.name, material_index);
+    }
+    return materials;
+}
+
+int AddDefaultMaterial(RenderScene& compiled) {
+    const int material_index = static_cast<int>(compiled.materials.size());
+    compiled.materials.push_back(RenderMaterial{});
+    return material_index;
+}
+
+std::optional<int> ResolveMaterialIndex(
+    const SceneDescription& scene,
+    const InstanceDescription& instance,
+    const std::unordered_map<std::string, int>& materials,
+    RenderScene& compiled,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    if (instance.material.empty()) {
+        return AddDefaultMaterial(compiled);
+    }
+
+    const auto material = materials.find(instance.material);
+    if (material == materials.end()) {
+        diagnostics.push_back(Error(scene, "instances.material", "references unknown material"));
+        return std::nullopt;
+    }
+    return material->second;
+}
+
+void AppendBuiltinTriangle(RenderScene& compiled, const TransformDescription& transform, int material_index) {
     constexpr Point3f p0{-0.5f, 0.0f, 0.0f};
     constexpr Point3f p1{0.5f, 0.0f, 0.0f};
     constexpr Point3f p2{0.0f, 1.0f, 0.0f};
@@ -115,8 +151,6 @@ void AppendBuiltinTriangle(RenderScene& compiled, const TransformDescription& tr
     const Point3f world_p1 = ApplyTransform(p1, transform);
     const Point3f world_p2 = ApplyTransform(p2, transform);
 
-    const int material_index = static_cast<int>(compiled.materials.size());
-    compiled.materials.push_back(RenderMaterial{});
     compiled.triangles.push_back(RenderTriangle{
         world_p0,
         world_p1,
@@ -126,10 +160,7 @@ void AppendBuiltinTriangle(RenderScene& compiled, const TransformDescription& tr
     });
 }
 
-void AppendImportedMesh(RenderScene& compiled, const ImportedMesh& mesh, const TransformDescription& transform) {
-    const int material_index = static_cast<int>(compiled.materials.size());
-    compiled.materials.push_back(RenderMaterial{});
-
+void AppendImportedMesh(RenderScene& compiled, const ImportedMesh& mesh, const TransformDescription& transform, int material_index) {
     for (const ImportedTriangle& triangle : mesh.triangles) {
         const Point3f world_p0 = ApplyTransform(triangle.p0, transform);
         const Point3f world_p1 = ApplyTransform(triangle.p1, transform);
@@ -150,6 +181,7 @@ void AppendObjAsset(
     RenderScene& compiled,
     const std::filesystem::path& asset_path,
     const TransformDescription& transform,
+    int material_index,
     std::unordered_map<std::string, ImportedMesh>& mesh_cache,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
@@ -173,7 +205,7 @@ void AppendObjAsset(
         cached = mesh_cache.emplace(cache_key, std::move(load_result.mesh.value())).first;
     }
 
-    AppendImportedMesh(compiled, cached->second, transform);
+    AppendImportedMesh(compiled, cached->second, transform, material_index);
 }
 
 } // namespace
@@ -205,6 +237,7 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
     CopyAreaLights(scene, compiled);
 
     const std::unordered_map<std::string, std::filesystem::path> assets = BuildAssetMap(scene);
+    const std::unordered_map<std::string, int> materials = BuildMaterialMap(scene, compiled);
     std::unordered_map<std::string, ImportedMesh> mesh_cache;
     for (const InstanceDescription& instance : scene.instances) {
         const auto asset = assets.find(instance.asset);
@@ -215,10 +248,16 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
 
         const std::filesystem::path& asset_path = asset->second;
         const std::string asset_path_string = asset_path.generic_string();
+        const std::optional<int> material_index =
+            ResolveMaterialIndex(scene, instance, materials, compiled, result.diagnostics);
+        if (!material_index.has_value()) {
+            continue;
+        }
+
         if (asset_path_string == "builtin:triangle") {
-            AppendBuiltinTriangle(compiled, instance.transform);
+            AppendBuiltinTriangle(compiled, instance.transform, *material_index);
         } else if (HasObjExtension(asset_path)) {
-            AppendObjAsset(scene, compiled, asset_path, instance.transform, mesh_cache, result.diagnostics);
+            AppendObjAsset(scene, compiled, asset_path, instance.transform, *material_index, mesh_cache, result.diagnostics);
         } else {
             result.diagnostics.push_back(Error(scene, "assets.path", "asset import not implemented yet: " + asset_path_string));
         }

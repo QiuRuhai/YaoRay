@@ -160,6 +160,123 @@ YR_TEST(scene_compiler_expands_builtin_triangle) {
     YR_EXPECT_EQ(triangle.material_index, 0);
 }
 
+YR_TEST(scene_compiler_compiles_named_materials) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.materials.push_back(yr::MaterialDescription{
+        "red",
+        yr::Color3f{0.9f, 0.1f, 0.05f},
+        yr::Color3f{0.0f, 0.0f, 0.0f}
+    });
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderScene& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
+    YR_EXPECT_NEAR(compiled.materials[0].albedo.x, 0.9, 1e-6);
+    YR_EXPECT_NEAR(compiled.materials[0].albedo.y, 0.1, 1e-6);
+    YR_EXPECT_NEAR(compiled.materials[0].albedo.z, 0.05, 1e-6);
+    YR_EXPECT_NEAR(compiled.materials[0].emission.x, 0.0, 1e-6);
+}
+
+YR_TEST(scene_compiler_binds_builtin_instance_to_named_material) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"triangle", "builtin:triangle"});
+    scene.materials.push_back(yr::MaterialDescription{
+        "green",
+        yr::Color3f{0.1f, 0.65f, 0.2f},
+        yr::Color3f{}
+    });
+    yr::InstanceDescription instance;
+    instance.asset = "triangle";
+    instance.material = "green";
+    scene.instances.push_back(instance);
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderScene& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
+    YR_EXPECT_EQ(compiled.triangles.size(), std::size_t{1});
+    YR_EXPECT_EQ(compiled.triangles[0].material_index, 0);
+    YR_EXPECT_NEAR(compiled.materials[0].albedo.y, 0.65, 1e-6);
+}
+
+YR_TEST(scene_compiler_shares_named_material_between_instances) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"triangle", "builtin:triangle"});
+    scene.materials.push_back(yr::MaterialDescription{
+        "white",
+        yr::Color3f{0.75f, 0.75f, 0.75f},
+        yr::Color3f{}
+    });
+    yr::InstanceDescription first;
+    first.asset = "triangle";
+    first.material = "white";
+    scene.instances.push_back(first);
+
+    yr::InstanceDescription second;
+    second.asset = "triangle";
+    second.material = "white";
+    second.transform.translate = yr::Vec3f{2.0f, 0.0f, 0.0f};
+    scene.instances.push_back(second);
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderScene& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
+    YR_EXPECT_EQ(compiled.triangles.size(), std::size_t{2});
+    YR_EXPECT_EQ(compiled.triangles[0].material_index, 0);
+    YR_EXPECT_EQ(compiled.triangles[1].material_index, 0);
+}
+
+YR_TEST(scene_compiler_preserves_default_material_for_unbound_instances) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"triangle", "builtin:triangle"});
+    scene.materials.push_back(yr::MaterialDescription{
+        "red",
+        yr::Color3f{1.0f, 0.0f, 0.0f},
+        yr::Color3f{}
+    });
+    scene.instances.push_back(yr::InstanceDescription{"triangle", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderScene& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.materials.size(), std::size_t{2});
+    YR_EXPECT_EQ(compiled.triangles.size(), std::size_t{1});
+    YR_EXPECT_EQ(compiled.triangles[0].material_index, 1);
+    YR_EXPECT_NEAR(compiled.materials[1].albedo.x, 0.8, 1e-6);
+    YR_EXPECT_NEAR(compiled.materials[1].albedo.y, 0.8, 1e-6);
+    YR_EXPECT_NEAR(compiled.materials[1].albedo.z, 0.8, 1e-6);
+}
+
+YR_TEST(scene_compiler_rejects_unknown_material_reference) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"triangle", "builtin:triangle"});
+    scene.materials.push_back(yr::MaterialDescription{
+        "red",
+        yr::Color3f{1.0f, 0.0f, 0.0f},
+        yr::Color3f{}
+    });
+    yr::InstanceDescription instance;
+    instance.asset = "triangle";
+    instance.material = "missing";
+    scene.instances.push_back(instance);
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "instances.material", "references unknown material"));
+}
+
 YR_TEST(scene_compiler_applies_builtin_triangle_transform) {
     yr::SceneDescription scene = MakeBaseScene();
     scene.assets.push_back(yr::AssetDescription{"triangle", "builtin:triangle"});
