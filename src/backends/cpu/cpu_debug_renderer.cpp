@@ -32,15 +32,75 @@ Color3f EnvironmentColor(const RenderScene& scene) {
     return Color3f{};
 }
 
-Color3f ShadeHit(const RenderScene& scene, const Ray3f& ray, const RenderTriangle& triangle) {
-    if (triangle.material_index < 0 ||
-        static_cast<std::size_t>(triangle.material_index) >= scene.materials.size()) {
+constexpr float ShadowEpsilon = 1.0e-4f;
+
+Color3f Multiply(Color3f a, Color3f b) {
+    return Color3f{a.x * b.x, a.y * b.y, a.z * b.z};
+}
+
+Vec3f FaceForward(Vec3f normal, Vec3f reference) {
+    return Dot(normal, reference) < 0.0f ? -normal : normal;
+}
+
+bool IsValidMaterialIndex(const RenderScene& scene, int material_index) {
+    return material_index >= 0 && static_cast<std::size_t>(material_index) < scene.materials.size();
+}
+
+void AccumulateTraceStats(CpuDebugRenderStats& stats, const BvhTraceStats& trace_stats) {
+    stats.bvh_node_tests += trace_stats.node_tests;
+    stats.triangle_tests += trace_stats.triangle_tests;
+}
+
+Color3f ShadeHit(
+    const RenderScene& scene,
+    const Ray3f& ray,
+    const BvhHit& hit,
+    CpuDebugRenderStats& stats
+) {
+    if (hit.triangle == nullptr || !IsValidMaterialIndex(scene, hit.triangle->material_index)) {
         return Color3f{1.0f, 0.0f, 1.0f};
     }
 
+    const RenderTriangle& triangle = *hit.triangle;
     const RenderMaterial& material = scene.materials[static_cast<std::size_t>(triangle.material_index)];
-    const float normal_lighting = std::max(0.15f, std::fabs(Dot(triangle.normal, -ray.direction)));
-    return material.albedo * normal_lighting + material.emission;
+    const Point3f hit_point = ray.origin + ray.direction * hit.t;
+    const Vec3f normal = FaceForward(Normalize(triangle.normal), -ray.direction);
+
+    Color3f radiance = material.emission;
+    for (const RenderAreaLight& light : scene.area_lights) {
+        const float area = light.width * light.height;
+        if (area <= 0.0f) {
+            continue;
+        }
+
+        const Vec3f to_light = light.position - hit_point;
+        const float distance_squared = LengthSquared(to_light);
+        if (distance_squared <= ShadowEpsilon * ShadowEpsilon) {
+            continue;
+        }
+
+        const float distance = std::sqrt(distance_squared);
+        const Vec3f wi = to_light / distance;
+        const float n_dot_l = std::max(0.0f, Dot(normal, wi));
+        if (n_dot_l <= 0.0f) {
+            continue;
+        }
+
+        ++stats.shadow_rays;
+        BvhTraceStats shadow_trace;
+        const Ray3f shadow_ray{hit_point + normal * ShadowEpsilon, wi};
+        const BvhHit shadow_hit = IntersectBvh(scene, shadow_ray, shadow_trace);
+        AccumulateTraceStats(stats, shadow_trace);
+        if (shadow_hit.hit && shadow_hit.t < distance - ShadowEpsilon) {
+            ++stats.occluded_shadow_rays;
+            continue;
+        }
+
+        const float scale = area * n_dot_l / distance_squared;
+        radiance = radiance + Multiply(material.albedo, light.radiance) * scale;
+    }
+
+    return radiance;
 }
 
 } // namespace
@@ -58,11 +118,10 @@ CpuDebugRenderResult RenderCpuDebug(const RenderScene& scene) {
 
             BvhTraceStats trace_stats;
             const BvhHit hit = IntersectBvh(scene, ray, trace_stats);
-            result.stats.bvh_node_tests += trace_stats.node_tests;
-            result.stats.triangle_tests += trace_stats.triangle_tests;
+            AccumulateTraceStats(result.stats, trace_stats);
             if (hit.hit && hit.triangle != nullptr) {
                 ++result.stats.hits;
-                result.film.AddSample(x, y, ShadeHit(scene, ray, *hit.triangle));
+                result.film.AddSample(x, y, ShadeHit(scene, ray, hit, result.stats));
             } else {
                 ++result.stats.misses;
                 result.film.AddSample(x, y, EnvironmentColor(scene));

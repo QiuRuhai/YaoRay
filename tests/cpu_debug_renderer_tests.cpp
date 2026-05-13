@@ -9,6 +9,14 @@
 
 namespace {
 
+void RebuildBvh(yr::RenderScene& scene) {
+    const yr::BvhBuildResult build = yr::BuildBvh(scene.triangles);
+    if (!build.errors.empty()) {
+        throw std::runtime_error(build.errors[0]);
+    }
+    scene.bvh = build.bvh;
+}
+
 yr::RenderScene MakeDebugTriangleScene(int width = 5, int height = 5) {
     yr::RenderScene scene;
     scene.width = width;
@@ -30,12 +38,17 @@ yr::RenderScene MakeDebugTriangleScene(int width = 5, int height = 5) {
         yr::Vec3f{0.0f, 0.0f, 1.0f},
         0
     });
-    const yr::BvhBuildResult build = yr::BuildBvh(scene.triangles);
-    if (!build.errors.empty()) {
-        throw std::runtime_error(build.errors[0]);
-    }
-    scene.bvh = build.bvh;
+    RebuildBvh(scene);
     return scene;
+}
+
+void AddCenterLight(yr::RenderScene& scene, yr::Point3f position, yr::Color3f radiance) {
+    scene.area_lights.push_back(yr::RenderAreaLight{
+        position,
+        1.0f,
+        1.0f,
+        radiance
+    });
 }
 
 } // namespace
@@ -123,4 +136,72 @@ YR_TEST(cpu_debug_renderer_uses_bvh_to_reduce_triangle_tests) {
 
     YR_EXPECT_TRUE(result.stats.bvh_node_tests > 0);
     YR_EXPECT_TRUE(result.stats.triangle_tests < result.stats.rays_traced * std::uint64_t{scene.triangles.size()});
+}
+
+YR_TEST(cpu_debug_renderer_adds_material_emission_on_hits) {
+    yr::RenderScene scene = MakeDebugTriangleScene(3, 3);
+    scene.materials[0].albedo = yr::Color3f{};
+    scene.materials[0].emission = yr::Color3f{0.25f, 0.5f, 0.75f};
+
+    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(scene);
+    const yr::Color3f center = result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_NEAR(center.x, 0.25, 1e-6);
+    YR_EXPECT_NEAR(center.y, 0.5, 1e-6);
+    YR_EXPECT_NEAR(center.z, 0.75, 1e-6);
+    YR_EXPECT_EQ(result.stats.shadow_rays, std::uint64_t{0});
+    YR_EXPECT_EQ(result.stats.occluded_shadow_rays, std::uint64_t{0});
+}
+
+YR_TEST(cpu_debug_renderer_lights_front_facing_diffuse_hits) {
+    yr::RenderScene scene = MakeDebugTriangleScene(3, 3);
+    AddCenterLight(scene, yr::Point3f{0.0f, 0.0f, 2.0f}, yr::Color3f{4.0f, 4.0f, 4.0f});
+
+    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(scene);
+    const yr::Color3f center = result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_NEAR(center.x, 1.0, 1e-5);
+    YR_EXPECT_NEAR(center.y, 0.2, 1e-5);
+    YR_EXPECT_NEAR(center.z, 0.1, 1e-5);
+    YR_EXPECT_TRUE(result.stats.shadow_rays > 0);
+    YR_EXPECT_EQ(result.stats.occluded_shadow_rays, std::uint64_t{0});
+}
+
+YR_TEST(cpu_debug_renderer_ignores_lights_behind_surface) {
+    yr::RenderScene scene = MakeDebugTriangleScene(3, 3);
+    AddCenterLight(scene, yr::Point3f{0.0f, 0.0f, -2.0f}, yr::Color3f{10.0f, 10.0f, 10.0f});
+
+    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(scene);
+    const yr::Color3f center = result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_NEAR(center.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(center.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(center.z, 0.0, 1e-6);
+    YR_EXPECT_EQ(result.stats.shadow_rays, std::uint64_t{0});
+    YR_EXPECT_EQ(result.stats.occluded_shadow_rays, std::uint64_t{0});
+}
+
+YR_TEST(cpu_debug_renderer_shadow_ray_blocks_direct_light) {
+    yr::RenderScene unblocked = MakeDebugTriangleScene(3, 3);
+    AddCenterLight(unblocked, yr::Point3f{0.0f, 2.0f, 2.0f}, yr::Color3f{8.0f, 8.0f, 8.0f});
+
+    yr::RenderScene blocked = unblocked;
+    blocked.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-0.75f, 1.0f, 0.25f},
+        yr::Point3f{0.75f, 1.0f, 0.25f},
+        yr::Point3f{0.0f, 1.0f, 1.75f},
+        yr::Vec3f{0.0f, -1.0f, 0.0f},
+        0
+    });
+    RebuildBvh(blocked);
+
+    const yr::CpuDebugRenderResult unblocked_result = yr::RenderCpuDebug(unblocked);
+    const yr::CpuDebugRenderResult blocked_result = yr::RenderCpuDebug(blocked);
+    const yr::Color3f unblocked_center = unblocked_result.film.LinearPixel(1, 1);
+    const yr::Color3f blocked_center = blocked_result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_TRUE(unblocked_center.x > 0.5f);
+    YR_EXPECT_TRUE(blocked_center.x < unblocked_center.x * 0.1f);
+    YR_EXPECT_TRUE(blocked_result.stats.shadow_rays > 0);
+    YR_EXPECT_TRUE(blocked_result.stats.occluded_shadow_rays > 0);
 }
