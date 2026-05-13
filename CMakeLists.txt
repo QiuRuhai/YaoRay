@@ -25,7 +25,11 @@ add_library(yaoray_film STATIC
     src/film/tone_mapping.cpp
 )
 target_include_directories(yaoray_film PUBLIC include)
-target_link_libraries(yaoray_film PUBLIC yaoray_core)
+
+add_library(stb INTERFACE)
+target_include_directories(stb INTERFACE external/stb)
+
+target_link_libraries(yaoray_film PUBLIC yaoray_core PRIVATE stb)
 
 add_library(tomlplusplus INTERFACE)
 target_include_directories(tomlplusplus INTERFACE external/tomlplusplus)
