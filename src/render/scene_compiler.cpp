@@ -1,10 +1,13 @@
 #include <yaoray/render/scene_compiler.hpp>
 
+#include <yaoray/assets/obj_loader.hpp>
+
 #include <cmath>
 #include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace yr {
 namespace {
@@ -17,6 +20,14 @@ float DegreesToRadians(float degrees) {
 
 SceneDiagnostic Error(const SceneDescription& scene, std::string field, std::string message) {
     return SceneDiagnostic{DiagnosticSeverity::Error, scene.source_path, std::move(field), std::move(message)};
+}
+
+SceneDiagnostic Warning(const SceneDescription& scene, std::string field, std::string message) {
+    return SceneDiagnostic{DiagnosticSeverity::Warning, scene.source_path, std::move(field), std::move(message)};
+}
+
+bool HasObjExtension(const std::filesystem::path& path) {
+    return path.extension() == ".obj";
 }
 
 RenderCamera CompileCamera(const CameraDescription& camera) {
@@ -114,6 +125,56 @@ void AppendBuiltinTriangle(RenderScene& compiled, const TransformDescription& tr
     });
 }
 
+void AppendImportedMesh(RenderScene& compiled, const ImportedMesh& mesh, const TransformDescription& transform) {
+    const int material_index = static_cast<int>(compiled.materials.size());
+    compiled.materials.push_back(RenderMaterial{});
+
+    for (const ImportedTriangle& triangle : mesh.triangles) {
+        const Point3f world_p0 = ApplyTransform(triangle.p0, transform);
+        const Point3f world_p1 = ApplyTransform(triangle.p1, transform);
+        const Point3f world_p2 = ApplyTransform(triangle.p2, transform);
+
+        compiled.triangles.push_back(RenderTriangle{
+            world_p0,
+            world_p1,
+            world_p2,
+            Normalize(Cross(world_p1 - world_p0, world_p2 - world_p0)),
+            material_index
+        });
+    }
+}
+
+void AppendObjAsset(
+    const SceneDescription& scene,
+    RenderScene& compiled,
+    const std::filesystem::path& asset_path,
+    const TransformDescription& transform,
+    std::unordered_map<std::string, ImportedMesh>& mesh_cache,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const std::string cache_key = asset_path.generic_string();
+    auto cached = mesh_cache.find(cache_key);
+    if (cached == mesh_cache.end()) {
+        AssetLoadResult load_result = LoadObjMesh(asset_path);
+        for (const std::string& warning : load_result.warnings) {
+            diagnostics.push_back(Warning(scene, "assets.path", warning));
+        }
+        for (const std::string& error : load_result.errors) {
+            diagnostics.push_back(Error(scene, "assets.path", error));
+        }
+        if (!load_result.errors.empty()) {
+            return;
+        }
+        if (!load_result.mesh.has_value()) {
+            diagnostics.push_back(Error(scene, "assets.path", "OBJ loader returned no mesh: " + cache_key));
+            return;
+        }
+        cached = mesh_cache.emplace(cache_key, std::move(load_result.mesh.value())).first;
+    }
+
+    AppendImportedMesh(compiled, cached->second, transform);
+}
+
 } // namespace
 
 SceneCompileResult CompileScene(const SceneDescription& scene) {
@@ -143,6 +204,7 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
     CopyAreaLights(scene, compiled);
 
     const std::unordered_map<std::string, std::filesystem::path> assets = BuildAssetMap(scene);
+    std::unordered_map<std::string, ImportedMesh> mesh_cache;
     for (const InstanceDescription& instance : scene.instances) {
         const auto asset = assets.find(instance.asset);
         if (asset == assets.end()) {
@@ -150,11 +212,14 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
             continue;
         }
 
-        const std::string asset_path = asset->second.generic_string();
-        if (asset_path == "builtin:triangle") {
+        const std::filesystem::path& asset_path = asset->second;
+        const std::string asset_path_string = asset_path.generic_string();
+        if (asset_path_string == "builtin:triangle") {
             AppendBuiltinTriangle(compiled, instance.transform);
+        } else if (HasObjExtension(asset_path)) {
+            AppendObjAsset(scene, compiled, asset_path, instance.transform, mesh_cache, result.diagnostics);
         } else {
-            result.diagnostics.push_back(Error(scene, "assets.path", "asset import not implemented yet: " + asset_path));
+            result.diagnostics.push_back(Error(scene, "assets.path", "asset import not implemented yet: " + asset_path_string));
         }
     }
 

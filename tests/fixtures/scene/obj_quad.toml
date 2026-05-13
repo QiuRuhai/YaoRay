@@ -1,0 +1,27 @@
+[render]
+backend = "cpu"
+width = 64
+height = 32
+
+[film]
+output = "out/obj_quad.ppm"
+
+[camera]
+type = "perspective"
+position = [0, 0, 4]
+target = [0, 0, 0]
+fov_y = 60
+
+[[assets]]
+name = "quad"
+path = "../assets/quad.obj"
+
+[[instances]]
+asset = "quad"
+translate = [0, 0, 0]
+rotate_degrees = [0, 0, 0]
+scale = [1, 1, 1]
+
+[environment]
+type = "constant"
+radiance = [0.02, 0.02, 0.02]
