@@ -114,8 +114,8 @@ Extend `InstanceDescription`:
 ```cpp
 struct InstanceDescription {
     std::string asset;
-    std::string material;
     TransformDescription transform;
+    std::string material;
 };
 ```
 
