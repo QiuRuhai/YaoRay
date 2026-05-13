@@ -19,8 +19,9 @@ The foundation slices provide:
 - CPU debug rendering of compiled triangle scenes to ASCII PPM
 - render backend dispatch through a common backend interface
 - geometry-only OBJ asset import for small mesh scenes
+- BVH acceleration over compiled render triangles for the CPU debug renderer
 
-Final path tracing quality, material and texture import, BVH construction, PNG output, glTF/GLB import, and real CUDA backend support are planned as separate implementation slices.
+Final path tracing quality, material and texture import, advanced BVH split methods, PNG output, glTF/GLB import, and real CUDA backend support are planned as separate implementation slices.
 
 ## Build
 
@@ -39,4 +40,4 @@ build\Debug\yaoray.exe render scenes\examples\minimal.toml --backend cpu
 build\Debug\yaoray.exe render scenes\examples\obj_pyramid.toml --backend cpu
 ```
 
-The `render` command currently parses, compiles, and renders CPU debug images to ASCII PPM. It supports the built-in triangle and small geometry-only OBJ meshes. This is a correctness and smoke-test renderer, not the final path tracer or final image-quality target.
+The `render` command currently parses, compiles, builds a BVH, and renders CPU debug images to ASCII PPM. It supports the built-in triangle and small geometry-only OBJ meshes. This is a correctness and smoke-test renderer, not the final path tracer or final image-quality target.

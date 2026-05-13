@@ -100,6 +100,8 @@ int RunRender(int argc, char** argv) {
     std::cout << "Scene compiled successfully.\n";
     std::cout << "Requested backend: " << yr::RenderBackendName(render_scene.backend) << '\n';
     std::cout << "Compiled triangles: " << render_scene.triangles.size() << '\n';
+    std::cout << "BVH nodes: " << render_scene.bvh.nodes.size() << '\n';
+    std::cout << "BVH max depth: " << render_scene.bvh.max_depth << '\n';
 
     const auto backend = yr::CreateRenderBackend(render_scene.backend);
     if (!backend) {
@@ -129,6 +131,7 @@ int RunRender(int argc, char** argv) {
 
     std::cout << "Rendered image: " << scene.film.output.generic_string() << '\n';
     std::cout << "Rays traced: " << render_result.stats.rays_traced << '\n';
+    std::cout << "BVH node tests: " << render_result.stats.bvh_node_tests << '\n';
     std::cout << "Triangle tests: " << render_result.stats.triangle_tests << '\n';
     std::cout << "Hits: " << render_result.stats.hits << '\n';
     std::cout << "Misses: " << render_result.stats.misses << '\n';
