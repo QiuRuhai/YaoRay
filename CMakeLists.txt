@@ -63,6 +63,7 @@ add_library(yaoray_backends STATIC
     src/backends/backend.cpp
     src/backends/cpu/cpu_debug_backend.cpp
     src/backends/cpu/cpu_debug_renderer.cpp
+    src/backends/cpu/cpu_path_tracer.cpp
 )
 target_include_directories(yaoray_backends PUBLIC include)
 target_link_libraries(yaoray_backends PUBLIC yaoray_core yaoray_film yaoray_render)
@@ -78,6 +79,7 @@ add_executable(yaoray_tests
     tests/render_scene_tests.cpp
     tests/backend_tests.cpp
     tests/cpu_debug_renderer_tests.cpp
+    tests/cpu_path_tracer_tests.cpp
 )
 target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_scene yaoray_render yaoray_assets yaoray_backends)
 target_compile_definitions(yaoray_tests PRIVATE YAORAY_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
