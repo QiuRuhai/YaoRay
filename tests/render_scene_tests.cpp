@@ -23,6 +23,7 @@ yr::SceneDescription MakeBaseScene() {
     scene.render.spp = 4;
     scene.render.max_depth = 6;
     scene.render.seed = std::uint64_t{123};
+    scene.render.threads = 4;
     scene.camera = yr::CameraDescription{};
     scene.camera->position = yr::Point3f{0.0f, 0.0f, 4.0f};
     scene.camera->target = yr::Point3f{0.0f, 0.0f, 0.0f};
@@ -59,6 +60,7 @@ YR_TEST(render_scene_defaults_are_backend_friendly) {
     YR_EXPECT_EQ(scene.spp, 1);
     YR_EXPECT_EQ(scene.max_depth, 5);
     YR_EXPECT_EQ(scene.seed, std::uint64_t{0});
+    YR_EXPECT_EQ(scene.threads, 0);
     YR_EXPECT_TRUE(scene.triangles.empty());
     YR_EXPECT_TRUE(scene.materials.empty());
     YR_EXPECT_TRUE(scene.area_lights.empty());
@@ -81,6 +83,7 @@ YR_TEST(scene_compiler_copies_render_settings) {
     YR_EXPECT_EQ(compiled.spp, 4);
     YR_EXPECT_EQ(compiled.max_depth, 6);
     YR_EXPECT_EQ(compiled.seed, std::uint64_t{123});
+    YR_EXPECT_EQ(compiled.threads, 4);
 }
 
 YR_TEST(scene_compiler_builds_camera_basis) {

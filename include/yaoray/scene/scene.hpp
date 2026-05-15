@@ -50,6 +50,7 @@ struct RenderSettings {
     int spp = 1;
     int max_depth = 5;
     std::uint64_t seed = 0;
+    int threads = 0;
 };
 
 struct FilmSettings {

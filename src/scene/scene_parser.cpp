@@ -352,7 +352,7 @@ void ParseRender(
     CheckUnknownFields(
         table,
         "render",
-        {"backend", "integrator", "width", "height", "spp", "max_depth", "seed"},
+        {"backend", "integrator", "width", "height", "spp", "max_depth", "seed", "threads"},
         file,
         diagnostics
     );
@@ -396,6 +396,13 @@ void ParseRender(
     }
     if (const auto seed = ReadUInt64(table, "seed")) {
         scene.render.seed = *seed;
+    }
+    if (const auto threads = ReadInt(table, "threads", file, "render.threads", diagnostics)) {
+        if (*threads < 0) {
+            diagnostics.push_back(Error(file, "render.threads", "must be non-negative"));
+        } else {
+            scene.render.threads = *threads;
+        }
     }
 
     if (scene.render.width <= 0) {

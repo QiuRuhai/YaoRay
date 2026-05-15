@@ -99,6 +99,8 @@ YR_TEST(scene_defaults_match_schema) {
     YR_EXPECT_EQ(scene.render.height, 0);
     YR_EXPECT_EQ(scene.render.spp, 1);
     YR_EXPECT_EQ(scene.render.max_depth, 5);
+    YR_EXPECT_EQ(scene.render.seed, std::uint64_t{0});
+    YR_EXPECT_EQ(scene.render.threads, 0);
     YR_EXPECT_EQ(scene.film.tone_mapper, yr::ToneMapperKind::Aces);
     YR_EXPECT_NEAR(scene.film.exposure, 0.0, 1e-6);
     YR_EXPECT_EQ(scene.environment.type, yr::EnvironmentKind::None);
@@ -235,6 +237,7 @@ YR_TEST(scene_parser_loads_minimal_scene_file) {
     YR_EXPECT_EQ(scene.render.spp, 64);
     YR_EXPECT_EQ(scene.render.max_depth, 8);
     YR_EXPECT_EQ(scene.render.seed, std::uint64_t{42});
+    YR_EXPECT_EQ(scene.render.threads, 0);
     const std::filesystem::path expected_output = (scene_path.parent_path() / "out" / "example.png").lexically_normal();
     YR_EXPECT_EQ(scene.film.output.generic_string(), expected_output.generic_string());
     YR_EXPECT_EQ(scene.film.tone_mapper, yr::ToneMapperKind::Aces);
@@ -296,6 +299,7 @@ YR_TEST(scene_parser_applies_defaults) {
     YR_EXPECT_EQ(scene.render.integrator, yr::RenderIntegratorKind::DebugDirect);
     YR_EXPECT_EQ(scene.render.spp, 1);
     YR_EXPECT_EQ(scene.render.max_depth, 5);
+    YR_EXPECT_EQ(scene.render.threads, 0);
     YR_EXPECT_EQ(scene.film.tone_mapper, yr::ToneMapperKind::Aces);
     YR_EXPECT_NEAR(scene.film.exposure, 0.0, 1e-6);
     YR_EXPECT_EQ(scene.film.checkpoint_interval_s, 0);
@@ -333,6 +337,161 @@ fov_y = 45
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
     YR_EXPECT_EQ(result.scene.value().render.integrator, yr::RenderIntegratorKind::Path);
+}
+
+YR_TEST(scene_parser_loads_render_threads) {
+    const std::filesystem::path path = WriteTempScene(
+        "render_threads.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+threads = 4
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().render.threads, 4);
+}
+
+YR_TEST(scene_parser_allows_auto_render_threads) {
+    const std::filesystem::path path = WriteTempScene(
+        "auto_render_threads.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+threads = 0
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().render.threads, 0);
+}
+
+YR_TEST(scene_parser_rejects_negative_render_threads) {
+    const std::filesystem::path path = WriteTempScene(
+        "negative_render_threads.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+threads = -1
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.threads", "must be non-negative"));
+}
+
+YR_TEST(scene_parser_rejects_float_render_threads) {
+    const std::filesystem::path path = WriteTempScene(
+        "float_render_threads.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+threads = 1.5
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.threads", "must be an integer"));
+}
+
+YR_TEST(scene_parser_rejects_string_render_threads) {
+    const std::filesystem::path path = WriteTempScene(
+        "string_render_threads.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+threads = "many"
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.threads", "must be an integer"));
 }
 
 YR_TEST(scene_parser_rejects_unknown_render_integrator) {
