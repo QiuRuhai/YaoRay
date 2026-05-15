@@ -366,6 +366,37 @@ fov_y = 45
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.integrator", "unknown integrator"));
 }
 
+YR_TEST(scene_parser_rejects_non_string_render_integrator) {
+    const std::filesystem::path path = WriteTempScene(
+        "bad_integrator_type.toml",
+        ValidScene(
+            R"toml(
+[render]
+integrator = 123
+width = 64
+height = 32
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.integrator", "must be a string"));
+}
+
 YR_TEST(scene_parser_loads_materials_and_instance_material_binding) {
     const std::filesystem::path path = WriteTempScene(
         "materials_and_instance_binding.toml",

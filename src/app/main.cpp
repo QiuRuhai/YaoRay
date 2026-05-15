@@ -29,7 +29,7 @@ void PrintRenderHelp() {
         << "Usage:\n"
         << "  yaoray render <scene.toml> [--backend cpu|cuda]\n"
         << '\n'
-        << "The render command currently parses, compiles, and renders CPU debug PNG/PPM images.\n";
+        << "The render command parses, compiles, and renders scenes with scene-selected CPU integrators.\n";
 }
 
 yr::ToneMapper ToFilmToneMapper(yr::ToneMapperKind mapper) {

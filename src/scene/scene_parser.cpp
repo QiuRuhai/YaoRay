@@ -110,6 +110,24 @@ std::optional<T> ReadValue(const toml::table& table, std::string_view key) {
     return table[key].value<T>();
 }
 
+std::optional<std::string> ReadString(
+    const toml::table& table,
+    std::string_view key,
+    const std::filesystem::path& file,
+    std::string field,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const toml::node* node = table.get(key);
+    if (node == nullptr) {
+        return std::nullopt;
+    }
+    if (const auto value = node->value<std::string>()) {
+        return *value;
+    }
+    diagnostics.push_back(Error(file, std::move(field), "must be a string"));
+    return std::nullopt;
+}
+
 std::optional<int> ReadInt(
     const toml::table& table,
     std::string_view key,
@@ -346,7 +364,7 @@ void ParseRender(
             diagnostics.push_back(Error(file, "render.backend", "unknown backend"));
         }
     }
-    if (const auto integrator = ReadValue<std::string>(table, "integrator")) {
+    if (const auto integrator = ReadString(table, "integrator", file, "render.integrator", diagnostics)) {
         if (const auto parsed = ParseRenderIntegratorName(*integrator)) {
             scene.render.integrator = *parsed;
         } else {
