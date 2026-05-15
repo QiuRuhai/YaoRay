@@ -334,7 +334,7 @@ void ParseRender(
     CheckUnknownFields(
         table,
         "render",
-        {"backend", "width", "height", "spp", "max_depth", "seed"},
+        {"backend", "integrator", "width", "height", "spp", "max_depth", "seed"},
         file,
         diagnostics
     );
@@ -344,6 +344,13 @@ void ParseRender(
             scene.render.backend = *parsed;
         } else {
             diagnostics.push_back(Error(file, "render.backend", "unknown backend"));
+        }
+    }
+    if (const auto integrator = ReadValue<std::string>(table, "integrator")) {
+        if (const auto parsed = ParseRenderIntegratorName(*integrator)) {
+            scene.render.integrator = *parsed;
+        } else {
+            diagnostics.push_back(Error(file, "render.integrator", "unknown integrator"));
         }
     }
 

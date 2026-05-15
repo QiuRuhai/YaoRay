@@ -94,6 +94,7 @@ YR_TEST(scene_defaults_match_schema) {
     const yr::SceneDescription scene;
 
     YR_EXPECT_EQ(scene.render.backend, yr::RenderBackendKind::Cpu);
+    YR_EXPECT_EQ(scene.render.integrator, yr::RenderIntegratorKind::DebugDirect);
     YR_EXPECT_EQ(scene.render.width, 0);
     YR_EXPECT_EQ(scene.render.height, 0);
     YR_EXPECT_EQ(scene.render.spp, 1);
@@ -108,6 +109,8 @@ YR_TEST(scene_defaults_match_schema) {
 YR_TEST(scene_enum_names_are_stable) {
     YR_EXPECT_EQ(yr::RenderBackendName(yr::RenderBackendKind::Cpu), std::string_view{"cpu"});
     YR_EXPECT_EQ(yr::RenderBackendName(yr::RenderBackendKind::Cuda), std::string_view{"cuda"});
+    YR_EXPECT_EQ(yr::RenderIntegratorName(yr::RenderIntegratorKind::DebugDirect), std::string_view{"debug_direct"});
+    YR_EXPECT_EQ(yr::RenderIntegratorName(yr::RenderIntegratorKind::Path), std::string_view{"path"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::None), std::string_view{"none"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::Reinhard), std::string_view{"reinhard"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::Aces), std::string_view{"aces"});
@@ -121,6 +124,8 @@ YR_TEST(scene_enum_names_are_stable) {
 YR_TEST(scene_enum_parsers_accept_stable_names) {
     YR_EXPECT_EQ(yr::ParseRenderBackendName("cpu").value(), yr::RenderBackendKind::Cpu);
     YR_EXPECT_EQ(yr::ParseRenderBackendName("cuda").value(), yr::RenderBackendKind::Cuda);
+    YR_EXPECT_EQ(yr::ParseRenderIntegratorName("debug_direct").value(), yr::RenderIntegratorKind::DebugDirect);
+    YR_EXPECT_EQ(yr::ParseRenderIntegratorName("path").value(), yr::RenderIntegratorKind::Path);
     YR_EXPECT_EQ(yr::ParseToneMapperName("none").value(), yr::ToneMapperKind::None);
     YR_EXPECT_EQ(yr::ParseToneMapperName("reinhard").value(), yr::ToneMapperKind::Reinhard);
     YR_EXPECT_EQ(yr::ParseToneMapperName("aces").value(), yr::ToneMapperKind::Aces);
@@ -133,6 +138,7 @@ YR_TEST(scene_enum_parsers_accept_stable_names) {
 
 YR_TEST(scene_enum_parsers_reject_unknown_names) {
     YR_EXPECT_TRUE(!yr::ParseRenderBackendName("metal").has_value());
+    YR_EXPECT_TRUE(!yr::ParseRenderIntegratorName("bidirectional").has_value());
     YR_EXPECT_TRUE(!yr::ParseToneMapperName("filmic").has_value());
     YR_EXPECT_TRUE(!yr::ParseCameraKindName("orthographic").has_value());
     YR_EXPECT_TRUE(!yr::ParseLightKindName("point").has_value());
@@ -141,6 +147,7 @@ YR_TEST(scene_enum_parsers_reject_unknown_names) {
 
 YR_TEST(scene_enum_names_return_unknown_for_invalid_values) {
     YR_EXPECT_EQ(yr::RenderBackendName(static_cast<yr::RenderBackendKind>(999)), std::string_view{"unknown"});
+    YR_EXPECT_EQ(yr::RenderIntegratorName(static_cast<yr::RenderIntegratorKind>(999)), std::string_view{"unknown"});
     YR_EXPECT_EQ(yr::ToneMapperName(static_cast<yr::ToneMapperKind>(999)), std::string_view{"unknown"});
     YR_EXPECT_EQ(yr::CameraKindName(static_cast<yr::CameraKind>(999)), std::string_view{"unknown"});
     YR_EXPECT_EQ(yr::LightKindName(static_cast<yr::LightKind>(999)), std::string_view{"unknown"});
@@ -222,6 +229,7 @@ YR_TEST(scene_parser_loads_minimal_scene_file) {
     const yr::SceneDescription& scene = result.scene.value();
     YR_EXPECT_EQ(scene.source_path.generic_string(), scene_path.generic_string());
     YR_EXPECT_EQ(scene.render.backend, yr::RenderBackendKind::Cpu);
+    YR_EXPECT_EQ(scene.render.integrator, yr::RenderIntegratorKind::DebugDirect);
     YR_EXPECT_EQ(scene.render.width, 1280);
     YR_EXPECT_EQ(scene.render.height, 720);
     YR_EXPECT_EQ(scene.render.spp, 64);
@@ -285,6 +293,7 @@ YR_TEST(scene_parser_applies_defaults) {
 
     const yr::SceneDescription& scene = result.scene.value();
     YR_EXPECT_EQ(scene.render.backend, yr::RenderBackendKind::Cpu);
+    YR_EXPECT_EQ(scene.render.integrator, yr::RenderIntegratorKind::DebugDirect);
     YR_EXPECT_EQ(scene.render.spp, 1);
     YR_EXPECT_EQ(scene.render.max_depth, 5);
     YR_EXPECT_EQ(scene.film.tone_mapper, yr::ToneMapperKind::Aces);
@@ -292,6 +301,69 @@ YR_TEST(scene_parser_applies_defaults) {
     YR_EXPECT_EQ(scene.film.checkpoint_interval_s, 0);
     YR_EXPECT_EQ(scene.environment.type, yr::EnvironmentKind::Constant);
     YR_EXPECT_NEAR(scene.environment.strength, 1.0, 1e-6);
+}
+
+YR_TEST(scene_parser_loads_render_integrator) {
+    const std::filesystem::path path = WriteTempScene(
+        "path_integrator.toml",
+        ValidScene(
+            R"toml(
+[render]
+backend = "cpu"
+integrator = "path"
+width = 64
+height = 32
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().render.integrator, yr::RenderIntegratorKind::Path);
+}
+
+YR_TEST(scene_parser_rejects_unknown_render_integrator) {
+    const std::filesystem::path path = WriteTempScene(
+        "bad_integrator.toml",
+        ValidScene(
+            R"toml(
+[render]
+integrator = "light_transport_magic"
+width = 64
+height = 32
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.integrator", "unknown integrator"));
 }
 
 YR_TEST(scene_parser_loads_materials_and_instance_material_binding) {

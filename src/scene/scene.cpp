@@ -22,6 +22,26 @@ std::optional<RenderBackendKind> ParseRenderBackendName(std::string_view name) {
     return std::nullopt;
 }
 
+std::string_view RenderIntegratorName(RenderIntegratorKind integrator) {
+    switch (integrator) {
+        case RenderIntegratorKind::DebugDirect:
+            return "debug_direct";
+        case RenderIntegratorKind::Path:
+            return "path";
+    }
+    return "unknown";
+}
+
+std::optional<RenderIntegratorKind> ParseRenderIntegratorName(std::string_view name) {
+    if (name == "debug_direct") {
+        return RenderIntegratorKind::DebugDirect;
+    }
+    if (name == "path") {
+        return RenderIntegratorKind::Path;
+    }
+    return std::nullopt;
+}
+
 std::string_view ToneMapperName(ToneMapperKind mapper) {
     switch (mapper) {
         case ToneMapperKind::None:
