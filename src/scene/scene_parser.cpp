@@ -243,6 +243,88 @@ std::optional<std::array<float, 2>> ReadVec2(
     return value;
 }
 
+std::optional<Point3f> ReadPoint3Node(
+    const toml::node& node,
+    const std::filesystem::path& file,
+    std::string field,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const toml::array* array = node.as_array();
+    if (array == nullptr || array->size() != 3) {
+        diagnostics.push_back(Error(file, std::move(field), "point must contain exactly three numeric values"));
+        return std::nullopt;
+    }
+
+    Point3f value;
+    for (std::size_t i = 0; i < 3; ++i) {
+        const std::optional<float> element = ReadNodeFloat((*array)[i]);
+        if (!element) {
+            diagnostics.push_back(Error(file, std::move(field), "point must contain exactly three numeric values"));
+            return std::nullopt;
+        }
+
+        if (i == 0) {
+            value.x = *element;
+        } else if (i == 1) {
+            value.y = *element;
+        } else {
+            value.z = *element;
+        }
+    }
+    return value;
+}
+
+std::optional<QuadDescription> ReadQuadNode(
+    const toml::node& node,
+    const std::filesystem::path& file,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const toml::array* array = node.as_array();
+    if (array == nullptr || array->size() != 4) {
+        diagnostics.push_back(Error(file, "assets.quads", "quad must contain exactly four points"));
+        return std::nullopt;
+    }
+
+    std::array<Point3f, 4> points{};
+    for (std::size_t i = 0; i < 4; ++i) {
+        const std::optional<Point3f> point = ReadPoint3Node((*array)[i], file, "assets.quads", diagnostics);
+        if (!point) {
+            return std::nullopt;
+        }
+        points[i] = *point;
+    }
+
+    return QuadDescription{points[0], points[1], points[2], points[3]};
+}
+
+void ParseAssetQuads(
+    const toml::table& table,
+    AssetDescription& asset,
+    const std::filesystem::path& file,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const toml::node* node = table.get("quads");
+    if (node == nullptr) {
+        return;
+    }
+
+    const toml::array* quads = node->as_array();
+    if (quads == nullptr) {
+        diagnostics.push_back(Error(file, "assets.quads", "must be an array of quads"));
+        return;
+    }
+    if (quads->empty()) {
+        diagnostics.push_back(Error(file, "assets.quads", "must not be empty"));
+        return;
+    }
+
+    for (const toml::node& quad_node : *quads) {
+        if (const std::optional<QuadDescription> quad = ReadQuadNode(quad_node, file, diagnostics)) {
+            asset.quads.push_back(*quad);
+        }
+    }
+}
+
 void ParseRender(
     const toml::table& table,
     SceneDescription& scene,
@@ -419,7 +501,7 @@ void ParseAssets(
             diagnostics.push_back(Error(file, "assets", "asset entry must be a table"));
             continue;
         }
-        CheckUnknownFields(*table, "assets", {"name", "path"}, file, diagnostics);
+        CheckUnknownFields(*table, "assets", {"name", "path", "quads"}, file, diagnostics);
 
         AssetDescription asset;
         if (const auto name = ReadValue<std::string>(*table, "name")) {
@@ -431,15 +513,24 @@ void ParseAssets(
         } else {
             diagnostics.push_back(Error(file, "assets.name", "missing required field"));
         }
+        const bool has_path = table->contains("path");
+        const bool has_quads = table->contains("quads");
+        if (has_path == has_quads) {
+            diagnostics.push_back(Error(file, "assets", "must define exactly one of path or quads"));
+        }
+
         if (const auto path = ReadValue<std::string>(*table, "path")) {
             if (path->empty()) {
                 diagnostics.push_back(Error(file, "assets.path", "must not be empty"));
             } else {
                 asset.path = NormalizeAssetPath(scene_dir, *path);
             }
-        } else {
-            diagnostics.push_back(Error(file, "assets.path", "missing required field"));
+        } else if (has_path) {
+            diagnostics.push_back(Error(file, "assets.path", "must be a string"));
         }
+
+        ParseAssetQuads(*table, asset, file, diagnostics);
+
         if (!asset.name.empty() && !names.insert(asset.name).second) {
             diagnostics.push_back(Error(file, "assets.name", "duplicate asset name"));
         }

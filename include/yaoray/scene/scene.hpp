@@ -63,9 +63,17 @@ struct CameraDescription {
     float focus_distance = 1.0f;
 };
 
+struct QuadDescription {
+    Point3f p0;
+    Point3f p1;
+    Point3f p2;
+    Point3f p3;
+};
+
 struct AssetDescription {
     std::string name;
     std::filesystem::path path;
+    std::vector<QuadDescription> quads;
 };
 
 struct TransformDescription {

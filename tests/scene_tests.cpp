@@ -102,6 +102,7 @@ YR_TEST(scene_defaults_match_schema) {
     YR_EXPECT_NEAR(scene.film.exposure, 0.0, 1e-6);
     YR_EXPECT_EQ(scene.environment.type, yr::EnvironmentKind::None);
     YR_EXPECT_TRUE(scene.materials.empty());
+    YR_EXPECT_TRUE(scene.assets.empty());
 }
 
 YR_TEST(scene_enum_names_are_stable) {
@@ -245,6 +246,7 @@ YR_TEST(scene_parser_loads_minimal_scene_file) {
     YR_EXPECT_EQ(scene.assets.size(), std::size_t{1});
     YR_EXPECT_EQ(scene.assets[0].name, std::string{"model"});
     YR_EXPECT_EQ(scene.assets[0].path.generic_string(), (scene_path.parent_path() / "assets" / "models" / "model.glb").lexically_normal().generic_string());
+    YR_EXPECT_TRUE(scene.assets[0].quads.empty());
     YR_EXPECT_TRUE(scene.materials.empty());
     YR_EXPECT_EQ(scene.instances.size(), std::size_t{1});
     YR_EXPECT_EQ(scene.instances[0].asset, std::string{"model"});
@@ -577,6 +579,7 @@ shader = "lambert"
 name = "model"
 path = "assets/model.glb"
 colour = "red"
+smooth = true
 )toml")
     );
 
@@ -586,6 +589,7 @@ colour = "red"
     YR_EXPECT_TRUE(!result.scene.has_value());
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.shader", "unknown field"));
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "assets.colour", "unknown field"));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "assets.smooth", "unknown field"));
 }
 
 YR_TEST(scene_parser_rejects_misdeclared_table_array_sections) {
@@ -701,4 +705,125 @@ asset = "triangle"
     YR_EXPECT_TRUE(result.scene.has_value());
     YR_EXPECT_EQ(result.scene.value().assets.size(), std::size_t{1});
     YR_EXPECT_EQ(result.scene.value().assets[0].path.generic_string(), std::string{"builtin:triangle"});
+}
+
+YR_TEST(scene_parser_loads_inline_quad_asset) {
+    const std::filesystem::path path = WriteTempScene(
+        "inline_quad_asset.toml",
+        ValidSceneWith(R"toml(
+[[assets]]
+name = "panel"
+quads = [
+  [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]]
+]
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::AssetDescription& asset = result.scene.value().assets[0];
+    YR_EXPECT_EQ(asset.name, std::string{"panel"});
+    YR_EXPECT_EQ(asset.path.generic_string(), std::string{});
+    YR_EXPECT_EQ(asset.quads.size(), std::size_t{1});
+    YR_EXPECT_NEAR(asset.quads[0].p0.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(asset.quads[0].p1.x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(asset.quads[0].p2.y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(asset.quads[0].p3.y, 1.0, 1e-6);
+}
+
+YR_TEST(scene_parser_loads_multiple_inline_quads) {
+    const std::filesystem::path path = WriteTempScene(
+        "inline_quad_asset_multiple.toml",
+        ValidSceneWith(R"toml(
+[[assets]]
+name = "two_panels"
+quads = [
+  [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
+  [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]]
+]
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::AssetDescription& asset = result.scene.value().assets[0];
+    YR_EXPECT_EQ(asset.quads.size(), std::size_t{2});
+    YR_EXPECT_NEAR(asset.quads[1].p0.z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(asset.quads[1].p2.z, 1.0, 1e-6);
+}
+
+YR_TEST(scene_parser_rejects_invalid_inline_quad_asset_shapes) {
+    const std::filesystem::path both_path = WriteTempScene(
+        "asset_path_and_quads.toml",
+        ValidSceneWith(R"toml(
+[[assets]]
+name = "bad"
+path = "builtin:triangle"
+quads = [
+  [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]]
+]
+)toml")
+    );
+    const std::filesystem::path neither_path = WriteTempScene(
+        "asset_neither_path_nor_quads.toml",
+        ValidSceneWith(R"toml(
+[[assets]]
+name = "bad"
+)toml")
+    );
+    const std::filesystem::path malformed_path = WriteTempScene(
+        "asset_bad_quad_shapes.toml",
+        ValidSceneWith(R"toml(
+[[assets]]
+name = "bad"
+quads = [
+  [[0, 0, 0], [1, 0, 0], [1, 1, 0]],
+  [[0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
+  "not a quad"
+]
+)toml")
+    );
+    const std::filesystem::path empty_path = WriteTempScene(
+        "asset_empty_quads.toml",
+        ValidSceneWith(R"toml(
+[[assets]]
+name = "bad"
+quads = []
+)toml")
+    );
+    const std::filesystem::path wrong_type_path = WriteTempScene(
+        "asset_quads_wrong_type.toml",
+        ValidSceneWith(R"toml(
+[[assets]]
+name = "bad"
+quads = "not an array"
+)toml")
+    );
+
+    const yr::SceneLoadResult both_result = yr::LoadSceneFile(both_path);
+    const yr::SceneLoadResult neither_result = yr::LoadSceneFile(neither_path);
+    const yr::SceneLoadResult malformed_result = yr::LoadSceneFile(malformed_path);
+    const yr::SceneLoadResult empty_result = yr::LoadSceneFile(empty_path);
+    const yr::SceneLoadResult wrong_type_result = yr::LoadSceneFile(wrong_type_path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(both_result.diagnostics));
+    YR_EXPECT_TRUE(!both_result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(both_result.diagnostics, "assets", "must define exactly one of path or quads"));
+    YR_EXPECT_TRUE(yr::HasSceneErrors(neither_result.diagnostics));
+    YR_EXPECT_TRUE(!neither_result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(neither_result.diagnostics, "assets", "must define exactly one of path or quads"));
+    YR_EXPECT_TRUE(yr::HasSceneErrors(malformed_result.diagnostics));
+    YR_EXPECT_TRUE(!malformed_result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(malformed_result.diagnostics, "assets.quads", "quad must contain exactly four points"));
+    YR_EXPECT_TRUE(DiagnosticsContain(malformed_result.diagnostics, "assets.quads", "point must contain exactly three numeric values"));
+    YR_EXPECT_TRUE(yr::HasSceneErrors(empty_result.diagnostics));
+    YR_EXPECT_TRUE(!empty_result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(empty_result.diagnostics, "assets.quads", "must not be empty"));
+    YR_EXPECT_TRUE(yr::HasSceneErrors(wrong_type_result.diagnostics));
+    YR_EXPECT_TRUE(!wrong_type_result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(wrong_type_result.diagnostics, "assets.quads", "must be an array of quads"));
 }
