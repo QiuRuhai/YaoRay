@@ -63,6 +63,7 @@ add_library(yaoray_backends STATIC
     src/backends/backend.cpp
     src/backends/cpu/cpu_debug_backend.cpp
     src/backends/cpu/cpu_debug_renderer.cpp
+    src/backends/cpu/cpu_tile_scheduler.cpp
     src/backends/cpu/cpu_path_tracer.cpp
 )
 target_include_directories(yaoray_backends PUBLIC include)
@@ -79,6 +80,7 @@ add_executable(yaoray_tests
     tests/render_scene_tests.cpp
     tests/backend_tests.cpp
     tests/cpu_debug_renderer_tests.cpp
+    tests/cpu_tile_scheduler_tests.cpp
     tests/cpu_path_tracer_tests.cpp
 )
 target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_scene yaoray_render yaoray_assets yaoray_backends)
