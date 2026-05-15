@@ -1,0 +1,39 @@
+[render]
+backend = "cpu"
+integrator = "path"
+width = 8
+height = 8
+spp = 4
+max_depth = 2
+seed = 17
+
+[film]
+output = "out/path_tracer_bounce.png"
+tone_mapper = "aces"
+exposure = 0.0
+
+[camera]
+type = "perspective"
+position = [0.0, 0.0, 4.0]
+target = [0.0, 0.0, 0.0]
+fov_y = 45.0
+
+[[materials]]
+name = "matte"
+albedo = [0.7, 0.7, 0.7]
+emission = [0, 0, 0]
+
+[[assets]]
+name = "panel"
+quads = [
+  [[-2.0, -2.0, 0.0], [2.0, -2.0, 0.0], [2.0, 2.0, 0.0], [-2.0, 2.0, 0.0]]
+]
+
+[[instances]]
+asset = "panel"
+material = "matte"
+
+[environment]
+type = "constant"
+radiance = [0.15, 0.2, 0.25]
+strength = 1.0
