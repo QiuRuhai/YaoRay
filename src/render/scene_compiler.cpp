@@ -99,10 +99,37 @@ Point3f ApplyTransform(Point3f point, const TransformDescription& transform) {
     };
 }
 
-std::unordered_map<std::string, std::filesystem::path> BuildAssetMap(const SceneDescription& scene) {
-    std::unordered_map<std::string, std::filesystem::path> assets;
+constexpr float DegenerateTriangleEpsilon = 1.0e-12f;
+
+bool AppendTriangle(
+    const SceneDescription& scene,
+    RenderScene& compiled,
+    Point3f p0,
+    Point3f p1,
+    Point3f p2,
+    int material_index,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const Vec3f normal = Cross(p1 - p0, p2 - p0);
+    if (LengthSquared(normal) <= DegenerateTriangleEpsilon) {
+        diagnostics.push_back(Error(scene, "assets.quads", "quad produces degenerate triangle"));
+        return false;
+    }
+
+    compiled.triangles.push_back(RenderTriangle{
+        p0,
+        p1,
+        p2,
+        Normalize(normal),
+        material_index
+    });
+    return true;
+}
+
+std::unordered_map<std::string, const AssetDescription*> BuildAssetMap(const SceneDescription& scene) {
+    std::unordered_map<std::string, const AssetDescription*> assets;
     for (const AssetDescription& asset : scene.assets) {
-        assets.emplace(asset.name, asset.path);
+        assets.emplace(asset.name, &asset);
     }
     return assets;
 }
@@ -176,6 +203,25 @@ void AppendImportedMesh(RenderScene& compiled, const ImportedMesh& mesh, const T
     }
 }
 
+void AppendInlineQuadAsset(
+    const SceneDescription& scene,
+    RenderScene& compiled,
+    const AssetDescription& asset,
+    const TransformDescription& transform,
+    int material_index,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    for (const QuadDescription& quad : asset.quads) {
+        const Point3f p0 = ApplyTransform(quad.p0, transform);
+        const Point3f p1 = ApplyTransform(quad.p1, transform);
+        const Point3f p2 = ApplyTransform(quad.p2, transform);
+        const Point3f p3 = ApplyTransform(quad.p3, transform);
+
+        AppendTriangle(scene, compiled, p0, p1, p2, material_index, diagnostics);
+        AppendTriangle(scene, compiled, p0, p2, p3, material_index, diagnostics);
+    }
+}
+
 void AppendObjAsset(
     const SceneDescription& scene,
     RenderScene& compiled,
@@ -236,7 +282,7 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
 
     CopyAreaLights(scene, compiled);
 
-    const std::unordered_map<std::string, std::filesystem::path> assets = BuildAssetMap(scene);
+    const std::unordered_map<std::string, const AssetDescription*> assets = BuildAssetMap(scene);
     const std::unordered_map<std::string, int> materials = BuildMaterialMap(scene, compiled);
     std::unordered_map<std::string, ImportedMesh> mesh_cache;
     for (const InstanceDescription& instance : scene.instances) {
@@ -246,7 +292,8 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
             continue;
         }
 
-        const std::filesystem::path& asset_path = asset->second;
+        const AssetDescription& asset_description = *asset->second;
+        const std::filesystem::path& asset_path = asset_description.path;
         const std::string asset_path_string = asset_path.generic_string();
         const std::optional<int> material_index =
             ResolveMaterialIndex(scene, instance, materials, compiled, result.diagnostics);
@@ -254,7 +301,9 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
             continue;
         }
 
-        if (asset_path_string == "builtin:triangle") {
+        if (!asset_description.quads.empty()) {
+            AppendInlineQuadAsset(scene, compiled, asset_description, instance.transform, *material_index, result.diagnostics);
+        } else if (asset_path_string == "builtin:triangle") {
             AppendBuiltinTriangle(compiled, instance.transform, *material_index);
         } else if (HasObjExtension(asset_path)) {
             AppendObjAsset(scene, compiled, asset_path, instance.transform, *material_index, mesh_cache, result.diagnostics);

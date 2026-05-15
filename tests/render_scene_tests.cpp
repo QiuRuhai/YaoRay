@@ -341,6 +341,138 @@ YR_TEST(scene_compiler_expands_obj_asset) {
     YR_EXPECT_NEAR(result.scene.value().triangles[0].normal.z, 1.0, 1e-6);
 }
 
+YR_TEST(scene_compiler_expands_inline_quad_asset) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "panel",
+        {},
+        std::vector<yr::QuadDescription>{
+            yr::QuadDescription{
+                yr::Point3f{0.0f, 0.0f, 0.0f},
+                yr::Point3f{1.0f, 0.0f, 0.0f},
+                yr::Point3f{1.0f, 1.0f, 0.0f},
+                yr::Point3f{0.0f, 1.0f, 0.0f}
+            }
+        }
+    });
+    scene.materials.push_back(yr::MaterialDescription{
+        "white",
+        yr::Color3f{0.7f, 0.7f, 0.7f},
+        yr::Color3f{}
+    });
+    yr::InstanceDescription instance;
+    instance.asset = "panel";
+    instance.material = "white";
+    scene.instances.push_back(instance);
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderScene& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
+    YR_EXPECT_EQ(compiled.triangles.size(), std::size_t{2});
+    YR_EXPECT_EQ(compiled.triangles[0].material_index, 0);
+    YR_EXPECT_EQ(compiled.triangles[1].material_index, 0);
+    YR_EXPECT_NEAR(compiled.triangles[0].p0.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(compiled.triangles[0].p1.x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(compiled.triangles[0].p2.y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(compiled.triangles[1].p0.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(compiled.triangles[1].p1.y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(compiled.triangles[1].p2.y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(compiled.triangles[0].normal.z, 1.0, 1e-6);
+}
+
+YR_TEST(scene_compiler_expands_multiple_inline_quads) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "panels",
+        {},
+        std::vector<yr::QuadDescription>{
+            yr::QuadDescription{
+                yr::Point3f{0.0f, 0.0f, 0.0f},
+                yr::Point3f{1.0f, 0.0f, 0.0f},
+                yr::Point3f{1.0f, 1.0f, 0.0f},
+                yr::Point3f{0.0f, 1.0f, 0.0f}
+            },
+            yr::QuadDescription{
+                yr::Point3f{0.0f, 0.0f, 1.0f},
+                yr::Point3f{1.0f, 0.0f, 1.0f},
+                yr::Point3f{1.0f, 1.0f, 1.0f},
+                yr::Point3f{0.0f, 1.0f, 1.0f}
+            }
+        }
+    });
+    scene.instances.push_back(yr::InstanceDescription{"panels", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().materials.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{4});
+    YR_EXPECT_EQ(result.scene.value().triangles[0].material_index, 0);
+    YR_EXPECT_EQ(result.scene.value().triangles[2].material_index, 0);
+}
+
+YR_TEST(scene_compiler_applies_inline_quad_transform) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "panel",
+        {},
+        std::vector<yr::QuadDescription>{
+            yr::QuadDescription{
+                yr::Point3f{0.0f, 0.0f, 0.0f},
+                yr::Point3f{1.0f, 0.0f, 0.0f},
+                yr::Point3f{1.0f, 1.0f, 0.0f},
+                yr::Point3f{0.0f, 1.0f, 0.0f}
+            }
+        }
+    });
+    yr::InstanceDescription instance;
+    instance.asset = "panel";
+    instance.transform.translate = yr::Vec3f{1.0f, 2.0f, 3.0f};
+    instance.transform.rotate_degrees = yr::Vec3f{0.0f, 0.0f, 90.0f};
+    instance.transform.scale = yr::Vec3f{2.0f, 1.0f, 1.0f};
+    scene.instances.push_back(instance);
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderTriangle& triangle = result.scene.value().triangles[0];
+    YR_EXPECT_NEAR(triangle.p0.x, 1.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p0.y, 2.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p0.z, 3.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p1.x, 1.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p1.y, 4.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p2.x, 0.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p2.y, 4.0, 1e-5);
+}
+
+YR_TEST(scene_compiler_rejects_degenerate_inline_quad) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "bad_panel",
+        {},
+        std::vector<yr::QuadDescription>{
+            yr::QuadDescription{
+                yr::Point3f{0.0f, 0.0f, 0.0f},
+                yr::Point3f{0.0f, 0.0f, 0.0f},
+                yr::Point3f{0.0f, 0.0f, 0.0f},
+                yr::Point3f{0.0f, 0.0f, 0.0f}
+            }
+        }
+    });
+    scene.instances.push_back(yr::InstanceDescription{"bad_panel", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "assets.quads", "quad produces degenerate triangle"));
+}
+
 YR_TEST(scene_compiler_applies_obj_transform) {
     yr::SceneDescription scene = MakeBaseScene();
     scene.assets.push_back(yr::AssetDescription{"triangle", FixturePath("assets/triangle.obj")});
