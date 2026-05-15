@@ -99,6 +99,7 @@ int RunRender(int argc, char** argv) {
     std::cout << "Scene parsed successfully: " << scene.source_path.generic_string() << '\n';
     std::cout << "Scene compiled successfully.\n";
     std::cout << "Requested backend: " << yr::RenderBackendName(render_scene.backend) << '\n';
+    std::cout << "Integrator: " << yr::RenderIntegratorName(render_scene.integrator) << '\n';
     std::cout << "Compiled triangles: " << render_scene.triangles.size() << '\n';
     std::cout << "BVH nodes: " << render_scene.bvh.nodes.size() << '\n';
     std::cout << "BVH max depth: " << render_scene.bvh.max_depth << '\n';
