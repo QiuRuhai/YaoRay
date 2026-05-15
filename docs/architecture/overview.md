@@ -18,11 +18,14 @@ Current implemented slices:
 - BVH acceleration over compiled render triangles
 - TOML named diffuse/emissive materials with instance-level material binding
 - scene-authored inline quad assets and a Cornell Box example based on Cornell measured geometry
+- render integrator selection with a deterministic CPU path tracer v0
 
-The CPU renderer is a simple reference path through camera rays, BVH traversal, triangle intersection, deterministic center-sampled area-light direct lighting, BVH shadow rays, Film accumulation, tone mapping, and PNG/PPM output. It is useful for smoke tests and future importer/BVH/CUDA comparisons, while final image quality remains the responsibility of later path tracing work.
+The CPU backend supports two integrators. `debug_direct` is the simple reference path through camera rays, BVH traversal, triangle intersection, deterministic center-sampled area-light direct lighting, BVH shadow rays, Film accumulation, tone mapping, and PNG/PPM output. `path` is the first CPU path tracer: it adds deterministic multi-sample camera jitter, diffuse bounce, emissive hits, and explicit center-sampled direct light. It is still a v0 integrator without MIS, Russian roulette, spectral rendering, random area-light sampling, or final-quality material models.
 
 The OBJ importer converts small Wavefront OBJ meshes into flat world-space triangles during scene compilation. It ignores OBJ `.mtl` files, textures, UVs, imported normals, and smoothing data in this slice; scene-authored named materials can still bind to a whole imported instance.
 
 Inline quad assets let TOML scenes define small measured or hand-authored quad meshes directly. The Cornell Box example uses this path so the official measured vertices stay visible in the scene file. Its materials are current RGB diffuse/emissive approximations; spectral matching remains future work.
+
+The path-traced Cornell example is separate from the debug Cornell scene. The debug scene remains a fast geometry and pipeline smoke test; the path scene is for manual visual review of indirect diffuse lighting.
 
 Spectral rendering, texture import, imported material files, soft shadows, glTF/GLB import, advanced BVH split methods, HDR output, a real CPU path tracer, real CUDA rendering, and final-quality image output will be added in focused implementation plans.
