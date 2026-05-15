@@ -24,6 +24,7 @@ The foundation slices provide:
 - TOML named diffuse/emissive materials with instance material binding
 - scene-authored inline quad assets and a Cornell Box geometry smoke scene
 - selectable render integrators with a first deterministic CPU path tracer
+- deterministic tile-threaded CPU path tracing with CLI throughput stats
 
 Final path tracing quality, spectral rendering, texture import, imported asset materials, soft shadows, advanced BVH split methods, glTF/GLB import, HDR output, and real CUDA backend support are planned as separate implementation slices.
 
@@ -46,4 +47,4 @@ build\Debug\yaoray.exe render scenes\examples\cornell_box.toml --backend cpu
 build\Debug\yaoray.exe render scenes\examples\cornell_box_path.toml --backend cpu
 ```
 
-The `render` command currently parses, compiles, builds a BVH, and renders deterministic CPU images to PNG or ASCII PPM based on `film.output`. `render.integrator = "debug_direct"` is the default direct-lighting debug renderer for fast smoke tests. `render.integrator = "path"` selects the first CPU path tracer with diffuse bounce, deterministic sampling, and explicit center-sampled direct light. The Cornell Box path example uses Cornell's measured geometry with RGB material approximations; it is an indirect-lighting preview, not a physically matched spectral render.
+The `render` command currently parses, compiles, builds a BVH, and renders deterministic CPU images to PNG or ASCII PPM based on `film.output`. `render.integrator = "debug_direct"` is the default direct-lighting debug renderer for fast smoke tests. `render.integrator = "path"` selects the first CPU path tracer with diffuse bounce, deterministic sampling, explicit center-sampled direct light, and tile-threaded CPU execution controlled by `render.threads` (`0` auto, `1` single-thread reference, `N` fixed worker count). The CLI reports actual threads plus samples/sec and rays/sec. The Cornell Box path example uses Cornell's measured geometry with RGB material approximations; it is an indirect-lighting preview, not a physically matched spectral render.

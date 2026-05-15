@@ -19,8 +19,9 @@ Current implemented slices:
 - TOML named diffuse/emissive materials with instance-level material binding
 - scene-authored inline quad assets and a Cornell Box example based on Cornell measured geometry
 - render integrator selection with a deterministic CPU path tracer v0
+- deterministic CPU path tracer tile threading with actual thread and throughput reporting
 
-The CPU backend supports two integrators. `debug_direct` is the simple reference path through camera rays, BVH traversal, triangle intersection, deterministic center-sampled area-light direct lighting, BVH shadow rays, Film accumulation, tone mapping, and PNG/PPM output. `path` is the first CPU path tracer: it adds deterministic multi-sample camera jitter, diffuse bounce, emissive hits, and explicit center-sampled direct light. It is still a v0 integrator without MIS, Russian roulette, spectral rendering, random area-light sampling, or final-quality material models.
+The CPU backend supports two integrators. `debug_direct` is the simple reference path through camera rays, BVH traversal, triangle intersection, deterministic center-sampled area-light direct lighting, BVH shadow rays, Film accumulation, tone mapping, and PNG/PPM output; it remains single-threaded for reference debugging. `path` is the first CPU path tracer: it adds deterministic multi-sample camera jitter, diffuse bounce, emissive hits, explicit center-sampled direct light, and row-major tile threading controlled by `render.threads` (`0` auto, `1` single-thread reference, `N` fixed worker count). It is still a v0 integrator without MIS, Russian roulette, spectral rendering, random area-light sampling, or final-quality material models.
 
 The OBJ importer converts small Wavefront OBJ meshes into flat world-space triangles during scene compilation. It ignores OBJ `.mtl` files, textures, UVs, imported normals, and smoothing data in this slice; scene-authored named materials can still bind to a whole imported instance.
 

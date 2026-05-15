@@ -6,6 +6,7 @@
 #include <yaoray/scene/diagnostic.hpp>
 #include <yaoray/scene/scene_parser.hpp>
 
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -42,6 +43,23 @@ yr::ToneMapper ToFilmToneMapper(yr::ToneMapperKind mapper) {
             return yr::ToneMapper::Aces;
     }
     return yr::ToneMapper::Aces;
+}
+
+double SafeRate(double numerator, double elapsed_seconds) {
+    if (elapsed_seconds <= 0.0) {
+        return 0.0;
+    }
+    return numerator / elapsed_seconds;
+}
+
+std::uint64_t TotalSamples(const yr::Film& film) {
+    std::uint64_t total = 0;
+    for (int y = 0; y < film.Height(); ++y) {
+        for (int x = 0; x < film.Width(); ++x) {
+            total += film.SampleCount(x, y);
+        }
+    }
+    return total;
 }
 
 int RunRender(int argc, char** argv) {
@@ -130,8 +148,12 @@ int RunRender(int argc, char** argv) {
         return 1;
     }
 
+    const std::uint64_t total_samples = TotalSamples(*render_result.film);
     std::cout << "Rendered image: " << scene.film.output.generic_string() << '\n';
+    std::cout << "Threads: " << render_result.stats.threads << '\n';
     std::cout << "Rays traced: " << render_result.stats.rays_traced << '\n';
+    std::cout << "Samples/sec: " << SafeRate(static_cast<double>(total_samples), render_result.stats.elapsed_seconds) << '\n';
+    std::cout << "Rays/sec: " << SafeRate(static_cast<double>(render_result.stats.rays_traced), render_result.stats.elapsed_seconds) << '\n';
     std::cout << "Shadow rays: " << render_result.stats.shadow_rays << '\n';
     std::cout << "Occluded shadow rays: " << render_result.stats.occluded_shadow_rays << '\n';
     std::cout << "BVH node tests: " << render_result.stats.bvh_node_tests << '\n';
