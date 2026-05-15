@@ -19,6 +19,7 @@ RenderStats ToRenderStats(const CpuDebugRenderStats& stats) {
     result.bvh_max_depth = stats.bvh_max_depth;
     result.hits = stats.hits;
     result.misses = stats.misses;
+    result.threads = 1;
     result.elapsed_seconds = stats.elapsed_seconds;
     return result;
 }
@@ -34,6 +35,7 @@ RenderStats ToRenderStats(const CpuPathTraceStats& stats) {
     result.bvh_max_depth = stats.bvh_max_depth;
     result.hits = stats.hits;
     result.misses = stats.misses;
+    result.threads = stats.threads;
     result.elapsed_seconds = stats.elapsed_seconds;
     return result;
 }

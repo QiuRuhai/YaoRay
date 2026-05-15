@@ -1,5 +1,6 @@
 #include <yaoray/backends/cpu/cpu_path_tracer.hpp>
 
+#include <yaoray/backends/cpu/cpu_tile_scheduler.hpp>
 #include <yaoray/core/ray.hpp>
 #include <yaoray/render/bvh.hpp>
 
@@ -8,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace yr {
 namespace {
@@ -94,6 +96,16 @@ bool IsValidMaterialIndex(const RenderScene& scene, int material_index) {
 void AccumulateTraceStats(CpuPathTraceStats& stats, const BvhTraceStats& trace_stats) {
     stats.bvh_node_tests += trace_stats.node_tests;
     stats.triangle_tests += trace_stats.triangle_tests;
+}
+
+void MergeTraceStats(CpuPathTraceStats& target, const CpuPathTraceStats& source) {
+    target.rays_traced += source.rays_traced;
+    target.shadow_rays += source.shadow_rays;
+    target.occluded_shadow_rays += source.occluded_shadow_rays;
+    target.triangle_tests += source.triangle_tests;
+    target.bvh_node_tests += source.bvh_node_tests;
+    target.hits += source.hits;
+    target.misses += source.misses;
 }
 
 Ray3f MakeCameraRay(const RenderScene& scene, int x, int y, float pixel_u, float pixel_v) {
@@ -229,21 +241,31 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, Rng& rng, CpuPathTraceSta
 
 CpuPathTraceResult RenderCpuPathTrace(const RenderScene& scene) {
     CpuPathTraceResult result{Film{scene.width, scene.height}, {}};
+    const CpuTileSchedule schedule = BuildCpuTileSchedule(scene.width, scene.height, scene.threads);
     result.stats.bvh_nodes = static_cast<int>(scene.bvh.nodes.size());
     result.stats.bvh_max_depth = scene.bvh.max_depth;
+    result.stats.threads = schedule.worker_count;
 
     const auto start = std::chrono::steady_clock::now();
     const int samples_per_pixel = std::max(1, scene.spp);
-    for (int y = 0; y < scene.height; ++y) {
-        for (int x = 0; x < scene.width; ++x) {
-            for (int sample = 0; sample < samples_per_pixel; ++sample) {
-                Rng rng{SeedFor(scene, x, y, sample)};
-                const float pixel_u = samples_per_pixel == 1 ? 0.5f : rng.NextFloat();
-                const float pixel_v = samples_per_pixel == 1 ? 0.5f : rng.NextFloat();
-                const Ray3f ray = MakeCameraRay(scene, x, y, pixel_u, pixel_v);
-                result.film.AddSample(x, y, TracePath(scene, ray, rng, result.stats));
+    std::vector<CpuPathTraceStats> worker_stats(static_cast<std::size_t>(schedule.worker_count));
+    ForEachCpuTile(schedule, [&](const CpuTile& tile, int worker_index) {
+        CpuPathTraceStats& stats = worker_stats[static_cast<std::size_t>(worker_index)];
+        for (int y = tile.y0; y < tile.y1; ++y) {
+            for (int x = tile.x0; x < tile.x1; ++x) {
+                for (int sample = 0; sample < samples_per_pixel; ++sample) {
+                    Rng rng{SeedFor(scene, x, y, sample)};
+                    const float pixel_u = samples_per_pixel == 1 ? 0.5f : rng.NextFloat();
+                    const float pixel_v = samples_per_pixel == 1 ? 0.5f : rng.NextFloat();
+                    const Ray3f ray = MakeCameraRay(scene, x, y, pixel_u, pixel_v);
+                    result.film.AddSample(x, y, TracePath(scene, ray, rng, stats));
+                }
             }
         }
+    });
+
+    for (const CpuPathTraceStats& stats : worker_stats) {
+        MergeTraceStats(result.stats, stats);
     }
 
     const auto end = std::chrono::steady_clock::now();

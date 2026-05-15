@@ -16,6 +16,7 @@ struct CpuPathTraceStats {
     int bvh_max_depth = 0;
     std::uint64_t hits = 0;
     std::uint64_t misses = 0;
+    int threads = 1;
     double elapsed_seconds = 0.0;
 };
 

@@ -131,6 +131,54 @@ bool AnyPixelDifferent(const yr::Film& first, const yr::Film& second) {
     return false;
 }
 
+bool FilmsEqual(const yr::Film& first, const yr::Film& second) {
+    if (first.Width() != second.Width() || first.Height() != second.Height()) {
+        return false;
+    }
+    if (first.BadSampleCount() != second.BadSampleCount()) {
+        return false;
+    }
+    for (int y = 0; y < first.Height(); ++y) {
+        for (int x = 0; x < first.Width(); ++x) {
+            if (first.SampleCount(x, y) != second.SampleCount(x, y)) {
+                return false;
+            }
+            if (!ColorEqual(first.LinearPixel(x, y), second.LinearPixel(x, y))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool CoreStatsEqual(const yr::CpuPathTraceStats& first, const yr::CpuPathTraceStats& second) {
+    return first.rays_traced == second.rays_traced &&
+           first.shadow_rays == second.shadow_rays &&
+           first.occluded_shadow_rays == second.occluded_shadow_rays &&
+           first.triangle_tests == second.triangle_tests &&
+           first.bvh_node_tests == second.bvh_node_tests &&
+           first.bvh_nodes == second.bvh_nodes &&
+           first.bvh_max_depth == second.bvh_max_depth &&
+           first.hits == second.hits &&
+           first.misses == second.misses;
+}
+
+yr::RenderScene MakeThreadedDeterminismScene() {
+    yr::RenderScene scene = MakeBaseScene(40, 24);
+    scene.spp = 3;
+    scene.max_depth = 2;
+    scene.seed = 99;
+    scene.environment.radiance = yr::Color3f{0.05f, 0.06f, 0.07f};
+    scene.materials[0].albedo = yr::Color3f{0.7f, 0.6f, 0.5f};
+    scene.area_lights.push_back(yr::RenderAreaLight{
+        yr::Point3f{0.0f, 0.5f, 2.0f},
+        1.0f,
+        1.0f,
+        yr::Color3f{2.0f, 2.0f, 2.0f}
+    });
+    return scene;
+}
+
 } // namespace
 
 YR_TEST(cpu_path_tracer_traces_one_sample_per_pixel) {
@@ -146,6 +194,7 @@ YR_TEST(cpu_path_tracer_traces_one_sample_per_pixel) {
     YR_EXPECT_EQ(result.stats.bvh_nodes, 1);
     YR_EXPECT_EQ(result.stats.bvh_max_depth, 1);
     YR_EXPECT_EQ(result.stats.hits + result.stats.misses, result.stats.rays_traced);
+    YR_EXPECT_EQ(result.stats.threads, 1);
 }
 
 YR_TEST(cpu_path_tracer_accumulates_spp_samples) {
@@ -237,4 +286,43 @@ YR_TEST(cpu_path_tracer_respects_max_depth_for_indirect_environment_bounce) {
     const yr::CpuPathTraceResult depth_two = yr::RenderCpuPathTrace(MakeIndirectBounceScene(2));
 
     YR_EXPECT_TRUE(Luminance(depth_two.film.LinearPixel(1, 1)) > Luminance(depth_one.film.LinearPixel(1, 1)));
+}
+
+YR_TEST(cpu_path_tracer_reports_single_thread_when_requested) {
+    yr::RenderScene scene = MakeThreadedDeterminismScene();
+    scene.threads = 1;
+
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+
+    YR_EXPECT_EQ(result.stats.threads, 1);
+}
+
+YR_TEST(cpu_path_tracer_reports_capped_requested_threads) {
+    yr::RenderScene scene = MakeBaseScene(4, 4);
+    scene.threads = 32;
+
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+
+    YR_EXPECT_EQ(result.stats.threads, 1);
+}
+
+YR_TEST(cpu_path_tracer_is_bitwise_identical_across_thread_counts) {
+    yr::RenderScene single_thread = MakeThreadedDeterminismScene();
+    single_thread.threads = 1;
+    yr::RenderScene two_threads = single_thread;
+    two_threads.threads = 2;
+    yr::RenderScene four_threads = single_thread;
+    four_threads.threads = 4;
+
+    const yr::CpuPathTraceResult single_result = yr::RenderCpuPathTrace(single_thread);
+    const yr::CpuPathTraceResult two_result = yr::RenderCpuPathTrace(two_threads);
+    const yr::CpuPathTraceResult four_result = yr::RenderCpuPathTrace(four_threads);
+
+    YR_EXPECT_EQ(single_result.stats.threads, 1);
+    YR_EXPECT_EQ(two_result.stats.threads, 2);
+    YR_EXPECT_EQ(four_result.stats.threads, 4);
+    YR_EXPECT_TRUE(FilmsEqual(single_result.film, two_result.film));
+    YR_EXPECT_TRUE(FilmsEqual(single_result.film, four_result.film));
+    YR_EXPECT_TRUE(CoreStatsEqual(single_result.stats, two_result.stats));
+    YR_EXPECT_TRUE(CoreStatsEqual(single_result.stats, four_result.stats));
 }
