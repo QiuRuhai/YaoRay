@@ -22,8 +22,9 @@ The foundation slices provide:
 - geometry-only OBJ asset import for small mesh scenes
 - BVH acceleration over compiled render triangles for the CPU debug renderer
 - TOML named diffuse/emissive materials with instance material binding
+- scene-authored inline quad assets and a Cornell Box geometry smoke scene
 
-Final path tracing quality, texture import, imported asset materials, soft shadows, advanced BVH split methods, glTF/GLB import, HDR output, and real CUDA backend support are planned as separate implementation slices.
+Final path tracing quality, spectral rendering, texture import, imported asset materials, soft shadows, advanced BVH split methods, glTF/GLB import, HDR output, and real CUDA backend support are planned as separate implementation slices.
 
 ## Build
 
@@ -40,6 +41,7 @@ build\Debug\yaoray.exe --help
 build\Debug\yaoray.exe --version
 build\Debug\yaoray.exe render scenes\examples\minimal.toml --backend cpu
 build\Debug\yaoray.exe render scenes\examples\obj_pyramid.toml --backend cpu
+build\Debug\yaoray.exe render scenes\examples\cornell_box.toml --backend cpu
 ```
 
-The `render` command currently parses, compiles, builds a BVH, and renders deterministic CPU direct-lighting images to PNG or ASCII PPM based on `film.output`. The example scenes write PNG by default and include named diffuse materials plus simple center-sampled area lights. This is still a correctness and smoke-test renderer, not the final path tracer or final image-quality target.
+The `render` command currently parses, compiles, builds a BVH, and renders deterministic CPU direct-lighting images to PNG or ASCII PPM based on `film.output`. The example scenes write PNG by default and include named diffuse materials plus simple center-sampled area lights. The Cornell Box example uses Cornell's measured geometry with RGB material approximations; it is a geometry and pipeline smoke scene, not a physically matched spectral render. This is still a correctness and smoke-test renderer, not the final path tracer or final image-quality target.
