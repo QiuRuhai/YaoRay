@@ -71,6 +71,35 @@ YR_TEST(cpu_backend_renders_film_and_stats) {
     YR_EXPECT_EQ(result.stats.hits + result.stats.misses, result.stats.rays_traced);
 }
 
+YR_TEST(cpu_backend_dispatches_path_integrator) {
+    const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cpu);
+    yr::RenderScene scene = MakeBackendTriangleScene(3, 3);
+    scene.integrator = yr::RenderIntegratorKind::Path;
+    scene.spp = 4;
+
+    const yr::RenderResult result = backend->Render(scene, yr::RenderRequest{});
+
+    YR_EXPECT_TRUE(result.ok);
+    YR_EXPECT_TRUE(result.error.empty());
+    YR_EXPECT_TRUE(result.film.has_value());
+    YR_EXPECT_EQ(result.film->SampleCount(0, 0), 4);
+    YR_EXPECT_TRUE(result.stats.rays_traced >= std::uint64_t{36});
+}
+
+YR_TEST(cpu_backend_keeps_debug_direct_as_default_integrator) {
+    const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cpu);
+    yr::RenderScene scene = MakeBackendTriangleScene(4, 3);
+    scene.integrator = yr::RenderIntegratorKind::DebugDirect;
+    scene.spp = 4;
+
+    const yr::RenderResult result = backend->Render(scene, yr::RenderRequest{});
+
+    YR_EXPECT_TRUE(result.ok);
+    YR_EXPECT_TRUE(result.film.has_value());
+    YR_EXPECT_EQ(result.film->SampleCount(0, 0), 1);
+    YR_EXPECT_EQ(result.stats.rays_traced, std::uint64_t{12});
+}
+
 YR_TEST(create_render_backend_returns_cuda_stub_backend) {
     const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cuda);
 
