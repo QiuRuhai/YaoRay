@@ -8,7 +8,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <utility>
 
 namespace yr {
 namespace {
@@ -167,12 +166,6 @@ Color3f EstimateDirectLight(
             continue;
         }
 
-        const Vec3f light_normal{0.0f, 0.0f, -1.0f};
-        const float light_facing_cosine = std::max(0.0f, Dot(light_normal, -wi));
-        if (light_facing_cosine <= 0.0f) {
-            continue;
-        }
-
         ++stats.shadow_rays;
         BvhTraceStats shadow_trace;
         const Ray3f shadow_ray{shadow_origin, wi};
@@ -183,7 +176,7 @@ Color3f EstimateDirectLight(
             continue;
         }
 
-        const float scale = area * n_dot_l * light_facing_cosine / distance_squared;
+        const float scale = area * n_dot_l / distance_squared;
         radiance = radiance + Multiply(albedo, light.radiance) * scale;
     }
     return radiance;
@@ -235,17 +228,9 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, Rng& rng, CpuPathTraceSta
 } // namespace
 
 CpuPathTraceResult RenderCpuPathTrace(const RenderScene& scene) {
-    RenderScene trace_scene = scene;
-    BvhBuildResult build = BuildBvh(trace_scene.triangles);
-    if (build.errors.empty()) {
-        trace_scene.bvh = std::move(build.bvh);
-    } else {
-        trace_scene.bvh = RenderBvh{};
-    }
-
     CpuPathTraceResult result{Film{scene.width, scene.height}, {}};
-    result.stats.bvh_nodes = static_cast<int>(trace_scene.bvh.nodes.size());
-    result.stats.bvh_max_depth = trace_scene.bvh.max_depth;
+    result.stats.bvh_nodes = static_cast<int>(scene.bvh.nodes.size());
+    result.stats.bvh_max_depth = scene.bvh.max_depth;
 
     const auto start = std::chrono::steady_clock::now();
     const int samples_per_pixel = std::max(1, scene.spp);
@@ -256,7 +241,7 @@ CpuPathTraceResult RenderCpuPathTrace(const RenderScene& scene) {
                 const float pixel_u = samples_per_pixel == 1 ? 0.5f : rng.NextFloat();
                 const float pixel_v = samples_per_pixel == 1 ? 0.5f : rng.NextFloat();
                 const Ray3f ray = MakeCameraRay(scene, x, y, pixel_u, pixel_v);
-                result.film.AddSample(x, y, TracePath(trace_scene, ray, rng, result.stats));
+                result.film.AddSample(x, y, TracePath(scene, ray, rng, result.stats));
             }
         }
     }
