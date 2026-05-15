@@ -32,10 +32,23 @@ Color3f EnvironmentColor(const RenderScene& scene) {
     return Color3f{};
 }
 
-constexpr float ShadowEpsilon = 1.0e-4f;
+constexpr float MinShadowBias = 1.0e-4f;
+constexpr float ShadowBiasScale = 1.0e-5f;
+constexpr float MaxShadowBiasDistanceFraction = 1.0e-2f;
 
 Color3f Multiply(Color3f a, Color3f b) {
     return Color3f{a.x * b.x, a.y * b.y, a.z * b.z};
+}
+
+float MaxAbsComponent(Point3f point) {
+    return std::max(std::fabs(point.x), std::max(std::fabs(point.y), std::fabs(point.z)));
+}
+
+float ShadowBias(Point3f origin, Point3f target, float distance) {
+    const float coordinate_scale = std::max(MaxAbsComponent(origin), MaxAbsComponent(target));
+    const float scaled_bias = coordinate_scale * ShadowBiasScale;
+    const float capped_bias = distance * MaxShadowBiasDistanceFraction;
+    return std::min(std::max(MinShadowBias, scaled_bias), capped_bias);
 }
 
 Vec3f FaceForward(Vec3f normal, Vec3f reference) {
@@ -75,12 +88,25 @@ Color3f ShadeHit(
 
         const Vec3f to_light = light.position - hit_point;
         const float distance_squared = LengthSquared(to_light);
-        if (distance_squared <= ShadowEpsilon * ShadowEpsilon) {
+        if (distance_squared <= MinShadowBias * MinShadowBias) {
             continue;
         }
 
         const float distance = std::sqrt(distance_squared);
-        const Vec3f wi = to_light / distance;
+        const float shadow_bias = ShadowBias(hit_point, light.position, distance);
+        if (distance <= shadow_bias) {
+            continue;
+        }
+
+        const Point3f shadow_origin = hit_point + normal * shadow_bias;
+        const Vec3f shadow_to_light = light.position - shadow_origin;
+        const float shadow_distance_squared = LengthSquared(shadow_to_light);
+        if (shadow_distance_squared <= MinShadowBias * MinShadowBias) {
+            continue;
+        }
+
+        const float shadow_distance = std::sqrt(shadow_distance_squared);
+        const Vec3f wi = shadow_to_light / shadow_distance;
         const float n_dot_l = std::max(0.0f, Dot(normal, wi));
         if (n_dot_l <= 0.0f) {
             continue;
@@ -88,10 +114,10 @@ Color3f ShadeHit(
 
         ++stats.shadow_rays;
         BvhTraceStats shadow_trace;
-        const Ray3f shadow_ray{hit_point + normal * ShadowEpsilon, wi};
+        const Ray3f shadow_ray{shadow_origin, wi};
         const BvhHit shadow_hit = IntersectBvh(scene, shadow_ray, shadow_trace);
         AccumulateTraceStats(stats, shadow_trace);
-        if (shadow_hit.hit && shadow_hit.t < distance - ShadowEpsilon) {
+        if (shadow_hit.hit && shadow_hit.t < shadow_distance - shadow_bias) {
             ++stats.occluded_shadow_rays;
             continue;
         }

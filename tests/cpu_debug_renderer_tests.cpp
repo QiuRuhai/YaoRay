@@ -205,3 +205,61 @@ YR_TEST(cpu_debug_renderer_shadow_ray_blocks_direct_light) {
     YR_EXPECT_TRUE(blocked_result.stats.shadow_rays > 0);
     YR_EXPECT_TRUE(blocked_result.stats.occluded_shadow_rays > 0);
 }
+
+YR_TEST(cpu_debug_renderer_does_not_treat_visible_light_panel_as_shadow_occluder_at_large_scale) {
+    yr::RenderScene scene;
+    scene.width = 9;
+    scene.height = 9;
+    scene.spp = 1;
+    scene.camera.origin = yr::Point3f{1'000'000.0f, 1'000.0f, 1'000'000.0f};
+    scene.camera.forward = yr::Vec3f{0.0f, -1.0f, 0.0f};
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Vec3f{0.0f, 0.0f, 1.0f};
+    scene.camera.fov_y_radians = 0.7f;
+    scene.materials.push_back(yr::RenderMaterial{yr::Color3f{1.0f, 1.0f, 1.0f}, yr::Color3f{}});
+    scene.materials.push_back(yr::RenderMaterial{yr::Color3f{}, yr::Color3f{1.0f, 1.0f, 1.0f}});
+
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{999'000.0f, 0.0f, 999'000.0f},
+        yr::Point3f{1'001'000.0f, 0.0f, 999'000.0f},
+        yr::Point3f{1'001'000.0f, 0.0f, 1'001'000.0f},
+        yr::Vec3f{0.0f, 1.0f, 0.0f},
+        0
+    });
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{999'000.0f, 0.0f, 999'000.0f},
+        yr::Point3f{1'001'000.0f, 0.0f, 1'001'000.0f},
+        yr::Point3f{999'000.0f, 0.0f, 1'001'000.0f},
+        yr::Vec3f{0.0f, 1.0f, 0.0f},
+        0
+    });
+
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{999'935.0f, 2'000.0f, 999'947.5f},
+        yr::Point3f{1'000'065.0f, 2'000.0f, 999'947.5f},
+        yr::Point3f{1'000'065.0f, 2'000.0f, 1'000'052.5f},
+        yr::Vec3f{0.0f, -1.0f, 0.0f},
+        1
+    });
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{999'935.0f, 2'000.0f, 999'947.5f},
+        yr::Point3f{1'000'065.0f, 2'000.0f, 1'000'052.5f},
+        yr::Point3f{999'935.0f, 2'000.0f, 1'000'052.5f},
+        yr::Vec3f{0.0f, -1.0f, 0.0f},
+        1
+    });
+    scene.area_lights.push_back(yr::RenderAreaLight{
+        yr::Point3f{1'000'000.0f, 2'000.0f, 1'000'000.0f},
+        130.0f,
+        105.0f,
+        yr::Color3f{10.0f, 10.0f, 10.0f}
+    });
+    RebuildBvh(scene);
+
+    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(scene);
+    const yr::Color3f center = result.film.LinearPixel(4, 4);
+
+    YR_EXPECT_TRUE(result.stats.shadow_rays > 0);
+    YR_EXPECT_EQ(result.stats.occluded_shadow_rays, std::uint64_t{0});
+    YR_EXPECT_TRUE(center.x > 0.0f);
+}
