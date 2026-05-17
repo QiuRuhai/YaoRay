@@ -193,6 +193,7 @@ yr::RenderScene MakeThreadedDeterminismScene() {
     scene.spp = 3;
     scene.max_depth = 2;
     scene.seed = 99;
+    scene.sampler = yr::RenderSamplerKind::Stratified;
     scene.light_samples = 4;
     scene.environment.radiance = yr::Color3f{0.05f, 0.06f, 0.07f};
     scene.materials[0].albedo = yr::Color3f{0.7f, 0.6f, 0.5f};
@@ -279,6 +280,19 @@ YR_TEST(cpu_path_tracer_changes_stochastic_result_for_different_seed) {
     const yr::CpuPathTraceResult second = yr::RenderCpuPathTrace(MakeStochasticEdgeScene(456));
 
     YR_EXPECT_TRUE(AnyPixelDifferent(first.film, second.film));
+}
+
+YR_TEST(cpu_path_tracer_stratified_sampler_changes_stochastic_result) {
+    yr::RenderScene independent = MakeStochasticEdgeScene(123);
+    independent.sampler = yr::RenderSamplerKind::Independent;
+
+    yr::RenderScene stratified = independent;
+    stratified.sampler = yr::RenderSamplerKind::Stratified;
+
+    const yr::CpuPathTraceResult independent_result = yr::RenderCpuPathTrace(independent);
+    const yr::CpuPathTraceResult stratified_result = yr::RenderCpuPathTrace(stratified);
+
+    YR_EXPECT_TRUE(AnyPixelDifferent(independent_result.film, stratified_result.film));
 }
 
 YR_TEST(cpu_path_tracer_adds_direct_area_light_contribution) {
@@ -388,6 +402,19 @@ YR_TEST(cpu_path_tracer_light_samples_increase_shadow_rays) {
 
 YR_TEST(cpu_path_tracer_is_deterministic_with_multiple_light_samples) {
     yr::RenderScene scene = MakeDiffuseFloorScene(7);
+    scene.light_samples = 4;
+
+    const yr::CpuPathTraceResult first = yr::RenderCpuPathTrace(scene);
+    const yr::CpuPathTraceResult second = yr::RenderCpuPathTrace(scene);
+
+    YR_EXPECT_TRUE(FilmsEqual(first.film, second.film));
+    YR_EXPECT_TRUE(CoreStatsEqual(first.stats, second.stats));
+}
+
+YR_TEST(cpu_path_tracer_stratified_sampler_is_deterministic) {
+    yr::RenderScene scene = MakeDiffuseFloorScene(7);
+    scene.sampler = yr::RenderSamplerKind::Stratified;
+    scene.spp = 4;
     scene.light_samples = 4;
 
     const yr::CpuPathTraceResult first = yr::RenderCpuPathTrace(scene);

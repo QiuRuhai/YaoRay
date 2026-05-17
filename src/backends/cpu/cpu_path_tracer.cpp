@@ -1,5 +1,6 @@
 #include <yaoray/backends/cpu/cpu_path_tracer.hpp>
 
+#include <yaoray/backends/cpu/cpu_sampler.hpp>
 #include <yaoray/backends/cpu/cpu_tile_scheduler.hpp>
 #include <yaoray/core/ray.hpp>
 #include <yaoray/render/bvh.hpp>
@@ -20,27 +21,6 @@ constexpr float MinShadowBias = 1.0e-4f;
 constexpr float ShadowBiasScale = 1.0e-5f;
 constexpr float MaxShadowBiasDistanceFraction = 1.0e-2f;
 
-struct Rng {
-    explicit Rng(std::uint64_t seed)
-        : state(seed == 0 ? 0x9E3779B97F4A7C15ull : seed) {}
-
-    std::uint32_t NextU32() {
-        std::uint64_t x = state;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        state = x;
-        return static_cast<std::uint32_t>((x * 0x2545F4914F6CDD1Dull) >> 32);
-    }
-
-    float NextFloat() {
-        constexpr float scale = 1.0f / 16777216.0f;
-        return static_cast<float>(NextU32() >> 8) * scale;
-    }
-
-    std::uint64_t state;
-};
-
 struct AreaLightSample {
     Point3f point;
     Vec3f normal{0.0f, -1.0f, 0.0f};
@@ -48,21 +28,6 @@ struct AreaLightSample {
     float area = 0.0f;
     float pdf_area = 0.0f;
 };
-
-std::uint64_t Mix64(std::uint64_t value) {
-    value += 0x9E3779B97F4A7C15ull;
-    value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9ull;
-    value = (value ^ (value >> 27)) * 0x94D049BB133111EBull;
-    return value ^ (value >> 31);
-}
-
-std::uint64_t SeedFor(const RenderScene& scene, int x, int y, int sample) {
-    std::uint64_t seed = Mix64(scene.seed);
-    seed ^= Mix64(static_cast<std::uint64_t>(x) + 0xA24BAED4963EE407ull);
-    seed ^= Mix64(static_cast<std::uint64_t>(y) + 0x9FB21C651E98DF25ull);
-    seed ^= Mix64(static_cast<std::uint64_t>(sample) + 0xC2B2AE3D27D4EB4Full);
-    return Mix64(seed);
-}
 
 Color3f Multiply(Color3f a, Color3f b) {
     return Color3f{a.x * b.x, a.y * b.y, a.z * b.z};
@@ -102,16 +67,19 @@ bool IsValidMaterialIndex(const RenderScene& scene, int material_index) {
     return material_index >= 0 && static_cast<std::size_t>(material_index) < scene.materials.size();
 }
 
-std::optional<AreaLightSample> SampleAreaLight(const RenderAreaLight& light, Rng& rng) {
+std::optional<AreaLightSample> SampleAreaLight(
+    const RenderAreaLight& light,
+    CpuSampler& sampler,
+    int light_sample_index
+) {
     const float area = light.width * light.height;
     if (area <= 0.0f) {
         return std::nullopt;
     }
 
-    const float u = rng.NextFloat();
-    const float v = rng.NextFloat();
-    const float offset_x = (u - 0.5f) * light.width;
-    const float offset_z = (v - 0.5f) * light.height;
+    const Vec2f uv = sampler.NextLight2D(light_sample_index);
+    const float offset_x = (uv.x - 0.5f) * light.width;
+    const float offset_z = (uv.y - 0.5f) * light.height;
 
     return AreaLightSample{
         light.position + Vec3f{offset_x, 0.0f, offset_z},
@@ -160,9 +128,10 @@ Ray3f MakeCameraRay(const RenderScene& scene, int x, int y, float pixel_u, float
     return Ray3f{scene.camera.origin, direction};
 }
 
-Vec3f SampleCosineHemisphere(Vec3f normal, Rng& rng) {
-    const float u1 = rng.NextFloat();
-    const float u2 = rng.NextFloat();
+Vec3f SampleCosineHemisphere(Vec3f normal, CpuSampler& sampler) {
+    const Vec2f sample = sampler.Next2D();
+    const float u1 = sample.x;
+    const float u2 = sample.y;
     const float radius = std::sqrt(u1);
     const float theta = 2.0f * Pi * u2;
     const float local_x = radius * std::cos(theta);
@@ -180,7 +149,7 @@ Color3f EstimateDirectLight(
     Point3f hit_point,
     Vec3f normal,
     Color3f albedo,
-    Rng& rng,
+    CpuSampler& sampler,
     CpuPathTraceStats& stats
 ) {
     Color3f radiance;
@@ -190,7 +159,7 @@ Color3f EstimateDirectLight(
     for (const RenderAreaLight& light : scene.area_lights) {
         Color3f light_radiance;
         for (int sample_index = 0; sample_index < light_sample_count; ++sample_index) {
-            const std::optional<AreaLightSample> sample = SampleAreaLight(light, rng);
+            const std::optional<AreaLightSample> sample = SampleAreaLight(light, sampler, sample_index);
             if (!sample.has_value()) {
                 continue;
             }
@@ -247,7 +216,7 @@ Color3f EstimateDirectLight(
     return radiance;
 }
 
-Color3f TracePath(const RenderScene& scene, Ray3f ray, Rng& rng, CpuPathTraceStats& stats) {
+Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuPathTraceStats& stats) {
     Color3f radiance;
     Color3f throughput{1.0f, 1.0f, 1.0f};
     const int max_depth = std::max(1, scene.max_depth);
@@ -276,14 +245,14 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, Rng& rng, CpuPathTraceSta
         const Vec3f normal = FaceForward(Normalize(triangle.normal), -ray.direction);
 
         radiance = radiance + Multiply(throughput, material.emission);
-        radiance = radiance + Multiply(throughput, EstimateDirectLight(scene, hit_point, normal, material.albedo, rng, stats));
+        radiance = radiance + Multiply(throughput, EstimateDirectLight(scene, hit_point, normal, material.albedo, sampler, stats));
 
         if (depth + 1 >= max_depth || IsNearBlack(material.albedo)) {
             break;
         }
 
         throughput = Multiply(throughput, material.albedo);
-        const Vec3f bounce_direction = SampleCosineHemisphere(normal, rng);
+        const Vec3f bounce_direction = SampleCosineHemisphere(normal, sampler);
         ray = Ray3f{hit_point + normal * SurfaceBias(hit_point), bounce_direction};
     }
 
@@ -307,11 +276,16 @@ CpuPathTraceResult RenderCpuPathTrace(const RenderScene& scene) {
         for (int y = tile.y0; y < tile.y1; ++y) {
             for (int x = tile.x0; x < tile.x1; ++x) {
                 for (int sample = 0; sample < samples_per_pixel; ++sample) {
-                    Rng rng{SeedFor(scene, x, y, sample)};
-                    const float pixel_u = samples_per_pixel == 1 ? 0.5f : rng.NextFloat();
-                    const float pixel_v = samples_per_pixel == 1 ? 0.5f : rng.NextFloat();
-                    const Ray3f ray = MakeCameraRay(scene, x, y, pixel_u, pixel_v);
-                    result.film.AddSample(x, y, TracePath(scene, ray, rng, stats));
+                    CpuSampler sampler{
+                        scene.sampler,
+                        SeedForPixelSample(scene.seed, x, y, sample),
+                        sample,
+                        samples_per_pixel,
+                        DirectLightSampleCount(scene)
+                    };
+                    const Vec2f pixel_sample = sampler.NextPixel2D();
+                    const Ray3f ray = MakeCameraRay(scene, x, y, pixel_sample.x, pixel_sample.y);
+                    result.film.AddSample(x, y, TracePath(scene, ray, sampler, stats));
                 }
             }
         }
