@@ -55,6 +55,7 @@ target_compile_options(yaoray_assets PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>"
 add_library(yaoray_render STATIC
     src/render/bvh.cpp
     src/render/bsdf.cpp
+    src/render/mis.cpp
     src/render/scene_compiler.cpp
 )
 target_include_directories(yaoray_render PUBLIC include)
@@ -81,6 +82,7 @@ add_executable(yaoray_tests
     tests/scene_tests.cpp
     tests/render_scene_tests.cpp
     tests/bsdf_tests.cpp
+    tests/mis_tests.cpp
     tests/backend_tests.cpp
     tests/cpu_debug_renderer_tests.cpp
     tests/cpu_tile_scheduler_tests.cpp
