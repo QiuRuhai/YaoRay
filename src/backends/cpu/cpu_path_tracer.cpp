@@ -4,6 +4,7 @@
 #include <yaoray/backends/cpu/cpu_tile_scheduler.hpp>
 #include <yaoray/core/ray.hpp>
 #include <yaoray/render/bvh.hpp>
+#include <yaoray/render/bsdf.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -16,7 +17,6 @@
 namespace yr {
 namespace {
 
-constexpr float Pi = 3.14159265358979323846f;
 constexpr float MinShadowBias = 1.0e-4f;
 constexpr float ShadowBiasScale = 1.0e-5f;
 constexpr float MaxShadowBiasDistanceFraction = 1.0e-2f;
@@ -56,10 +56,6 @@ Vec3f FaceForward(Vec3f normal, Vec3f reference) {
     return Dot(normal, reference) < 0.0f ? -normal : normal;
 }
 
-Vec3f Reflect(Vec3f direction, Vec3f normal) {
-    return Normalize(direction - normal * (2.0f * Dot(direction, normal)));
-}
-
 Color3f EnvironmentColor(const RenderScene& scene) {
     if (scene.environment.type == EnvironmentKind::Constant) {
         return scene.environment.radiance * scene.environment.strength;
@@ -92,10 +88,6 @@ std::optional<AreaLightSample> SampleAreaLight(
         area,
         1.0f / area
     };
-}
-
-Color3f EvaluateDiffuseBrdf(Color3f albedo) {
-    return albedo / Pi;
 }
 
 int DirectLightSampleCount(const RenderScene& scene) {
@@ -132,27 +124,12 @@ Ray3f MakeCameraRay(const RenderScene& scene, int x, int y, float pixel_u, float
     return Ray3f{scene.camera.origin, direction};
 }
 
-Vec3f SampleCosineHemisphere(Vec3f normal, CpuSampler& sampler) {
-    const Vec2f sample = sampler.Next2D();
-    const float u1 = sample.x;
-    const float u2 = sample.y;
-    const float radius = std::sqrt(u1);
-    const float theta = 2.0f * Pi * u2;
-    const float local_x = radius * std::cos(theta);
-    const float local_y = radius * std::sin(theta);
-    const float local_z = std::sqrt(std::max(0.0f, 1.0f - u1));
-
-    const Vec3f helper = std::fabs(normal.z) < 0.999f ? Vec3f{0.0f, 0.0f, 1.0f} : Vec3f{1.0f, 0.0f, 0.0f};
-    const Vec3f tangent = Normalize(Cross(helper, normal));
-    const Vec3f bitangent = Cross(normal, tangent);
-    return Normalize(tangent * local_x + bitangent * local_y + normal * local_z);
-}
-
 Color3f EstimateDirectLight(
     const RenderScene& scene,
+    const RenderMaterial& material,
     Point3f hit_point,
     Vec3f normal,
-    Color3f albedo,
+    Vec3f wo,
     CpuSampler& sampler,
     CpuPathTraceStats& stats
 ) {
@@ -209,10 +186,14 @@ Color3f EstimateDirectLight(
                 continue;
             }
 
-            const Color3f brdf = EvaluateDiffuseBrdf(albedo);
+            const Color3f bsdf = EvaluateBsdf(material, wo, wi, normal);
+            if (IsNearBlack(bsdf)) {
+                continue;
+            }
+
             const float geometry = cos_surface * cos_light / distance_squared;
             const float weight = geometry / sample->pdf_area;
-            light_radiance = light_radiance + Multiply(brdf, sample->radiance) * weight;
+            light_radiance = light_radiance + Multiply(bsdf, sample->radiance) * weight;
         }
 
         radiance = radiance + light_radiance * inverse_light_sample_count;
@@ -247,26 +228,25 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
         const RenderMaterial& material = scene.materials[static_cast<std::size_t>(triangle.material_index)];
         const Point3f hit_point = ray.At(hit.t);
         const Vec3f normal = FaceForward(Normalize(triangle.normal), -ray.direction);
+        const Vec3f wo = -ray.direction;
 
         radiance = radiance + Multiply(throughput, material.emission);
 
-        if (material.type == MaterialKind::Diffuse) {
-            radiance = radiance + Multiply(throughput, EstimateDirectLight(scene, hit_point, normal, material.albedo, sampler, stats));
+        if (!IsDeltaBsdf(material)) {
+            radiance = radiance + Multiply(throughput, EstimateDirectLight(scene, material, hit_point, normal, wo, sampler, stats));
         }
 
-        if (depth + 1 >= max_depth || IsNearBlack(material.albedo)) {
+        if (depth + 1 >= max_depth) {
             break;
         }
 
-        throughput = Multiply(throughput, material.albedo);
-        if (material.type == MaterialKind::Mirror) {
-            const Vec3f reflected_direction = Reflect(ray.direction, normal);
-            ray = Ray3f{hit_point + normal * SurfaceBias(hit_point), reflected_direction};
-            continue;
+        const BsdfSample bsdf_sample = SampleBsdf(material, wo, normal, sampler.Next2D());
+        if (!bsdf_sample.valid || IsNearBlack(bsdf_sample.weight)) {
+            break;
         }
 
-        const Vec3f bounce_direction = SampleCosineHemisphere(normal, sampler);
-        ray = Ray3f{hit_point + normal * SurfaceBias(hit_point), bounce_direction};
+        throughput = Multiply(throughput, bsdf_sample.weight);
+        ray = Ray3f{hit_point + normal * SurfaceBias(hit_point), bsdf_sample.wi};
     }
 
     return radiance;
