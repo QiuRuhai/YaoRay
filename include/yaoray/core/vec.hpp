@@ -4,6 +4,15 @@
 
 namespace yr {
 
+struct Vec2f {
+    float x = 0.0f;
+    float y = 0.0f;
+
+    constexpr Vec2f() = default;
+    constexpr Vec2f(float x_value, float y_value)
+        : x(x_value), y(y_value) {}
+};
+
 struct Vec3f {
     float x = 0.0f;
     float y = 0.0f;
