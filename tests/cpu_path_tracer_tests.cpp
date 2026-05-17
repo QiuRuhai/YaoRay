@@ -405,6 +405,27 @@ YR_TEST(cpu_path_tracer_direct_light_uses_diffuse_brdf_weight) {
     YR_EXPECT_TRUE(center.z < 2.0f);
 }
 
+YR_TEST(cpu_path_tracer_direct_light_mis_downweights_large_light_against_diffuse_bsdf) {
+    yr::RenderScene scene = MakeDiffuseFloorScene(136539);
+    scene.max_depth = 1;
+    scene.spp = 1;
+    scene.light_samples = 1;
+    scene.area_lights[0].width = 50.0f;
+    scene.area_lights[0].height = 50.0f;
+    scene.area_lights[0].radiance = yr::Color3f{1.0f, 1.0f, 1.0f};
+
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+    const yr::Color3f center = result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_TRUE(center.x > 0.0f);
+    YR_EXPECT_TRUE(center.y > 0.0f);
+    YR_EXPECT_TRUE(center.z > 0.0f);
+    YR_EXPECT_TRUE(center.x < 0.01f);
+    YR_EXPECT_TRUE(center.y < 0.01f);
+    YR_EXPECT_TRUE(center.z < 0.01f);
+    YR_EXPECT_TRUE(result.stats.shadow_rays > 0);
+}
+
 YR_TEST(cpu_path_tracer_area_light_sampling_changes_with_seed) {
     yr::RenderScene first_scene = MakeDiffuseFloorScene(11);
     yr::RenderScene second_scene = MakeDiffuseFloorScene(12);

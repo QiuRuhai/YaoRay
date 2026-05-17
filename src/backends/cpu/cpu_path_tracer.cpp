@@ -5,6 +5,8 @@
 #include <yaoray/core/ray.hpp>
 #include <yaoray/render/bvh.hpp>
 #include <yaoray/render/bsdf.hpp>
+#include <yaoray/render/light_sampling.hpp>
+#include <yaoray/render/mis.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -20,14 +22,6 @@ namespace {
 constexpr float MinShadowBias = 1.0e-4f;
 constexpr float ShadowBiasScale = 1.0e-5f;
 constexpr float MaxShadowBiasDistanceFraction = 1.0e-2f;
-
-struct AreaLightSample {
-    Point3f point;
-    Vec3f normal{0.0f, -1.0f, 0.0f};
-    Color3f radiance;
-    float area = 0.0f;
-    float pdf_area = 0.0f;
-};
 
 Color3f Multiply(Color3f a, Color3f b) {
     return Color3f{a.x * b.x, a.y * b.y, a.z * b.z};
@@ -65,29 +59,6 @@ Color3f EnvironmentColor(const RenderScene& scene) {
 
 bool IsValidMaterialIndex(const RenderScene& scene, int material_index) {
     return material_index >= 0 && static_cast<std::size_t>(material_index) < scene.materials.size();
-}
-
-std::optional<AreaLightSample> SampleAreaLight(
-    const RenderAreaLight& light,
-    CpuSampler& sampler,
-    int light_sample_index
-) {
-    const float area = light.width * light.height;
-    if (area <= 0.0f) {
-        return std::nullopt;
-    }
-
-    const Vec2f uv = sampler.NextLight2D(light_sample_index);
-    const float offset_x = (uv.x - 0.5f) * light.width;
-    const float offset_z = (uv.y - 0.5f) * light.height;
-
-    return AreaLightSample{
-        light.position + Vec3f{offset_x, 0.0f, offset_z},
-        Vec3f{0.0f, -1.0f, 0.0f},
-        light.radiance,
-        area,
-        1.0f / area
-    };
 }
 
 int DirectLightSampleCount(const RenderScene& scene) {
@@ -140,7 +111,7 @@ Color3f EstimateDirectLight(
     for (const RenderAreaLight& light : scene.area_lights) {
         Color3f light_radiance;
         for (int sample_index = 0; sample_index < light_sample_count; ++sample_index) {
-            const std::optional<AreaLightSample> sample = SampleAreaLight(light, sampler, sample_index);
+            const std::optional<AreaLightSample> sample = SampleAreaLight(light, sampler.NextLight2D(sample_index));
             if (!sample.has_value()) {
                 continue;
             }
@@ -171,8 +142,8 @@ Color3f EstimateDirectLight(
                 continue;
             }
 
-            const float cos_light = std::max(0.0f, Dot(sample->normal, -wi));
-            if (cos_light <= 0.0f) {
+            const float pdf_light = PdfAreaLightSampleSolidAngle(light, hit_point, sample->point);
+            if (pdf_light <= 0.0f) {
                 continue;
             }
 
@@ -191,9 +162,9 @@ Color3f EstimateDirectLight(
                 continue;
             }
 
-            const float geometry = cos_surface * cos_light / distance_squared;
-            const float weight = geometry / sample->pdf_area;
-            light_radiance = light_radiance + Multiply(bsdf, sample->radiance) * weight;
+            const float pdf_bsdf = PdfBsdf(material, wo, wi, normal);
+            const float mis_weight = PowerHeuristic(light_sample_count, pdf_light, 1, pdf_bsdf);
+            light_radiance = light_radiance + Multiply(bsdf, sample->radiance) * (cos_surface * mis_weight / pdf_light);
         }
 
         radiance = radiance + light_radiance * inverse_light_sample_count;
