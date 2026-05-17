@@ -23,6 +23,14 @@ constexpr float MinShadowBias = 1.0e-4f;
 constexpr float ShadowBiasScale = 1.0e-5f;
 constexpr float MaxShadowBiasDistanceFraction = 1.0e-2f;
 
+struct PreviousBounce {
+    bool valid = false;
+    bool delta = false;
+    Point3f origin;
+    float bsdf_pdf = 0.0f;
+    int light_sample_count = 1;
+};
+
 Color3f Multiply(Color3f a, Color3f b) {
     return Color3f{a.x * b.x, a.y * b.y, a.z * b.z};
 }
@@ -55,6 +63,15 @@ Color3f EnvironmentColor(const RenderScene& scene) {
         return scene.environment.radiance * scene.environment.strength;
     }
     return Color3f{};
+}
+
+float EmissiveHitMisWeight(const RenderScene& scene, const PreviousBounce& previous, Point3f hit_point) {
+    if (!previous.valid || previous.delta) {
+        return 1.0f;
+    }
+
+    const float pdf_light = PdfAreaLightsForPointSolidAngle(scene, previous.origin, hit_point);
+    return PowerHeuristic(1, previous.bsdf_pdf, previous.light_sample_count, pdf_light);
 }
 
 bool IsValidMaterialIndex(const RenderScene& scene, int material_index) {
@@ -175,6 +192,7 @@ Color3f EstimateDirectLight(
 Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuPathTraceStats& stats) {
     Color3f radiance;
     Color3f throughput{1.0f, 1.0f, 1.0f};
+    PreviousBounce previous_bounce;
     const int max_depth = std::max(1, scene.max_depth);
 
     for (int depth = 0; depth < max_depth; ++depth) {
@@ -201,7 +219,10 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
         const Vec3f normal = FaceForward(Normalize(triangle.normal), -ray.direction);
         const Vec3f wo = -ray.direction;
 
-        radiance = radiance + Multiply(throughput, material.emission);
+        if (!IsNearBlack(material.emission)) {
+            const float emission_weight = EmissiveHitMisWeight(scene, previous_bounce, hit_point);
+            radiance = radiance + Multiply(throughput, material.emission) * emission_weight;
+        }
 
         if (!IsDeltaBsdf(material)) {
             radiance = radiance + Multiply(throughput, EstimateDirectLight(scene, material, hit_point, normal, wo, sampler, stats));
@@ -216,6 +237,13 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
             break;
         }
 
+        previous_bounce = PreviousBounce{
+            true,
+            bsdf_sample.specular,
+            hit_point,
+            bsdf_sample.pdf,
+            DirectLightSampleCount(scene)
+        };
         throughput = Multiply(throughput, bsdf_sample.weight);
         ray = Ray3f{hit_point + normal * SurfaceBias(hit_point), bsdf_sample.wi};
     }

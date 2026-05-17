@@ -139,6 +139,124 @@ yr::RenderScene MakeBlockedDiffuseFloorScene() {
     return scene;
 }
 
+yr::RenderScene MakeDiffuseToExplicitEmitterScene(bool matching_explicit_area_light) {
+    yr::RenderScene scene;
+    scene.width = 1;
+    scene.height = 1;
+    scene.spp = 32;
+    scene.max_depth = 2;
+    scene.seed = 21;
+    scene.light_samples = 128;
+    scene.camera.origin = yr::Point3f{0.0f, 0.5f, 4.0f};
+    scene.camera.forward = yr::Normalize(yr::Vec3f{0.0f, -0.5f, -4.0f});
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Vec3f{0.0f, 1.0f, 0.0f};
+    scene.camera.fov_y_radians = 0.7f;
+    scene.environment.type = yr::EnvironmentKind::Constant;
+    scene.environment.radiance = yr::Color3f{};
+    scene.environment.strength = 1.0f;
+    scene.materials.push_back(yr::RenderMaterial{
+        yr::MaterialKind::Diffuse,
+        yr::Color3f{1.0f, 1.0f, 1.0f},
+        yr::Color3f{}
+    });
+    scene.materials.push_back(yr::RenderMaterial{
+        yr::MaterialKind::Diffuse,
+        yr::Color3f{},
+        yr::Color3f{1.0f, 1.0f, 1.0f}
+    });
+
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-3.0f, 0.0f, -3.0f},
+        yr::Point3f{0.0f, 0.0f, 3.0f},
+        yr::Point3f{3.0f, 0.0f, -3.0f},
+        yr::Vec3f{0.0f, 1.0f, 0.0f},
+        0
+    });
+
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-25.0f, 2.0f, -25.0f},
+        yr::Point3f{25.0f, 2.0f, -25.0f},
+        yr::Point3f{25.0f, 2.0f, 25.0f},
+        yr::Vec3f{0.0f, -1.0f, 0.0f},
+        1
+    });
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-25.0f, 2.0f, -25.0f},
+        yr::Point3f{25.0f, 2.0f, 25.0f},
+        yr::Point3f{-25.0f, 2.0f, 25.0f},
+        yr::Vec3f{0.0f, -1.0f, 0.0f},
+        1
+    });
+
+    scene.area_lights.push_back(yr::RenderAreaLight{
+        matching_explicit_area_light ? yr::Point3f{0.0f, 2.0f, 0.0f} : yr::Point3f{0.0f, -2.0f, 0.0f},
+        50.0f,
+        50.0f,
+        yr::Color3f{}
+    });
+
+    RebuildBvh(scene);
+    return scene;
+}
+
+yr::RenderScene MakeMirrorToExplicitEmitterScene() {
+    yr::RenderScene scene;
+    scene.width = 1;
+    scene.height = 1;
+    scene.spp = 1;
+    scene.max_depth = 2;
+    scene.seed = 33;
+    scene.light_samples = 128;
+    scene.camera.origin = yr::Point3f{0.0f, 1.0f, 4.0f};
+    scene.camera.forward = yr::Normalize(yr::Vec3f{0.0f, -1.0f, -4.0f});
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Vec3f{0.0f, 1.0f, 0.0f};
+    scene.camera.fov_y_radians = 0.7f;
+    scene.environment.type = yr::EnvironmentKind::Constant;
+    scene.environment.radiance = yr::Color3f{};
+    scene.environment.strength = 1.0f;
+    scene.materials.push_back(yr::RenderMaterial{
+        yr::MaterialKind::Mirror,
+        yr::Color3f{1.0f, 1.0f, 1.0f},
+        yr::Color3f{}
+    });
+    scene.materials.push_back(yr::RenderMaterial{
+        yr::MaterialKind::Diffuse,
+        yr::Color3f{},
+        yr::Color3f{1.0f, 1.0f, 1.0f}
+    });
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-4.0f, 0.0f, -4.0f},
+        yr::Point3f{0.0f, 0.0f, 4.0f},
+        yr::Point3f{4.0f, 0.0f, -4.0f},
+        yr::Vec3f{0.0f, 1.0f, 0.0f},
+        0
+    });
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-25.0f, 2.0f, -33.0f},
+        yr::Point3f{25.0f, 2.0f, -33.0f},
+        yr::Point3f{25.0f, 2.0f, 17.0f},
+        yr::Vec3f{0.0f, -1.0f, 0.0f},
+        1
+    });
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-25.0f, 2.0f, -33.0f},
+        yr::Point3f{25.0f, 2.0f, 17.0f},
+        yr::Point3f{-25.0f, 2.0f, 17.0f},
+        yr::Vec3f{0.0f, -1.0f, 0.0f},
+        1
+    });
+    scene.area_lights.push_back(yr::RenderAreaLight{
+        yr::Point3f{0.0f, 2.0f, -8.0f},
+        50.0f,
+        50.0f,
+        yr::Color3f{}
+    });
+    RebuildBvh(scene);
+    return scene;
+}
+
 yr::RenderScene MakeIndirectBounceScene(int max_depth) {
     yr::RenderScene scene = MakeBaseScene(3, 3);
     scene.max_depth = max_depth;
@@ -384,6 +502,29 @@ YR_TEST(cpu_path_tracer_respects_max_depth_for_indirect_environment_bounce) {
     const yr::CpuPathTraceResult depth_two = yr::RenderCpuPathTrace(MakeIndirectBounceScene(2));
 
     YR_EXPECT_TRUE(Luminance(depth_two.film.LinearPixel(1, 1)) > Luminance(depth_one.film.LinearPixel(1, 1)));
+}
+
+YR_TEST(cpu_path_tracer_mis_weights_bsdf_sampled_explicit_emitter_hits) {
+    const yr::CpuPathTraceResult without_matching_explicit_light =
+        yr::RenderCpuPathTrace(MakeDiffuseToExplicitEmitterScene(false));
+    const yr::CpuPathTraceResult with_matching_explicit_light =
+        yr::RenderCpuPathTrace(MakeDiffuseToExplicitEmitterScene(true));
+
+    const float without_luminance = Luminance(without_matching_explicit_light.film.LinearPixel(0, 0));
+    const float with_luminance = Luminance(with_matching_explicit_light.film.LinearPixel(0, 0));
+
+    YR_EXPECT_TRUE(without_luminance > 0.0f);
+    YR_EXPECT_TRUE(with_luminance > 0.0f);
+    YR_EXPECT_TRUE(with_luminance < without_luminance);
+}
+
+YR_TEST(cpu_path_tracer_delta_bsdf_sampled_emissive_hits_keep_full_weight) {
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(MakeMirrorToExplicitEmitterScene());
+    const yr::Color3f pixel = result.film.LinearPixel(0, 0);
+
+    YR_EXPECT_NEAR(pixel.x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(pixel.y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(pixel.z, 1.0, 1e-6);
 }
 
 YR_TEST(cpu_path_tracer_direct_light_uses_diffuse_brdf_weight) {
