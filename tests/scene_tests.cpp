@@ -119,6 +119,8 @@ YR_TEST(scene_enum_names_are_stable) {
     YR_EXPECT_EQ(yr::RenderSamplerName(yr::RenderSamplerKind::Stratified), std::string_view{"stratified"});
     YR_EXPECT_EQ(yr::MaterialKindName(yr::MaterialKind::Diffuse), std::string_view{"diffuse"});
     YR_EXPECT_EQ(yr::MaterialKindName(yr::MaterialKind::Mirror), std::string_view{"mirror"});
+    YR_EXPECT_EQ(yr::MaterialKindName(yr::MaterialKind::Metal), std::string_view{"metal"});
+    YR_EXPECT_EQ(yr::MaterialKindName(yr::MaterialKind::Plastic), std::string_view{"plastic"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::None), std::string_view{"none"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::Reinhard), std::string_view{"reinhard"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::Aces), std::string_view{"aces"});
@@ -138,6 +140,8 @@ YR_TEST(scene_enum_parsers_accept_stable_names) {
     YR_EXPECT_EQ(yr::ParseRenderSamplerName("stratified").value(), yr::RenderSamplerKind::Stratified);
     YR_EXPECT_EQ(yr::ParseMaterialKindName("diffuse").value(), yr::MaterialKind::Diffuse);
     YR_EXPECT_EQ(yr::ParseMaterialKindName("mirror").value(), yr::MaterialKind::Mirror);
+    YR_EXPECT_EQ(yr::ParseMaterialKindName("metal").value(), yr::MaterialKind::Metal);
+    YR_EXPECT_EQ(yr::ParseMaterialKindName("plastic").value(), yr::MaterialKind::Plastic);
     YR_EXPECT_EQ(yr::ParseToneMapperName("none").value(), yr::ToneMapperKind::None);
     YR_EXPECT_EQ(yr::ParseToneMapperName("reinhard").value(), yr::ToneMapperKind::Reinhard);
     YR_EXPECT_EQ(yr::ParseToneMapperName("aces").value(), yr::ToneMapperKind::Aces);
@@ -153,6 +157,7 @@ YR_TEST(scene_enum_parsers_reject_unknown_names) {
     YR_EXPECT_TRUE(!yr::ParseRenderIntegratorName("bidirectional").has_value());
     YR_EXPECT_TRUE(!yr::ParseRenderSamplerName("sobol").has_value());
     YR_EXPECT_TRUE(!yr::ParseMaterialKindName("glass").has_value());
+    YR_EXPECT_TRUE(!yr::ParseMaterialKindName("rough_metal").has_value());
     YR_EXPECT_TRUE(!yr::ParseToneMapperName("filmic").has_value());
     YR_EXPECT_TRUE(!yr::ParseCameraKindName("orthographic").has_value());
     YR_EXPECT_TRUE(!yr::ParseLightKindName("point").has_value());
@@ -924,6 +929,71 @@ albedo = [0.95, 0.95, 0.95]
     YR_EXPECT_EQ(result.scene.value().materials[0].type, yr::MaterialKind::Mirror);
 }
 
+YR_TEST(scene_parser_loads_metal_material_type_and_roughness) {
+    const std::filesystem::path path = WriteTempScene(
+        "metal_material_type.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "brushed_gold"
+type = "metal"
+albedo = [1.0, 0.72, 0.32]
+roughness = 0.35
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::MaterialDescription& material = result.scene.value().materials[0];
+    YR_EXPECT_EQ(material.type, yr::MaterialKind::Metal);
+    YR_EXPECT_NEAR(material.roughness, 0.35, 1e-6);
+    YR_EXPECT_NEAR(material.specular, 0.04, 1e-6);
+}
+
+YR_TEST(scene_parser_loads_plastic_material_type_roughness_and_specular) {
+    const std::filesystem::path path = WriteTempScene(
+        "plastic_material_type.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "red_plastic"
+type = "plastic"
+albedo = [0.8, 0.05, 0.03]
+roughness = 0.25
+specular = 0.08
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::MaterialDescription& material = result.scene.value().materials[0];
+    YR_EXPECT_EQ(material.type, yr::MaterialKind::Plastic);
+    YR_EXPECT_NEAR(material.roughness, 0.25, 1e-6);
+    YR_EXPECT_NEAR(material.specular, 0.08, 1e-6);
+}
+
+YR_TEST(scene_parser_applies_plastic_roughness_default) {
+    const std::filesystem::path path = WriteTempScene(
+        "plastic_default_roughness.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "default_plastic"
+type = "plastic"
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::MaterialDescription& material = result.scene.value().materials[0];
+    YR_EXPECT_EQ(material.type, yr::MaterialKind::Plastic);
+    YR_EXPECT_NEAR(material.roughness, 0.25, 1e-6);
+    YR_EXPECT_NEAR(material.specular, 0.04, 1e-6);
+}
+
 YR_TEST(scene_parser_applies_material_defaults) {
     const std::filesystem::path path = WriteTempScene(
         "material_defaults.toml",
@@ -953,6 +1023,8 @@ asset = "triangle"
     YR_EXPECT_NEAR(material.emission.x, 0.0, 1e-6);
     YR_EXPECT_NEAR(material.emission.y, 0.0, 1e-6);
     YR_EXPECT_NEAR(material.emission.z, 0.0, 1e-6);
+    YR_EXPECT_NEAR(material.roughness, 0.0, 1e-6);
+    YR_EXPECT_NEAR(material.specular, 0.04, 1e-6);
 }
 
 YR_TEST(scene_parser_rejects_bad_material_entries) {
@@ -961,7 +1033,7 @@ YR_TEST(scene_parser_rejects_bad_material_entries) {
         ValidSceneWith(R"toml(
 [[materials]]
 name = "red"
-roughness = 0.5
+unknown_scalar = 0.5
 
 [[materials]]
 name = "red"
@@ -979,7 +1051,7 @@ emission = "bright"
 
     YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(!result.scene.has_value());
-    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.roughness", "unknown field"));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.unknown_scalar", "unknown field"));
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.name", "duplicate material name"));
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.name", "must not be empty"));
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.name", "missing required field"));
@@ -1019,6 +1091,78 @@ type = 7
     YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(!result.scene.has_value());
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.type", "must be a string"));
+}
+
+YR_TEST(scene_parser_rejects_non_numeric_material_roughness) {
+    const std::filesystem::path path = WriteTempScene(
+        "non_numeric_material_roughness.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "bad_roughness"
+type = "metal"
+roughness = "smooth"
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.roughness", "must be a finite float in [0, 1]"));
+}
+
+YR_TEST(scene_parser_rejects_out_of_range_material_roughness) {
+    const std::filesystem::path path = WriteTempScene(
+        "out_of_range_material_roughness.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "bad_roughness"
+type = "metal"
+roughness = 1.25
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.roughness", "must be in [0, 1]"));
+}
+
+YR_TEST(scene_parser_rejects_non_numeric_material_specular) {
+    const std::filesystem::path path = WriteTempScene(
+        "non_numeric_material_specular.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "bad_specular"
+type = "plastic"
+specular = "bright"
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.specular", "must be a finite float in [0, 1]"));
+}
+
+YR_TEST(scene_parser_rejects_out_of_range_material_specular) {
+    const std::filesystem::path path = WriteTempScene(
+        "out_of_range_material_specular.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "bad_specular"
+type = "plastic"
+specular = -0.1
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.specular", "must be in [0, 1]"));
 }
 
 YR_TEST(scene_parser_rejects_empty_and_non_string_instance_material) {

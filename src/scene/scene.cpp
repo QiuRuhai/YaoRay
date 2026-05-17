@@ -123,6 +123,10 @@ std::string_view MaterialKindName(MaterialKind kind) {
             return "diffuse";
         case MaterialKind::Mirror:
             return "mirror";
+        case MaterialKind::Metal:
+            return "metal";
+        case MaterialKind::Plastic:
+            return "plastic";
     }
     return "unknown";
 }
@@ -133,6 +137,12 @@ std::optional<MaterialKind> ParseMaterialKindName(std::string_view name) {
     }
     if (name == "mirror") {
         return MaterialKind::Mirror;
+    }
+    if (name == "metal") {
+        return MaterialKind::Metal;
+    }
+    if (name == "plastic") {
+        return MaterialKind::Plastic;
     }
     return std::nullopt;
 }

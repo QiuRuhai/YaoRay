@@ -192,6 +192,29 @@ std::optional<float> ReadFloat(
     return std::nullopt;
 }
 
+std::optional<float> ReadUnitFloat(
+    const toml::table& table,
+    std::string_view key,
+    const std::filesystem::path& file,
+    std::string field,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const toml::node* node = table.get(key);
+    if (node == nullptr) {
+        return std::nullopt;
+    }
+    const std::optional<float> value = ReadNodeFloat(*node);
+    if (!value) {
+        diagnostics.push_back(Error(file, field, "must be a finite float in [0, 1]"));
+        return std::nullopt;
+    }
+    if (*value < 0.0f || *value > 1.0f) {
+        diagnostics.push_back(Error(file, std::move(field), "must be in [0, 1]"));
+        return std::nullopt;
+    }
+    return value;
+}
+
 std::optional<Vec3f> ReadVec3(
     const toml::table& table,
     std::string_view key,
@@ -601,7 +624,13 @@ void ParseMaterials(
             diagnostics.push_back(Error(file, "materials", "material entry must be a table"));
             continue;
         }
-        CheckUnknownFields(*table, "materials", {"name", "type", "albedo", "emission"}, file, diagnostics);
+        CheckUnknownFields(
+            *table,
+            "materials",
+            {"name", "type", "albedo", "emission", "roughness", "specular"},
+            file,
+            diagnostics
+        );
 
         MaterialDescription material;
         if (const auto name = ReadValue<std::string>(*table, "name")) {
@@ -628,6 +657,16 @@ void ParseMaterials(
         }
         if (const auto emission = ReadVec3(*table, "emission", file, "materials.emission", diagnostics)) {
             material.emission = *emission;
+        }
+        const bool roughness_authored = table->contains("roughness");
+        if (const auto roughness = ReadUnitFloat(*table, "roughness", file, "materials.roughness", diagnostics)) {
+            material.roughness = *roughness;
+        }
+        if (const auto specular = ReadUnitFloat(*table, "specular", file, "materials.specular", diagnostics)) {
+            material.specular = *specular;
+        }
+        if (!roughness_authored && material.type == MaterialKind::Plastic) {
+            material.roughness = 0.25f;
         }
 
         if (!material.name.empty() && !names.insert(material.name).second) {

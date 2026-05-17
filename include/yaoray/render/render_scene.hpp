@@ -29,6 +29,8 @@ struct RenderMaterial {
     MaterialKind type = MaterialKind::Diffuse;
     Color3f albedo{0.8f, 0.8f, 0.8f};
     Color3f emission;
+    float roughness = 0.0f;
+    float specular = 0.04f;
 };
 
 struct RenderTriangle {

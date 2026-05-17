@@ -74,6 +74,8 @@ YR_TEST(render_scene_defaults_are_backend_friendly) {
 
     const yr::RenderMaterial material;
     YR_EXPECT_EQ(material.type, yr::MaterialKind::Diffuse);
+    YR_EXPECT_NEAR(material.roughness, 0.0, 1e-6);
+    YR_EXPECT_NEAR(material.specular, 0.04, 1e-6);
 }
 
 YR_TEST(scene_compiler_copies_render_settings) {
@@ -215,6 +217,28 @@ YR_TEST(scene_compiler_copies_material_type) {
     YR_EXPECT_NEAR(compiled.materials[0].albedo.x, 0.95, 1e-6);
 }
 
+YR_TEST(scene_compiler_copies_material_scalars) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.materials.push_back(yr::MaterialDescription{
+        "plastic",
+        yr::MaterialKind::Plastic,
+        yr::Color3f{0.8f, 0.05f, 0.03f},
+        yr::Color3f{},
+        0.25f,
+        0.08f
+    });
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderScene& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
+    YR_EXPECT_EQ(compiled.materials[0].type, yr::MaterialKind::Plastic);
+    YR_EXPECT_NEAR(compiled.materials[0].roughness, 0.25, 1e-6);
+    YR_EXPECT_NEAR(compiled.materials[0].specular, 0.08, 1e-6);
+}
+
 YR_TEST(scene_compiler_binds_builtin_instance_to_named_material) {
     yr::SceneDescription scene = MakeBaseScene();
     scene.assets.push_back(yr::AssetDescription{"triangle", "builtin:triangle"});
@@ -294,6 +318,8 @@ YR_TEST(scene_compiler_preserves_default_material_for_unbound_instances) {
     YR_EXPECT_NEAR(compiled.materials[1].albedo.x, 0.8, 1e-6);
     YR_EXPECT_NEAR(compiled.materials[1].albedo.y, 0.8, 1e-6);
     YR_EXPECT_NEAR(compiled.materials[1].albedo.z, 0.8, 1e-6);
+    YR_EXPECT_NEAR(compiled.materials[1].roughness, 0.0, 1e-6);
+    YR_EXPECT_NEAR(compiled.materials[1].specular, 0.04, 1e-6);
 }
 
 YR_TEST(scene_compiler_rejects_unknown_material_reference) {
