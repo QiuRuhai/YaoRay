@@ -101,6 +101,7 @@ YR_TEST(scene_defaults_match_schema) {
     YR_EXPECT_EQ(scene.render.max_depth, 5);
     YR_EXPECT_EQ(scene.render.seed, std::uint64_t{0});
     YR_EXPECT_EQ(scene.render.threads, 0);
+    YR_EXPECT_EQ(scene.render.light_samples, 1);
     YR_EXPECT_EQ(scene.film.tone_mapper, yr::ToneMapperKind::Aces);
     YR_EXPECT_NEAR(scene.film.exposure, 0.0, 1e-6);
     YR_EXPECT_EQ(scene.environment.type, yr::EnvironmentKind::None);
@@ -401,6 +402,68 @@ fov_y = 45
     YR_EXPECT_EQ(result.scene.value().render.threads, 0);
 }
 
+YR_TEST(scene_parser_loads_render_light_samples) {
+    const std::filesystem::path path = WriteTempScene(
+        "render_light_samples.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+light_samples = 4
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().render.light_samples, 4);
+}
+
+YR_TEST(scene_parser_rejects_zero_render_light_samples) {
+    const std::filesystem::path path = WriteTempScene(
+        "zero_render_light_samples.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+light_samples = 0
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.light_samples", "must be positive"));
+}
+
 YR_TEST(scene_parser_rejects_negative_render_threads) {
     const std::filesystem::path path = WriteTempScene(
         "negative_render_threads.toml",
@@ -430,6 +493,37 @@ fov_y = 45
     YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(!result.scene.has_value());
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.threads", "must be non-negative"));
+}
+
+YR_TEST(scene_parser_rejects_negative_render_light_samples) {
+    const std::filesystem::path path = WriteTempScene(
+        "negative_render_light_samples.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+light_samples = -1
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.light_samples", "must be positive"));
 }
 
 YR_TEST(scene_parser_rejects_float_render_threads) {
@@ -492,6 +586,68 @@ fov_y = 45
     YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(!result.scene.has_value());
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.threads", "must be an integer"));
+}
+
+YR_TEST(scene_parser_rejects_float_render_light_samples) {
+    const std::filesystem::path path = WriteTempScene(
+        "float_render_light_samples.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+light_samples = 1.5
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.light_samples", "must be an integer"));
+}
+
+YR_TEST(scene_parser_rejects_string_render_light_samples) {
+    const std::filesystem::path path = WriteTempScene(
+        "string_render_light_samples.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+light_samples = "many"
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.light_samples", "must be an integer"));
 }
 
 YR_TEST(scene_parser_rejects_unknown_render_integrator) {

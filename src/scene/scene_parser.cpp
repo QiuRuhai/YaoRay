@@ -352,7 +352,7 @@ void ParseRender(
     CheckUnknownFields(
         table,
         "render",
-        {"backend", "integrator", "width", "height", "spp", "max_depth", "seed", "threads"},
+        {"backend", "integrator", "width", "height", "spp", "max_depth", "seed", "threads", "light_samples"},
         file,
         diagnostics
     );
@@ -404,6 +404,9 @@ void ParseRender(
             scene.render.threads = *threads;
         }
     }
+    if (const auto light_samples = ReadInt(table, "light_samples", file, "render.light_samples", diagnostics)) {
+        scene.render.light_samples = *light_samples;
+    }
 
     if (scene.render.width <= 0) {
         diagnostics.push_back(Error(file, "render.width", "must be positive"));
@@ -416,6 +419,9 @@ void ParseRender(
     }
     if (scene.render.max_depth <= 0) {
         diagnostics.push_back(Error(file, "render.max_depth", "must be positive"));
+    }
+    if (scene.render.light_samples <= 0) {
+        diagnostics.push_back(Error(file, "render.light_samples", "must be positive"));
     }
 }
 

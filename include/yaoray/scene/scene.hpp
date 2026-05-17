@@ -51,6 +51,7 @@ struct RenderSettings {
     int max_depth = 5;
     std::uint64_t seed = 0;
     int threads = 0;
+    int light_samples = 1;
 };
 
 struct FilmSettings {

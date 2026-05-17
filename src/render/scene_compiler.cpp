@@ -267,6 +267,7 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
     compiled.max_depth = scene.render.max_depth;
     compiled.seed = scene.render.seed;
     compiled.threads = scene.render.threads;
+    compiled.light_samples = scene.render.light_samples;
 
     if (!scene.camera.has_value()) {
         result.diagnostics.push_back(Error(scene, "camera", "missing camera"));
