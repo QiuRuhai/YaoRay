@@ -56,6 +56,10 @@ Vec3f FaceForward(Vec3f normal, Vec3f reference) {
     return Dot(normal, reference) < 0.0f ? -normal : normal;
 }
 
+Vec3f Reflect(Vec3f direction, Vec3f normal) {
+    return Normalize(direction - normal * (2.0f * Dot(direction, normal)));
+}
+
 Color3f EnvironmentColor(const RenderScene& scene) {
     if (scene.environment.type == EnvironmentKind::Constant) {
         return scene.environment.radiance * scene.environment.strength;
@@ -245,13 +249,22 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
         const Vec3f normal = FaceForward(Normalize(triangle.normal), -ray.direction);
 
         radiance = radiance + Multiply(throughput, material.emission);
-        radiance = radiance + Multiply(throughput, EstimateDirectLight(scene, hit_point, normal, material.albedo, sampler, stats));
+
+        if (material.type == MaterialKind::Diffuse) {
+            radiance = radiance + Multiply(throughput, EstimateDirectLight(scene, hit_point, normal, material.albedo, sampler, stats));
+        }
 
         if (depth + 1 >= max_depth || IsNearBlack(material.albedo)) {
             break;
         }
 
         throughput = Multiply(throughput, material.albedo);
+        if (material.type == MaterialKind::Mirror) {
+            const Vec3f reflected_direction = Reflect(ray.direction, normal);
+            ray = Ray3f{hit_point + normal * SurfaceBias(hit_point), reflected_direction};
+            continue;
+        }
+
         const Vec3f bounce_direction = SampleCosineHemisphere(normal, sampler);
         ray = Ray3f{hit_point + normal * SurfaceBias(hit_point), bounce_direction};
     }

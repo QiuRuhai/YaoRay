@@ -61,6 +61,19 @@ yr::RenderScene MakeEmissiveTriangleScene() {
     return scene;
 }
 
+yr::RenderScene MakeMirrorTriangleScene() {
+    yr::RenderScene scene = MakeBaseScene(3, 3);
+    scene.max_depth = 2;
+    scene.environment.radiance = yr::Color3f{0.2f, 0.4f, 0.6f};
+    scene.environment.strength = 1.0f;
+    scene.materials[0] = yr::RenderMaterial{
+        yr::MaterialKind::Mirror,
+        yr::Color3f{0.5f, 0.5f, 0.5f},
+        yr::Color3f{}
+    };
+    return scene;
+}
+
 yr::RenderScene MakeStochasticEdgeScene(std::uint64_t seed) {
     yr::RenderScene scene = MakeBaseScene(3, 3);
     scene.spp = 8;
@@ -197,6 +210,7 @@ yr::RenderScene MakeThreadedDeterminismScene() {
     scene.light_samples = 4;
     scene.environment.radiance = yr::Color3f{0.05f, 0.06f, 0.07f};
     scene.materials[0].albedo = yr::Color3f{0.7f, 0.6f, 0.5f};
+    scene.materials[0].type = yr::MaterialKind::Mirror;
     scene.area_lights.push_back(yr::RenderAreaLight{
         yr::Point3f{0.0f, 0.5f, 2.0f},
         1.0f,
@@ -257,6 +271,51 @@ YR_TEST(cpu_path_tracer_uses_precompiled_bvh_stats) {
 
 YR_TEST(cpu_path_tracer_sees_emissive_surfaces) {
     const yr::RenderScene scene = MakeEmissiveTriangleScene();
+
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+    const yr::Color3f center = result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_NEAR(center.x, 0.25, 1e-6);
+    YR_EXPECT_NEAR(center.y, 0.5, 1e-6);
+    YR_EXPECT_NEAR(center.z, 0.75, 1e-6);
+}
+
+YR_TEST(cpu_path_tracer_mirror_reflects_environment) {
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(MakeMirrorTriangleScene());
+    const yr::Color3f center = result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_NEAR(center.x, 0.1, 1e-6);
+    YR_EXPECT_NEAR(center.y, 0.2, 1e-6);
+    YR_EXPECT_NEAR(center.z, 0.3, 1e-6);
+}
+
+YR_TEST(cpu_path_tracer_mirror_skips_diffuse_direct_lighting) {
+    yr::RenderScene scene = MakeDiffuseFloorScene(7);
+    scene.max_depth = 1;
+    scene.materials[0] = yr::RenderMaterial{
+        yr::MaterialKind::Mirror,
+        yr::Color3f{1.0f, 1.0f, 1.0f},
+        yr::Color3f{}
+    };
+
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+    const yr::Color3f center = result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_EQ(result.stats.shadow_rays, std::uint64_t{0});
+    YR_EXPECT_NEAR(center.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(center.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(center.z, 0.0, 1e-6);
+}
+
+YR_TEST(cpu_path_tracer_black_mirror_stops_after_emission) {
+    yr::RenderScene scene = MakeBaseScene(3, 3);
+    scene.max_depth = 2;
+    scene.environment.radiance = yr::Color3f{1.0f, 1.0f, 1.0f};
+    scene.materials[0] = yr::RenderMaterial{
+        yr::MaterialKind::Mirror,
+        yr::Color3f{},
+        yr::Color3f{0.25f, 0.5f, 0.75f}
+    };
 
     const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
     const yr::Color3f center = result.film.LinearPixel(1, 1);
