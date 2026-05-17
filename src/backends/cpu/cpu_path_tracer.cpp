@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace yr {
@@ -38,6 +39,14 @@ struct Rng {
     }
 
     std::uint64_t state;
+};
+
+struct AreaLightSample {
+    Point3f point;
+    Vec3f normal{0.0f, -1.0f, 0.0f};
+    Color3f radiance;
+    float area = 0.0f;
+    float pdf_area = 0.0f;
 };
 
 std::uint64_t Mix64(std::uint64_t value) {
@@ -93,6 +102,30 @@ bool IsValidMaterialIndex(const RenderScene& scene, int material_index) {
     return material_index >= 0 && static_cast<std::size_t>(material_index) < scene.materials.size();
 }
 
+std::optional<AreaLightSample> SampleAreaLight(const RenderAreaLight& light, Rng& rng) {
+    const float area = light.width * light.height;
+    if (area <= 0.0f) {
+        return std::nullopt;
+    }
+
+    const float u = rng.NextFloat();
+    const float v = rng.NextFloat();
+    const float offset_x = (u - 0.5f) * light.width;
+    const float offset_z = (v - 0.5f) * light.height;
+
+    return AreaLightSample{
+        light.position + Vec3f{offset_x, 0.0f, offset_z},
+        Vec3f{0.0f, -1.0f, 0.0f},
+        light.radiance,
+        area,
+        1.0f / area
+    };
+}
+
+Color3f EvaluateDiffuseBrdf(Color3f albedo) {
+    return albedo / Pi;
+}
+
 void AccumulateTraceStats(CpuPathTraceStats& stats, const BvhTraceStats& trace_stats) {
     stats.bvh_node_tests += trace_stats.node_tests;
     stats.triangle_tests += trace_stats.triangle_tests;
@@ -143,29 +176,30 @@ Color3f EstimateDirectLight(
     Point3f hit_point,
     Vec3f normal,
     Color3f albedo,
+    Rng& rng,
     CpuPathTraceStats& stats
 ) {
     Color3f radiance;
     for (const RenderAreaLight& light : scene.area_lights) {
-        const float area = light.width * light.height;
-        if (area <= 0.0f) {
+        const std::optional<AreaLightSample> sample = SampleAreaLight(light, rng);
+        if (!sample.has_value()) {
             continue;
         }
 
-        const Vec3f to_light = light.position - hit_point;
+        const Vec3f to_light = sample->point - hit_point;
         const float distance_squared = LengthSquared(to_light);
         if (distance_squared <= MinShadowBias * MinShadowBias) {
             continue;
         }
 
         const float distance = std::sqrt(distance_squared);
-        const float shadow_bias = ShadowBias(hit_point, light.position, distance);
+        const float shadow_bias = ShadowBias(hit_point, sample->point, distance);
         if (distance <= shadow_bias) {
             continue;
         }
 
         const Point3f shadow_origin = hit_point + normal * shadow_bias;
-        const Vec3f shadow_to_light = light.position - shadow_origin;
+        const Vec3f shadow_to_light = sample->point - shadow_origin;
         const float shadow_distance_squared = LengthSquared(shadow_to_light);
         if (shadow_distance_squared <= MinShadowBias * MinShadowBias) {
             continue;
@@ -173,8 +207,13 @@ Color3f EstimateDirectLight(
 
         const float shadow_distance = std::sqrt(shadow_distance_squared);
         const Vec3f wi = shadow_to_light / shadow_distance;
-        const float n_dot_l = std::max(0.0f, Dot(normal, wi));
-        if (n_dot_l <= 0.0f) {
+        const float cos_surface = std::max(0.0f, Dot(normal, wi));
+        if (cos_surface <= 0.0f) {
+            continue;
+        }
+
+        const float cos_light = std::max(0.0f, Dot(sample->normal, -wi));
+        if (cos_light <= 0.0f) {
             continue;
         }
 
@@ -188,8 +227,10 @@ Color3f EstimateDirectLight(
             continue;
         }
 
-        const float scale = area * n_dot_l / distance_squared;
-        radiance = radiance + Multiply(albedo, light.radiance) * scale;
+        const Color3f brdf = EvaluateDiffuseBrdf(albedo);
+        const float geometry = cos_surface * cos_light / distance_squared;
+        const float weight = geometry / sample->pdf_area;
+        radiance = radiance + Multiply(brdf, sample->radiance) * weight;
     }
     return radiance;
 }
@@ -223,7 +264,7 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, Rng& rng, CpuPathTraceSta
         const Vec3f normal = FaceForward(Normalize(triangle.normal), -ray.direction);
 
         radiance = radiance + Multiply(throughput, material.emission);
-        radiance = radiance + Multiply(throughput, EstimateDirectLight(scene, hit_point, normal, material.albedo, stats));
+        radiance = radiance + Multiply(throughput, EstimateDirectLight(scene, hit_point, normal, material.albedo, rng, stats));
 
         if (depth + 1 >= max_depth || IsNearBlack(material.albedo)) {
             break;

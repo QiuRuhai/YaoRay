@@ -80,6 +80,52 @@ yr::RenderScene MakeStochasticEdgeScene(std::uint64_t seed) {
     return scene;
 }
 
+yr::RenderScene MakeDiffuseFloorScene(std::uint64_t seed = 7) {
+    yr::RenderScene scene;
+    scene.width = 3;
+    scene.height = 3;
+    scene.spp = 1;
+    scene.max_depth = 1;
+    scene.seed = seed;
+    scene.camera.origin = yr::Point3f{0.0f, 0.5f, 4.0f};
+    scene.camera.forward = yr::Normalize(yr::Vec3f{0.0f, -0.5f, -4.0f});
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Vec3f{0.0f, 1.0f, 0.0f};
+    scene.camera.fov_y_radians = 0.7f;
+    scene.environment.type = yr::EnvironmentKind::Constant;
+    scene.environment.radiance = yr::Color3f{};
+    scene.environment.strength = 1.0f;
+    scene.materials.push_back(yr::RenderMaterial{yr::Color3f{1.0f, 1.0f, 1.0f}, yr::Color3f{}});
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-3.0f, 0.0f, -3.0f},
+        yr::Point3f{0.0f, 0.0f, 3.0f},
+        yr::Point3f{3.0f, 0.0f, -3.0f},
+        yr::Vec3f{0.0f, 1.0f, 0.0f},
+        0
+    });
+    scene.area_lights.push_back(yr::RenderAreaLight{
+        yr::Point3f{0.0f, 2.0f, 0.0f},
+        2.0f,
+        2.0f,
+        yr::Color3f{4.0f, 4.0f, 4.0f}
+    });
+    RebuildBvh(scene);
+    return scene;
+}
+
+yr::RenderScene MakeBlockedDiffuseFloorScene() {
+    yr::RenderScene scene = MakeDiffuseFloorScene();
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-3.0f, 1.0f, -3.0f},
+        yr::Point3f{0.0f, 1.0f, 3.0f},
+        yr::Point3f{3.0f, 1.0f, -3.0f},
+        yr::Vec3f{0.0f, -1.0f, 0.0f},
+        0
+    });
+    RebuildBvh(scene);
+    return scene;
+}
+
 yr::RenderScene MakeIndirectBounceScene(int max_depth) {
     yr::RenderScene scene = MakeBaseScene(3, 3);
     scene.max_depth = max_depth;
@@ -92,32 +138,11 @@ yr::RenderScene MakeIndirectBounceScene(int max_depth) {
 }
 
 yr::RenderScene MakeDirectLightScene() {
-    yr::RenderScene scene = MakeBaseScene(3, 3);
-    scene.environment.radiance = yr::Color3f{};
-    scene.materials[0].albedo = yr::Color3f{1.0f, 0.5f, 0.25f};
-    scene.area_lights.push_back(yr::RenderAreaLight{
-        yr::Point3f{0.0f, 0.0f, 2.0f},
-        1.0f,
-        1.0f,
-        yr::Color3f{4.0f, 4.0f, 4.0f}
-    });
-    RebuildBvh(scene);
-    return scene;
+    return MakeDiffuseFloorScene();
 }
 
 yr::RenderScene MakeShadowedDirectLightScene() {
-    yr::RenderScene scene = MakeDirectLightScene();
-    scene.area_lights[0].position = yr::Point3f{0.0f, 2.0f, 2.0f};
-    scene.area_lights[0].radiance = yr::Color3f{8.0f, 8.0f, 8.0f};
-    scene.triangles.push_back(yr::RenderTriangle{
-        yr::Point3f{-0.75f, 1.0f, 0.25f},
-        yr::Point3f{0.75f, 1.0f, 0.25f},
-        yr::Point3f{0.0f, 1.0f, 1.75f},
-        yr::Vec3f{0.0f, -1.0f, 0.0f},
-        0
-    });
-    RebuildBvh(scene);
-    return scene;
+    return MakeBlockedDiffuseFloorScene();
 }
 
 bool AnyPixelDifferent(const yr::Film& first, const yr::Film& second) {
@@ -267,15 +292,14 @@ YR_TEST(cpu_path_tracer_adds_direct_area_light_contribution) {
 }
 
 YR_TEST(cpu_path_tracer_counts_shadow_occlusion_and_dims_direct_light) {
-    yr::RenderScene unblocked = MakeDirectLightScene();
-    unblocked.area_lights[0].position = yr::Point3f{0.0f, 2.0f, 2.0f};
-    unblocked.area_lights[0].radiance = yr::Color3f{8.0f, 8.0f, 8.0f};
-    RebuildBvh(unblocked);
+    const yr::RenderScene unblocked = MakeDiffuseFloorScene();
     const yr::RenderScene blocked = MakeShadowedDirectLightScene();
 
     const yr::CpuPathTraceResult unblocked_result = yr::RenderCpuPathTrace(unblocked);
     const yr::CpuPathTraceResult blocked_result = yr::RenderCpuPathTrace(blocked);
 
+    YR_EXPECT_TRUE(unblocked_result.stats.shadow_rays > 0);
+    YR_EXPECT_EQ(unblocked_result.stats.occluded_shadow_rays, std::uint64_t{0});
     YR_EXPECT_TRUE(blocked_result.stats.shadow_rays > 0);
     YR_EXPECT_TRUE(blocked_result.stats.occluded_shadow_rays > 0);
     YR_EXPECT_TRUE(Luminance(blocked_result.film.LinearPixel(1, 1)) < Luminance(unblocked_result.film.LinearPixel(1, 1)));
@@ -286,6 +310,64 @@ YR_TEST(cpu_path_tracer_respects_max_depth_for_indirect_environment_bounce) {
     const yr::CpuPathTraceResult depth_two = yr::RenderCpuPathTrace(MakeIndirectBounceScene(2));
 
     YR_EXPECT_TRUE(Luminance(depth_two.film.LinearPixel(1, 1)) > Luminance(depth_one.film.LinearPixel(1, 1)));
+}
+
+YR_TEST(cpu_path_tracer_direct_light_uses_diffuse_brdf_weight) {
+    yr::RenderScene scene = MakeDiffuseFloorScene(7);
+    scene.spp = 1;
+    scene.area_lights[0].width = 2.0f;
+    scene.area_lights[0].height = 2.0f;
+    scene.area_lights[0].radiance = yr::Color3f{4.0f, 4.0f, 4.0f};
+    RebuildBvh(scene);
+
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+    const yr::Color3f center = result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_TRUE(center.x > 0.0f);
+    YR_EXPECT_TRUE(center.y > 0.0f);
+    YR_EXPECT_TRUE(center.z > 0.0f);
+    YR_EXPECT_TRUE(center.x < 2.0f);
+    YR_EXPECT_TRUE(center.y < 2.0f);
+    YR_EXPECT_TRUE(center.z < 2.0f);
+}
+
+YR_TEST(cpu_path_tracer_area_light_sampling_changes_with_seed) {
+    yr::RenderScene first_scene = MakeDiffuseFloorScene(11);
+    yr::RenderScene second_scene = MakeDiffuseFloorScene(12);
+    first_scene.spp = 1;
+    second_scene.spp = 1;
+
+    const yr::CpuPathTraceResult first = yr::RenderCpuPathTrace(first_scene);
+    const yr::CpuPathTraceResult second = yr::RenderCpuPathTrace(second_scene);
+
+    YR_EXPECT_TRUE(!ColorEqual(first.film.LinearPixel(1, 1), second.film.LinearPixel(1, 1)));
+}
+
+YR_TEST(cpu_path_tracer_ignores_invalid_area_light_size) {
+    yr::RenderScene scene = MakeDiffuseFloorScene();
+    scene.area_lights[0].width = 0.0f;
+    scene.area_lights[0].height = 2.0f;
+
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+    const yr::Color3f center = result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_EQ(result.stats.shadow_rays, std::uint64_t{0});
+    YR_EXPECT_NEAR(center.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(center.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(center.z, 0.0, 1e-6);
+}
+
+YR_TEST(cpu_path_tracer_ignores_area_light_behind_surface) {
+    yr::RenderScene scene = MakeDiffuseFloorScene();
+    scene.area_lights[0].position = yr::Point3f{0.0f, -2.0f, 0.0f};
+
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+    const yr::Color3f center = result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_EQ(result.stats.shadow_rays, std::uint64_t{0});
+    YR_EXPECT_NEAR(center.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(center.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(center.z, 0.0, 1e-6);
 }
 
 YR_TEST(cpu_path_tracer_reports_single_thread_when_requested) {
