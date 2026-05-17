@@ -40,7 +40,7 @@ yr::RenderScene MakeBaseScene(int width, int height) {
     scene.environment.type = yr::EnvironmentKind::Constant;
     scene.environment.radiance = yr::Color3f{0.02f, 0.03f, 0.04f};
     scene.environment.strength = 1.0f;
-    scene.materials.push_back(yr::RenderMaterial{yr::Color3f{0.8f, 0.8f, 0.8f}, yr::Color3f{}});
+    scene.materials.push_back(yr::RenderMaterial{yr::MaterialKind::Diffuse, yr::Color3f{0.8f, 0.8f, 0.8f}, yr::Color3f{}});
     scene.triangles.push_back(yr::RenderTriangle{
         yr::Point3f{-1.5f, -1.0f, 0.0f},
         yr::Point3f{1.5f, -1.0f, 0.0f},
@@ -95,7 +95,7 @@ yr::RenderScene MakeDiffuseFloorScene(std::uint64_t seed = 7) {
     scene.environment.type = yr::EnvironmentKind::Constant;
     scene.environment.radiance = yr::Color3f{};
     scene.environment.strength = 1.0f;
-    scene.materials.push_back(yr::RenderMaterial{yr::Color3f{1.0f, 1.0f, 1.0f}, yr::Color3f{}});
+    scene.materials.push_back(yr::RenderMaterial{yr::MaterialKind::Diffuse, yr::Color3f{1.0f, 1.0f, 1.0f}, yr::Color3f{}});
     scene.triangles.push_back(yr::RenderTriangle{
         yr::Point3f{-3.0f, 0.0f, -3.0f},
         yr::Point3f{0.0f, 0.0f, 3.0f},

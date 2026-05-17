@@ -25,7 +25,11 @@ yr::RenderScene MakeBackendTriangleScene(int width = 4, int height = 3) {
     scene.environment.type = yr::EnvironmentKind::Constant;
     scene.environment.radiance = yr::Color3f{0.05f, 0.10f, 0.15f};
     scene.environment.strength = 1.0f;
-    scene.materials.push_back(yr::RenderMaterial{yr::Color3f{1.0f, 0.2f, 0.1f}, yr::Color3f{}});
+    scene.materials.push_back(yr::RenderMaterial{
+        yr::MaterialKind::Diffuse,
+        yr::Color3f{1.0f, 0.2f, 0.1f},
+        yr::Color3f{}
+    });
     scene.triangles.push_back(yr::RenderTriangle{
         yr::Point3f{-0.5f, -0.5f, 0.0f},
         yr::Point3f{0.5f, -0.5f, 0.0f},

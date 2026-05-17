@@ -117,6 +117,26 @@ std::optional<LightKind> ParseLightKindName(std::string_view name) {
     return std::nullopt;
 }
 
+std::string_view MaterialKindName(MaterialKind kind) {
+    switch (kind) {
+        case MaterialKind::Diffuse:
+            return "diffuse";
+        case MaterialKind::Mirror:
+            return "mirror";
+    }
+    return "unknown";
+}
+
+std::optional<MaterialKind> ParseMaterialKindName(std::string_view name) {
+    if (name == "diffuse") {
+        return MaterialKind::Diffuse;
+    }
+    if (name == "mirror") {
+        return MaterialKind::Mirror;
+    }
+    return std::nullopt;
+}
+
 std::string_view EnvironmentKindName(EnvironmentKind kind) {
     switch (kind) {
         case EnvironmentKind::None:

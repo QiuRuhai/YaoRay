@@ -117,6 +117,8 @@ YR_TEST(scene_enum_names_are_stable) {
     YR_EXPECT_EQ(yr::RenderIntegratorName(yr::RenderIntegratorKind::Path), std::string_view{"path"});
     YR_EXPECT_EQ(yr::RenderSamplerName(yr::RenderSamplerKind::Independent), std::string_view{"independent"});
     YR_EXPECT_EQ(yr::RenderSamplerName(yr::RenderSamplerKind::Stratified), std::string_view{"stratified"});
+    YR_EXPECT_EQ(yr::MaterialKindName(yr::MaterialKind::Diffuse), std::string_view{"diffuse"});
+    YR_EXPECT_EQ(yr::MaterialKindName(yr::MaterialKind::Mirror), std::string_view{"mirror"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::None), std::string_view{"none"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::Reinhard), std::string_view{"reinhard"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::Aces), std::string_view{"aces"});
@@ -134,6 +136,8 @@ YR_TEST(scene_enum_parsers_accept_stable_names) {
     YR_EXPECT_EQ(yr::ParseRenderIntegratorName("path").value(), yr::RenderIntegratorKind::Path);
     YR_EXPECT_EQ(yr::ParseRenderSamplerName("independent").value(), yr::RenderSamplerKind::Independent);
     YR_EXPECT_EQ(yr::ParseRenderSamplerName("stratified").value(), yr::RenderSamplerKind::Stratified);
+    YR_EXPECT_EQ(yr::ParseMaterialKindName("diffuse").value(), yr::MaterialKind::Diffuse);
+    YR_EXPECT_EQ(yr::ParseMaterialKindName("mirror").value(), yr::MaterialKind::Mirror);
     YR_EXPECT_EQ(yr::ParseToneMapperName("none").value(), yr::ToneMapperKind::None);
     YR_EXPECT_EQ(yr::ParseToneMapperName("reinhard").value(), yr::ToneMapperKind::Reinhard);
     YR_EXPECT_EQ(yr::ParseToneMapperName("aces").value(), yr::ToneMapperKind::Aces);
@@ -148,6 +152,7 @@ YR_TEST(scene_enum_parsers_reject_unknown_names) {
     YR_EXPECT_TRUE(!yr::ParseRenderBackendName("metal").has_value());
     YR_EXPECT_TRUE(!yr::ParseRenderIntegratorName("bidirectional").has_value());
     YR_EXPECT_TRUE(!yr::ParseRenderSamplerName("sobol").has_value());
+    YR_EXPECT_TRUE(!yr::ParseMaterialKindName("glass").has_value());
     YR_EXPECT_TRUE(!yr::ParseToneMapperName("filmic").has_value());
     YR_EXPECT_TRUE(!yr::ParseCameraKindName("orthographic").has_value());
     YR_EXPECT_TRUE(!yr::ParseLightKindName("point").has_value());
@@ -158,6 +163,7 @@ YR_TEST(scene_enum_names_return_unknown_for_invalid_values) {
     YR_EXPECT_EQ(yr::RenderBackendName(static_cast<yr::RenderBackendKind>(999)), std::string_view{"unknown"});
     YR_EXPECT_EQ(yr::RenderIntegratorName(static_cast<yr::RenderIntegratorKind>(999)), std::string_view{"unknown"});
     YR_EXPECT_EQ(yr::RenderSamplerName(static_cast<yr::RenderSamplerKind>(999)), std::string_view{"unknown"});
+    YR_EXPECT_EQ(yr::MaterialKindName(static_cast<yr::MaterialKind>(999)), std::string_view{"unknown"});
     YR_EXPECT_EQ(yr::ToneMapperName(static_cast<yr::ToneMapperKind>(999)), std::string_view{"unknown"});
     YR_EXPECT_EQ(yr::CameraKindName(static_cast<yr::CameraKind>(999)), std::string_view{"unknown"});
     YR_EXPECT_EQ(yr::LightKindName(static_cast<yr::LightKind>(999)), std::string_view{"unknown"});
@@ -880,6 +886,44 @@ material = "warm_white"
     YR_EXPECT_EQ(scene.instances[0].material, std::string{"warm_white"});
 }
 
+YR_TEST(scene_parser_loads_diffuse_material_type) {
+    const std::filesystem::path path = WriteTempScene(
+        "diffuse_material_type.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "matte"
+type = "diffuse"
+albedo = [0.7, 0.6, 0.5]
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().materials.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().materials[0].type, yr::MaterialKind::Diffuse);
+}
+
+YR_TEST(scene_parser_loads_mirror_material_type) {
+    const std::filesystem::path path = WriteTempScene(
+        "mirror_material_type.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "mirror"
+type = "mirror"
+albedo = [0.95, 0.95, 0.95]
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().materials.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().materials[0].type, yr::MaterialKind::Mirror);
+}
+
 YR_TEST(scene_parser_applies_material_defaults) {
     const std::filesystem::path path = WriteTempScene(
         "material_defaults.toml",
@@ -902,6 +946,7 @@ asset = "triangle"
     YR_EXPECT_TRUE(result.scene.has_value());
     const yr::MaterialDescription& material = result.scene.value().materials[0];
     YR_EXPECT_EQ(material.name, std::string{"defaulted"});
+    YR_EXPECT_EQ(material.type, yr::MaterialKind::Diffuse);
     YR_EXPECT_NEAR(material.albedo.x, 0.8, 1e-6);
     YR_EXPECT_NEAR(material.albedo.y, 0.8, 1e-6);
     YR_EXPECT_NEAR(material.albedo.z, 0.8, 1e-6);
@@ -940,6 +985,40 @@ emission = "bright"
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.name", "missing required field"));
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.albedo", "expected three numeric values"));
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.emission", "expected three numeric values"));
+}
+
+YR_TEST(scene_parser_rejects_unknown_material_type) {
+    const std::filesystem::path path = WriteTempScene(
+        "unknown_material_type.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "glass_for_later"
+type = "glass"
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.type", "unknown material type"));
+}
+
+YR_TEST(scene_parser_rejects_non_string_material_type) {
+    const std::filesystem::path path = WriteTempScene(
+        "non_string_material_type.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "bad_type"
+type = 7
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.type", "must be a string"));
 }
 
 YR_TEST(scene_parser_rejects_empty_and_non_string_instance_material) {

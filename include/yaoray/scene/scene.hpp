@@ -41,6 +41,11 @@ enum class LightKind {
     Area,
 };
 
+enum class MaterialKind {
+    Diffuse,
+    Mirror,
+};
+
 enum class EnvironmentKind {
     None,
     Constant,
@@ -98,6 +103,7 @@ struct TransformDescription {
 
 struct MaterialDescription {
     std::string name;
+    MaterialKind type = MaterialKind::Diffuse;
     Color3f albedo{0.8f, 0.8f, 0.8f};
     Color3f emission;
 };
@@ -153,6 +159,8 @@ std::optional<CameraKind> ParseCameraKindName(std::string_view name);
 
 std::string_view LightKindName(LightKind kind);
 std::optional<LightKind> ParseLightKindName(std::string_view name);
+std::string_view MaterialKindName(MaterialKind kind);
+std::optional<MaterialKind> ParseMaterialKindName(std::string_view name);
 
 std::string_view EnvironmentKindName(EnvironmentKind kind);
 std::optional<EnvironmentKind> ParseEnvironmentKindName(std::string_view name);

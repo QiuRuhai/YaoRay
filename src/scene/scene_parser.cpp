@@ -601,7 +601,7 @@ void ParseMaterials(
             diagnostics.push_back(Error(file, "materials", "material entry must be a table"));
             continue;
         }
-        CheckUnknownFields(*table, "materials", {"name", "albedo", "emission"}, file, diagnostics);
+        CheckUnknownFields(*table, "materials", {"name", "type", "albedo", "emission"}, file, diagnostics);
 
         MaterialDescription material;
         if (const auto name = ReadValue<std::string>(*table, "name")) {
@@ -616,6 +616,13 @@ void ParseMaterials(
             diagnostics.push_back(Error(file, "materials.name", "missing required field"));
         }
 
+        if (const auto type = ReadString(*table, "type", file, "materials.type", diagnostics)) {
+            if (const auto parsed = ParseMaterialKindName(*type)) {
+                material.type = *parsed;
+            } else {
+                diagnostics.push_back(Error(file, "materials.type", "unknown material type"));
+            }
+        }
         if (const auto albedo = ReadVec3(*table, "albedo", file, "materials.albedo", diagnostics)) {
             material.albedo = *albedo;
         }

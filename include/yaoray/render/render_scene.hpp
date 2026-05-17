@@ -26,6 +26,7 @@ struct RenderEnvironment {
 };
 
 struct RenderMaterial {
+    MaterialKind type = MaterialKind::Diffuse;
     Color3f albedo{0.8f, 0.8f, 0.8f};
     Color3f emission;
 };

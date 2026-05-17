@@ -30,7 +30,7 @@ yr::RenderScene MakeDebugTriangleScene(int width = 5, int height = 5) {
     scene.environment.type = yr::EnvironmentKind::Constant;
     scene.environment.radiance = yr::Color3f{0.05f, 0.10f, 0.15f};
     scene.environment.strength = 1.0f;
-    scene.materials.push_back(yr::RenderMaterial{yr::Color3f{1.0f, 0.2f, 0.1f}, yr::Color3f{}});
+    scene.materials.push_back(yr::RenderMaterial{yr::MaterialKind::Diffuse, yr::Color3f{1.0f, 0.2f, 0.1f}, yr::Color3f{}});
     scene.triangles.push_back(yr::RenderTriangle{
         yr::Point3f{-0.5f, -0.5f, 0.0f},
         yr::Point3f{0.5f, -0.5f, 0.0f},
@@ -216,8 +216,8 @@ YR_TEST(cpu_debug_renderer_does_not_treat_visible_light_panel_as_shadow_occluder
     scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
     scene.camera.up = yr::Vec3f{0.0f, 0.0f, 1.0f};
     scene.camera.fov_y_radians = 0.7f;
-    scene.materials.push_back(yr::RenderMaterial{yr::Color3f{1.0f, 1.0f, 1.0f}, yr::Color3f{}});
-    scene.materials.push_back(yr::RenderMaterial{yr::Color3f{}, yr::Color3f{1.0f, 1.0f, 1.0f}});
+    scene.materials.push_back(yr::RenderMaterial{yr::MaterialKind::Diffuse, yr::Color3f{1.0f, 1.0f, 1.0f}, yr::Color3f{}});
+    scene.materials.push_back(yr::RenderMaterial{yr::MaterialKind::Diffuse, yr::Color3f{}, yr::Color3f{1.0f, 1.0f, 1.0f}});
 
     scene.triangles.push_back(yr::RenderTriangle{
         yr::Point3f{999'000.0f, 0.0f, 999'000.0f},

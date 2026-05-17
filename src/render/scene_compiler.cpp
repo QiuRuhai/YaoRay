@@ -138,7 +138,7 @@ std::unordered_map<std::string, int> BuildMaterialMap(const SceneDescription& sc
     std::unordered_map<std::string, int> materials;
     for (const MaterialDescription& material : scene.materials) {
         const int material_index = static_cast<int>(compiled.materials.size());
-        compiled.materials.push_back(RenderMaterial{material.albedo, material.emission});
+        compiled.materials.push_back(RenderMaterial{material.type, material.albedo, material.emission});
         materials.emplace(material.name, material_index);
     }
     return materials;
