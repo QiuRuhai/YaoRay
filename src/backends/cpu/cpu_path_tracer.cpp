@@ -22,6 +22,9 @@ namespace {
 constexpr float MinShadowBias = 1.0e-4f;
 constexpr float ShadowBiasScale = 1.0e-5f;
 constexpr float MaxShadowBiasDistanceFraction = 1.0e-2f;
+constexpr int RussianRouletteStartDepth = 3;
+constexpr float RussianRouletteMinSurvival = 0.05f;
+constexpr float RussianRouletteMaxSurvival = 0.95f;
 
 struct PreviousBounce {
     bool valid = false;
@@ -37,6 +40,10 @@ Color3f Multiply(Color3f a, Color3f b) {
 
 bool IsNearBlack(Color3f color) {
     return color.x <= 0.0f && color.y <= 0.0f && color.z <= 0.0f;
+}
+
+float MaxComponent(Color3f color) {
+    return std::max(color.x, std::max(color.y, color.z));
 }
 
 float MaxAbsComponent(Point3f point) {
@@ -80,6 +87,24 @@ bool IsValidMaterialIndex(const RenderScene& scene, int material_index) {
 
 int DirectLightSampleCount(const RenderScene& scene) {
     return std::max(1, scene.light_samples);
+}
+
+bool SurviveRussianRoulette(int depth, Color3f& throughput, CpuSampler& sampler) {
+    if (depth < RussianRouletteStartDepth) {
+        return true;
+    }
+
+    const float survival = std::clamp(
+        MaxComponent(throughput),
+        RussianRouletteMinSurvival,
+        RussianRouletteMaxSurvival
+    );
+    if (sampler.Next1D() >= survival) {
+        return false;
+    }
+
+    throughput = throughput / survival;
+    return true;
 }
 
 void AccumulateTraceStats(CpuPathTraceStats& stats, const BvhTraceStats& trace_stats) {
@@ -237,6 +262,11 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
             break;
         }
 
+        throughput = Multiply(throughput, bsdf_sample.weight);
+        if (!SurviveRussianRoulette(depth, throughput, sampler)) {
+            break;
+        }
+
         previous_bounce = PreviousBounce{
             true,
             bsdf_sample.specular,
@@ -244,7 +274,6 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
             bsdf_sample.pdf,
             DirectLightSampleCount(scene)
         };
-        throughput = Multiply(throughput, bsdf_sample.weight);
         ray = Ray3f{hit_point + normal * SurfaceBias(hit_point), bsdf_sample.wi};
     }
 

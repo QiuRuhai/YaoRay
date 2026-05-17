@@ -257,6 +257,60 @@ yr::RenderScene MakeMirrorToExplicitEmitterScene() {
     return scene;
 }
 
+yr::RenderScene MakeMirrorHallScene(int max_depth, std::uint64_t seed = 101) {
+    yr::RenderScene scene;
+    scene.width = 1;
+    scene.height = 1;
+    scene.spp = 128;
+    scene.max_depth = max_depth;
+    scene.seed = seed;
+    scene.camera.origin = yr::Point3f{0.0f, 0.0f, 0.0f};
+    scene.camera.forward = yr::Vec3f{0.0f, 0.0f, 1.0f};
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Vec3f{0.0f, 1.0f, 0.0f};
+    scene.camera.fov_y_radians = 0.01f;
+    scene.environment.type = yr::EnvironmentKind::Constant;
+    scene.environment.radiance = yr::Color3f{};
+    scene.environment.strength = 1.0f;
+    scene.materials.push_back(yr::RenderMaterial{
+        yr::MaterialKind::Mirror,
+        yr::Color3f{0.2f, 0.2f, 0.2f},
+        yr::Color3f{}
+    });
+
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-10.0f, -10.0f, 1.0f},
+        yr::Point3f{10.0f, -10.0f, 1.0f},
+        yr::Point3f{10.0f, 10.0f, 1.0f},
+        yr::Vec3f{0.0f, 0.0f, -1.0f},
+        0
+    });
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-10.0f, -10.0f, 1.0f},
+        yr::Point3f{10.0f, 10.0f, 1.0f},
+        yr::Point3f{-10.0f, 10.0f, 1.0f},
+        yr::Vec3f{0.0f, 0.0f, -1.0f},
+        0
+    });
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-10.0f, -10.0f, -1.0f},
+        yr::Point3f{10.0f, -10.0f, -1.0f},
+        yr::Point3f{10.0f, 10.0f, -1.0f},
+        yr::Vec3f{0.0f, 0.0f, 1.0f},
+        0
+    });
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-10.0f, -10.0f, -1.0f},
+        yr::Point3f{10.0f, 10.0f, -1.0f},
+        yr::Point3f{-10.0f, 10.0f, -1.0f},
+        yr::Vec3f{0.0f, 0.0f, 1.0f},
+        0
+    });
+
+    RebuildBvh(scene);
+    return scene;
+}
+
 yr::RenderScene MakeIndirectBounceScene(int max_depth) {
     yr::RenderScene scene = MakeBaseScene(3, 3);
     scene.max_depth = max_depth;
@@ -525,6 +579,36 @@ YR_TEST(cpu_path_tracer_delta_bsdf_sampled_emissive_hits_keep_full_weight) {
     YR_EXPECT_NEAR(pixel.x, 1.0, 1e-6);
     YR_EXPECT_NEAR(pixel.y, 1.0, 1e-6);
     YR_EXPECT_NEAR(pixel.z, 1.0, 1e-6);
+}
+
+YR_TEST(cpu_path_tracer_russian_roulette_does_not_start_before_fixed_depth) {
+    const yr::RenderScene scene = MakeMirrorHallScene(4);
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+
+    YR_EXPECT_EQ(result.stats.rays_traced, static_cast<std::uint64_t>(scene.spp * scene.max_depth));
+    YR_EXPECT_EQ(result.stats.hits, result.stats.rays_traced);
+    YR_EXPECT_EQ(result.stats.misses, std::uint64_t{0});
+}
+
+YR_TEST(cpu_path_tracer_russian_roulette_terminates_low_throughput_high_depth_paths) {
+    const yr::RenderScene scene = MakeMirrorHallScene(12);
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+    const std::uint64_t no_roulette_rays = static_cast<std::uint64_t>(scene.spp * scene.max_depth);
+    const std::uint64_t minimum_pre_roulette_rays = static_cast<std::uint64_t>(scene.spp * 4);
+
+    YR_EXPECT_TRUE(result.stats.rays_traced >= minimum_pre_roulette_rays);
+    YR_EXPECT_TRUE(result.stats.rays_traced < no_roulette_rays);
+    YR_EXPECT_EQ(result.stats.misses, std::uint64_t{0});
+}
+
+YR_TEST(cpu_path_tracer_russian_roulette_is_deterministic_for_same_seed) {
+    const yr::RenderScene scene = MakeMirrorHallScene(12, 202);
+
+    const yr::CpuPathTraceResult first = yr::RenderCpuPathTrace(scene);
+    const yr::CpuPathTraceResult second = yr::RenderCpuPathTrace(scene);
+
+    YR_EXPECT_TRUE(FilmsEqual(first.film, second.film));
+    YR_EXPECT_TRUE(CoreStatsEqual(first.stats, second.stats));
 }
 
 YR_TEST(cpu_path_tracer_direct_light_uses_diffuse_brdf_weight) {
