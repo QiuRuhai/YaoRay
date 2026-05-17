@@ -48,6 +48,7 @@ struct RenderAreaLight {
 struct RenderScene {
     RenderBackendKind backend = RenderBackendKind::Cpu;
     RenderIntegratorKind integrator = RenderIntegratorKind::DebugDirect;
+    RenderSamplerKind sampler = RenderSamplerKind::Independent;
     int width = 0;
     int height = 0;
     int spp = 1;

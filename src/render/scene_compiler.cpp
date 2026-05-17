@@ -261,6 +261,7 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
     RenderScene compiled;
     compiled.backend = scene.render.backend;
     compiled.integrator = scene.render.integrator;
+    compiled.sampler = scene.render.sampler;
     compiled.width = scene.render.width;
     compiled.height = scene.render.height;
     compiled.spp = scene.render.spp;

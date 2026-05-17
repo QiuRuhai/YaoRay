@@ -18,6 +18,7 @@ yr::SceneDescription MakeBaseScene() {
     scene.source_path = "tests/fixtures/scene/generated.toml";
     scene.render.backend = yr::RenderBackendKind::Cuda;
     scene.render.integrator = yr::RenderIntegratorKind::Path;
+    scene.render.sampler = yr::RenderSamplerKind::Stratified;
     scene.render.width = 320;
     scene.render.height = 180;
     scene.render.spp = 4;
@@ -56,6 +57,7 @@ YR_TEST(render_scene_defaults_are_backend_friendly) {
 
     YR_EXPECT_EQ(scene.backend, yr::RenderBackendKind::Cpu);
     YR_EXPECT_EQ(scene.integrator, yr::RenderIntegratorKind::DebugDirect);
+    YR_EXPECT_EQ(scene.sampler, yr::RenderSamplerKind::Independent);
     YR_EXPECT_EQ(scene.width, 0);
     YR_EXPECT_EQ(scene.height, 0);
     YR_EXPECT_EQ(scene.spp, 1);
@@ -80,6 +82,7 @@ YR_TEST(scene_compiler_copies_render_settings) {
     const yr::RenderScene& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.backend, yr::RenderBackendKind::Cuda);
     YR_EXPECT_EQ(compiled.integrator, yr::RenderIntegratorKind::Path);
+    YR_EXPECT_EQ(compiled.sampler, yr::RenderSamplerKind::Stratified);
     YR_EXPECT_EQ(compiled.width, 320);
     YR_EXPECT_EQ(compiled.height, 180);
     YR_EXPECT_EQ(compiled.spp, 4);

@@ -352,7 +352,7 @@ void ParseRender(
     CheckUnknownFields(
         table,
         "render",
-        {"backend", "integrator", "width", "height", "spp", "max_depth", "seed", "threads", "light_samples"},
+        {"backend", "integrator", "sampler", "width", "height", "spp", "max_depth", "seed", "threads", "light_samples"},
         file,
         diagnostics
     );
@@ -369,6 +369,13 @@ void ParseRender(
             scene.render.integrator = *parsed;
         } else {
             diagnostics.push_back(Error(file, "render.integrator", "unknown integrator"));
+        }
+    }
+    if (const auto sampler = ReadString(table, "sampler", file, "render.sampler", diagnostics)) {
+        if (const auto parsed = ParseRenderSamplerName(*sampler)) {
+            scene.render.sampler = *parsed;
+        } else {
+            diagnostics.push_back(Error(file, "render.sampler", "unknown sampler"));
         }
     }
 

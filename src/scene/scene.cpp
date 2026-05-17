@@ -42,6 +42,26 @@ std::optional<RenderIntegratorKind> ParseRenderIntegratorName(std::string_view n
     return std::nullopt;
 }
 
+std::string_view RenderSamplerName(RenderSamplerKind sampler) {
+    switch (sampler) {
+        case RenderSamplerKind::Independent:
+            return "independent";
+        case RenderSamplerKind::Stratified:
+            return "stratified";
+    }
+    return "unknown";
+}
+
+std::optional<RenderSamplerKind> ParseRenderSamplerName(std::string_view name) {
+    if (name == "independent") {
+        return RenderSamplerKind::Independent;
+    }
+    if (name == "stratified") {
+        return RenderSamplerKind::Stratified;
+    }
+    return std::nullopt;
+}
+
 std::string_view ToneMapperName(ToneMapperKind mapper) {
     switch (mapper) {
         case ToneMapperKind::None:

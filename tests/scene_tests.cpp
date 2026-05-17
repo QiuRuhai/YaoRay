@@ -95,6 +95,7 @@ YR_TEST(scene_defaults_match_schema) {
 
     YR_EXPECT_EQ(scene.render.backend, yr::RenderBackendKind::Cpu);
     YR_EXPECT_EQ(scene.render.integrator, yr::RenderIntegratorKind::DebugDirect);
+    YR_EXPECT_EQ(scene.render.sampler, yr::RenderSamplerKind::Independent);
     YR_EXPECT_EQ(scene.render.width, 0);
     YR_EXPECT_EQ(scene.render.height, 0);
     YR_EXPECT_EQ(scene.render.spp, 1);
@@ -114,6 +115,8 @@ YR_TEST(scene_enum_names_are_stable) {
     YR_EXPECT_EQ(yr::RenderBackendName(yr::RenderBackendKind::Cuda), std::string_view{"cuda"});
     YR_EXPECT_EQ(yr::RenderIntegratorName(yr::RenderIntegratorKind::DebugDirect), std::string_view{"debug_direct"});
     YR_EXPECT_EQ(yr::RenderIntegratorName(yr::RenderIntegratorKind::Path), std::string_view{"path"});
+    YR_EXPECT_EQ(yr::RenderSamplerName(yr::RenderSamplerKind::Independent), std::string_view{"independent"});
+    YR_EXPECT_EQ(yr::RenderSamplerName(yr::RenderSamplerKind::Stratified), std::string_view{"stratified"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::None), std::string_view{"none"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::Reinhard), std::string_view{"reinhard"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::Aces), std::string_view{"aces"});
@@ -129,6 +132,8 @@ YR_TEST(scene_enum_parsers_accept_stable_names) {
     YR_EXPECT_EQ(yr::ParseRenderBackendName("cuda").value(), yr::RenderBackendKind::Cuda);
     YR_EXPECT_EQ(yr::ParseRenderIntegratorName("debug_direct").value(), yr::RenderIntegratorKind::DebugDirect);
     YR_EXPECT_EQ(yr::ParseRenderIntegratorName("path").value(), yr::RenderIntegratorKind::Path);
+    YR_EXPECT_EQ(yr::ParseRenderSamplerName("independent").value(), yr::RenderSamplerKind::Independent);
+    YR_EXPECT_EQ(yr::ParseRenderSamplerName("stratified").value(), yr::RenderSamplerKind::Stratified);
     YR_EXPECT_EQ(yr::ParseToneMapperName("none").value(), yr::ToneMapperKind::None);
     YR_EXPECT_EQ(yr::ParseToneMapperName("reinhard").value(), yr::ToneMapperKind::Reinhard);
     YR_EXPECT_EQ(yr::ParseToneMapperName("aces").value(), yr::ToneMapperKind::Aces);
@@ -142,6 +147,7 @@ YR_TEST(scene_enum_parsers_accept_stable_names) {
 YR_TEST(scene_enum_parsers_reject_unknown_names) {
     YR_EXPECT_TRUE(!yr::ParseRenderBackendName("metal").has_value());
     YR_EXPECT_TRUE(!yr::ParseRenderIntegratorName("bidirectional").has_value());
+    YR_EXPECT_TRUE(!yr::ParseRenderSamplerName("sobol").has_value());
     YR_EXPECT_TRUE(!yr::ParseToneMapperName("filmic").has_value());
     YR_EXPECT_TRUE(!yr::ParseCameraKindName("orthographic").has_value());
     YR_EXPECT_TRUE(!yr::ParseLightKindName("point").has_value());
@@ -151,6 +157,7 @@ YR_TEST(scene_enum_parsers_reject_unknown_names) {
 YR_TEST(scene_enum_names_return_unknown_for_invalid_values) {
     YR_EXPECT_EQ(yr::RenderBackendName(static_cast<yr::RenderBackendKind>(999)), std::string_view{"unknown"});
     YR_EXPECT_EQ(yr::RenderIntegratorName(static_cast<yr::RenderIntegratorKind>(999)), std::string_view{"unknown"});
+    YR_EXPECT_EQ(yr::RenderSamplerName(static_cast<yr::RenderSamplerKind>(999)), std::string_view{"unknown"});
     YR_EXPECT_EQ(yr::ToneMapperName(static_cast<yr::ToneMapperKind>(999)), std::string_view{"unknown"});
     YR_EXPECT_EQ(yr::CameraKindName(static_cast<yr::CameraKind>(999)), std::string_view{"unknown"});
     YR_EXPECT_EQ(yr::LightKindName(static_cast<yr::LightKind>(999)), std::string_view{"unknown"});
@@ -338,6 +345,68 @@ fov_y = 45
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
     YR_EXPECT_EQ(result.scene.value().render.integrator, yr::RenderIntegratorKind::Path);
+}
+
+YR_TEST(scene_parser_loads_independent_render_sampler) {
+    const std::filesystem::path path = WriteTempScene(
+        "independent_sampler.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+sampler = "independent"
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().render.sampler, yr::RenderSamplerKind::Independent);
+}
+
+YR_TEST(scene_parser_loads_stratified_render_sampler) {
+    const std::filesystem::path path = WriteTempScene(
+        "stratified_sampler.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+sampler = "stratified"
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().render.sampler, yr::RenderSamplerKind::Stratified);
 }
 
 YR_TEST(scene_parser_loads_render_threads) {
@@ -681,6 +750,37 @@ fov_y = 45
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.integrator", "unknown integrator"));
 }
 
+YR_TEST(scene_parser_rejects_unknown_render_sampler) {
+    const std::filesystem::path path = WriteTempScene(
+        "bad_sampler.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+sampler = "sobol"
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.sampler", "unknown sampler"));
+}
+
 YR_TEST(scene_parser_rejects_non_string_render_integrator) {
     const std::filesystem::path path = WriteTempScene(
         "bad_integrator_type.toml",
@@ -710,6 +810,37 @@ fov_y = 45
     YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(!result.scene.has_value());
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.integrator", "must be a string"));
+}
+
+YR_TEST(scene_parser_rejects_non_string_render_sampler) {
+    const std::filesystem::path path = WriteTempScene(
+        "bad_sampler_type.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+sampler = 123
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.sampler", "must be a string"));
 }
 
 YR_TEST(scene_parser_loads_materials_and_instance_material_binding) {

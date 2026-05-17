@@ -22,6 +22,11 @@ enum class RenderIntegratorKind {
     Path,
 };
 
+enum class RenderSamplerKind {
+    Independent,
+    Stratified,
+};
+
 enum class ToneMapperKind {
     None,
     Reinhard,
@@ -45,6 +50,7 @@ enum class EnvironmentKind {
 struct RenderSettings {
     RenderBackendKind backend = RenderBackendKind::Cpu;
     RenderIntegratorKind integrator = RenderIntegratorKind::DebugDirect;
+    RenderSamplerKind sampler = RenderSamplerKind::Independent;
     int width = 0;
     int height = 0;
     int spp = 1;
@@ -136,6 +142,8 @@ std::string_view RenderBackendName(RenderBackendKind backend);
 std::optional<RenderBackendKind> ParseRenderBackendName(std::string_view name);
 std::string_view RenderIntegratorName(RenderIntegratorKind integrator);
 std::optional<RenderIntegratorKind> ParseRenderIntegratorName(std::string_view name);
+std::string_view RenderSamplerName(RenderSamplerKind sampler);
+std::optional<RenderSamplerKind> ParseRenderSamplerName(std::string_view name);
 
 std::string_view ToneMapperName(ToneMapperKind mapper);
 std::optional<ToneMapperKind> ParseToneMapperName(std::string_view name);
