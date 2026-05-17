@@ -16,17 +16,19 @@ Current implemented slices:
 - common render backend interface with CPU debug and CUDA not-implemented backends
 - geometry-only OBJ asset import through the `yaoray_assets` module
 - BVH acceleration over compiled render triangles
-- TOML named diffuse/emissive materials with instance-level material binding
+- TOML named diffuse, emissive, and perfect mirror materials with instance-level material binding
 - scene-authored inline quad assets and a Cornell Box example based on Cornell measured geometry
 - render integrator selection with a deterministic CPU path tracer v0
 - deterministic CPU path tracer tile threading with actual thread and throughput reporting
 
-The CPU backend supports two integrators. `debug_direct` is the simple reference path through camera rays, BVH traversal, triangle intersection, deterministic center-sampled area-light direct lighting, BVH shadow rays, Film accumulation, tone mapping, and PNG/PPM output; it remains single-threaded for reference debugging and ignores `render.sampler` and `render.light_samples`. `path` is the CPU path tracer: it adds deterministic multi-sample camera jitter, diffuse bounce, emissive hits, random or stratified XZ-rectangle area-light surface sampling selected by `render.sampler`, configurable direct area-light sample averaging through `render.light_samples`, diffuse BRDF/PDF-weighted direct lighting, and row-major tile threading controlled by `render.threads` (`0` auto, `1` single-thread reference, `N` fixed worker count). It is still a v0 integrator without MIS, Russian roulette, denoising, adaptive sampling, Sobol/CMJ/blue-noise sampling, spectral rendering, random environment sampling, arbitrary oriented area lights, or final-quality material models.
+The CPU backend supports two integrators. `debug_direct` is the simple reference path through camera rays, BVH traversal, triangle intersection, deterministic center-sampled area-light direct lighting, BVH shadow rays, Film accumulation, tone mapping, and PNG/PPM output; it remains single-threaded for reference debugging, ignores `render.sampler` and `render.light_samples`, and does not recursively reflect mirror materials. `path` is the CPU path tracer: it adds deterministic multi-sample camera jitter, diffuse bounce, perfect mirror scattering, emissive hits, random or stratified XZ-rectangle area-light surface sampling selected by `render.sampler`, configurable direct area-light sample averaging through `render.light_samples`, diffuse BRDF/PDF-weighted direct lighting, and row-major tile threading controlled by `render.threads` (`0` auto, `1` single-thread reference, `N` fixed worker count). It is still a v0 integrator without MIS, Russian roulette, denoising, adaptive sampling, Sobol/CMJ/blue-noise sampling, spectral rendering, random environment sampling, arbitrary oriented area lights, or final-quality material models.
 
 The OBJ importer converts small Wavefront OBJ meshes into flat world-space triangles during scene compilation. It ignores OBJ `.mtl` files, textures, UVs, imported normals, and smoothing data in this slice; scene-authored named materials can still bind to a whole imported instance.
 
 Inline quad assets let TOML scenes define small measured or hand-authored quad meshes directly. The Cornell Box example uses this path so the official measured vertices stay visible in the scene file. Its materials are current RGB diffuse/emissive approximations; spectral matching remains future work.
 
 The path-traced Cornell example is separate from the debug Cornell scene. The debug scene remains a fast geometry and pipeline smoke test; the path scene is for manual visual review of indirect diffuse lighting.
+
+The material showcase scene is a Cornell-style manual preview for material behavior. It uses inline quads and the CPU path tracer to show diffuse surfaces, emissive light panels, and a perfect mirror block. Glass, roughness, texture maps, imported material files, and CUDA material evaluation remain future work.
 
 Spectral rendering, texture import, imported material files, soft shadows, glTF/GLB import, advanced BVH split methods, HDR output, more complete CPU path tracing, real CUDA rendering, and final-quality image output will be added in focused implementation plans.
