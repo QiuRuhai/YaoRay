@@ -126,6 +126,10 @@ Color3f EvaluateDiffuseBrdf(Color3f albedo) {
     return albedo / Pi;
 }
 
+int DirectLightSampleCount(const RenderScene& scene) {
+    return std::max(1, scene.light_samples);
+}
+
 void AccumulateTraceStats(CpuPathTraceStats& stats, const BvhTraceStats& trace_stats) {
     stats.bvh_node_tests += trace_stats.node_tests;
     stats.triangle_tests += trace_stats.triangle_tests;
@@ -180,57 +184,65 @@ Color3f EstimateDirectLight(
     CpuPathTraceStats& stats
 ) {
     Color3f radiance;
+    const int light_sample_count = DirectLightSampleCount(scene);
+    const float inverse_light_sample_count = 1.0f / static_cast<float>(light_sample_count);
+
     for (const RenderAreaLight& light : scene.area_lights) {
-        const std::optional<AreaLightSample> sample = SampleAreaLight(light, rng);
-        if (!sample.has_value()) {
-            continue;
+        Color3f light_radiance;
+        for (int sample_index = 0; sample_index < light_sample_count; ++sample_index) {
+            const std::optional<AreaLightSample> sample = SampleAreaLight(light, rng);
+            if (!sample.has_value()) {
+                continue;
+            }
+
+            const Vec3f to_light = sample->point - hit_point;
+            const float distance_squared = LengthSquared(to_light);
+            if (distance_squared <= MinShadowBias * MinShadowBias) {
+                continue;
+            }
+
+            const float distance = std::sqrt(distance_squared);
+            const float shadow_bias = ShadowBias(hit_point, sample->point, distance);
+            if (distance <= shadow_bias) {
+                continue;
+            }
+
+            const Point3f shadow_origin = hit_point + normal * shadow_bias;
+            const Vec3f shadow_to_light = sample->point - shadow_origin;
+            const float shadow_distance_squared = LengthSquared(shadow_to_light);
+            if (shadow_distance_squared <= MinShadowBias * MinShadowBias) {
+                continue;
+            }
+
+            const float shadow_distance = std::sqrt(shadow_distance_squared);
+            const Vec3f wi = shadow_to_light / shadow_distance;
+            const float cos_surface = std::max(0.0f, Dot(normal, wi));
+            if (cos_surface <= 0.0f) {
+                continue;
+            }
+
+            const float cos_light = std::max(0.0f, Dot(sample->normal, -wi));
+            if (cos_light <= 0.0f) {
+                continue;
+            }
+
+            ++stats.shadow_rays;
+            BvhTraceStats shadow_trace;
+            const Ray3f shadow_ray{shadow_origin, wi};
+            const BvhHit shadow_hit = IntersectBvh(scene, shadow_ray, shadow_trace);
+            AccumulateTraceStats(stats, shadow_trace);
+            if (shadow_hit.hit && shadow_hit.t < shadow_distance - shadow_bias) {
+                ++stats.occluded_shadow_rays;
+                continue;
+            }
+
+            const Color3f brdf = EvaluateDiffuseBrdf(albedo);
+            const float geometry = cos_surface * cos_light / distance_squared;
+            const float weight = geometry / sample->pdf_area;
+            light_radiance = light_radiance + Multiply(brdf, sample->radiance) * weight;
         }
 
-        const Vec3f to_light = sample->point - hit_point;
-        const float distance_squared = LengthSquared(to_light);
-        if (distance_squared <= MinShadowBias * MinShadowBias) {
-            continue;
-        }
-
-        const float distance = std::sqrt(distance_squared);
-        const float shadow_bias = ShadowBias(hit_point, sample->point, distance);
-        if (distance <= shadow_bias) {
-            continue;
-        }
-
-        const Point3f shadow_origin = hit_point + normal * shadow_bias;
-        const Vec3f shadow_to_light = sample->point - shadow_origin;
-        const float shadow_distance_squared = LengthSquared(shadow_to_light);
-        if (shadow_distance_squared <= MinShadowBias * MinShadowBias) {
-            continue;
-        }
-
-        const float shadow_distance = std::sqrt(shadow_distance_squared);
-        const Vec3f wi = shadow_to_light / shadow_distance;
-        const float cos_surface = std::max(0.0f, Dot(normal, wi));
-        if (cos_surface <= 0.0f) {
-            continue;
-        }
-
-        const float cos_light = std::max(0.0f, Dot(sample->normal, -wi));
-        if (cos_light <= 0.0f) {
-            continue;
-        }
-
-        ++stats.shadow_rays;
-        BvhTraceStats shadow_trace;
-        const Ray3f shadow_ray{shadow_origin, wi};
-        const BvhHit shadow_hit = IntersectBvh(scene, shadow_ray, shadow_trace);
-        AccumulateTraceStats(stats, shadow_trace);
-        if (shadow_hit.hit && shadow_hit.t < shadow_distance - shadow_bias) {
-            ++stats.occluded_shadow_rays;
-            continue;
-        }
-
-        const Color3f brdf = EvaluateDiffuseBrdf(albedo);
-        const float geometry = cos_surface * cos_light / distance_squared;
-        const float weight = geometry / sample->pdf_area;
-        radiance = radiance + Multiply(brdf, sample->radiance) * weight;
+        radiance = radiance + light_radiance * inverse_light_sample_count;
     }
     return radiance;
 }

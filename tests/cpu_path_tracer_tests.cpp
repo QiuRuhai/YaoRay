@@ -193,6 +193,7 @@ yr::RenderScene MakeThreadedDeterminismScene() {
     scene.spp = 3;
     scene.max_depth = 2;
     scene.seed = 99;
+    scene.light_samples = 4;
     scene.environment.radiance = yr::Color3f{0.05f, 0.06f, 0.07f};
     scene.materials[0].albedo = yr::Color3f{0.7f, 0.6f, 0.5f};
     scene.area_lights.push_back(yr::RenderAreaLight{
@@ -368,6 +369,32 @@ YR_TEST(cpu_path_tracer_ignores_area_light_behind_surface) {
     YR_EXPECT_NEAR(center.x, 0.0, 1e-6);
     YR_EXPECT_NEAR(center.y, 0.0, 1e-6);
     YR_EXPECT_NEAR(center.z, 0.0, 1e-6);
+}
+
+YR_TEST(cpu_path_tracer_light_samples_increase_shadow_rays) {
+    yr::RenderScene one_sample = MakeDiffuseFloorScene(7);
+    one_sample.light_samples = 1;
+
+    yr::RenderScene four_samples = one_sample;
+    four_samples.light_samples = 4;
+
+    const yr::CpuPathTraceResult one_result = yr::RenderCpuPathTrace(one_sample);
+    const yr::CpuPathTraceResult four_result = yr::RenderCpuPathTrace(four_samples);
+
+    YR_EXPECT_TRUE(one_result.stats.shadow_rays > 0);
+    YR_EXPECT_EQ(four_result.stats.shadow_rays, one_result.stats.shadow_rays * std::uint64_t{4});
+    YR_EXPECT_EQ(four_result.stats.occluded_shadow_rays, std::uint64_t{0});
+}
+
+YR_TEST(cpu_path_tracer_is_deterministic_with_multiple_light_samples) {
+    yr::RenderScene scene = MakeDiffuseFloorScene(7);
+    scene.light_samples = 4;
+
+    const yr::CpuPathTraceResult first = yr::RenderCpuPathTrace(scene);
+    const yr::CpuPathTraceResult second = yr::RenderCpuPathTrace(scene);
+
+    YR_EXPECT_TRUE(FilmsEqual(first.film, second.film));
+    YR_EXPECT_TRUE(CoreStatsEqual(first.stats, second.stats));
 }
 
 YR_TEST(cpu_path_tracer_reports_single_thread_when_requested) {
