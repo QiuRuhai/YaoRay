@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <vector>
 
 #include <yaoray/backends/cpu/cpu_path_tracer.hpp>
 #include <yaoray/render/bvh.hpp>
@@ -23,6 +24,61 @@ void RebuildBvh(yr::RenderScene& scene) {
         throw std::runtime_error(build.errors[0]);
     }
     scene.bvh = build.bvh;
+}
+
+yr::RenderScene MakeTexturedTriangleScene(std::uint64_t seed = 7, int threads = 1) {
+    yr::RenderScene scene;
+    scene.width = 1;
+    scene.height = 1;
+    scene.spp = 1;
+    scene.max_depth = 1;
+    scene.seed = seed;
+    scene.threads = threads;
+    scene.light_samples = 1;
+    scene.camera.origin = yr::Point3f{0.0f, 0.5f, 4.0f};
+    scene.camera.forward = yr::Normalize(yr::Vec3f{0.0f, -0.5f, -4.0f});
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Vec3f{0.0f, 1.0f, 0.0f};
+    scene.camera.fov_y_radians = 0.01f;
+    scene.environment.type = yr::EnvironmentKind::Constant;
+    scene.environment.radiance = yr::Color3f{};
+    scene.materials.push_back(yr::RenderMaterial{
+        yr::MaterialKind::Diffuse,
+        yr::Color3f{0.1f, 0.1f, 0.1f},
+        yr::Color3f{},
+        0.0f,
+        0.04f,
+        0
+    });
+    scene.textures.push_back(yr::RenderTexture{
+        2,
+        2,
+        std::vector<yr::Color3f>{
+            yr::Color3f{1.0f, 0.0f, 0.0f},
+            yr::Color3f{0.0f, 1.0f, 0.0f},
+            yr::Color3f{0.0f, 0.0f, 1.0f},
+            yr::Color3f{1.0f, 1.0f, 1.0f}
+        }
+    });
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-3.0f, 0.0f, -3.0f},
+        yr::Point3f{0.0f, 0.0f, 3.0f},
+        yr::Point3f{3.0f, 0.0f, -3.0f},
+        yr::Vec3f{0.0f, 1.0f, 0.0f},
+        0,
+        yr::Vec2f{0.25f, 0.25f},
+        yr::Vec2f{0.25f, 0.25f},
+        yr::Vec2f{0.25f, 0.25f},
+        true
+    });
+    scene.area_lights.push_back(yr::RenderAreaLight{
+        yr::Point3f{0.0f, 2.0f, 0.0f},
+        1.0f,
+        1.0f,
+        yr::Color3f{4.0f, 4.0f, 4.0f}
+    });
+    RebuildBvh(scene);
+    return scene;
 }
 
 yr::RenderScene MakeBaseScene(int width, int height) {
@@ -495,6 +551,23 @@ YR_TEST(cpu_path_tracer_black_mirror_stops_after_emission) {
     YR_EXPECT_NEAR(center.x, 0.25, 1e-6);
     YR_EXPECT_NEAR(center.y, 0.5, 1e-6);
     YR_EXPECT_NEAR(center.z, 0.75, 1e-6);
+}
+
+YR_TEST(cpu_path_tracer_uses_diffuse_texture_albedo_on_hit) {
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(MakeTexturedTriangleScene());
+    const yr::Color3f pixel = result.film.LinearPixel(0, 0);
+
+    YR_EXPECT_TRUE(pixel.x > 0.0f);
+    YR_EXPECT_TRUE(pixel.y < pixel.x * 0.1f);
+    YR_EXPECT_TRUE(pixel.z < pixel.x * 0.1f);
+}
+
+YR_TEST(cpu_path_tracer_textured_scene_is_deterministic_across_thread_counts) {
+    const yr::CpuPathTraceResult single = yr::RenderCpuPathTrace(MakeTexturedTriangleScene(91, 1));
+    const yr::CpuPathTraceResult threaded = yr::RenderCpuPathTrace(MakeTexturedTriangleScene(91, 8));
+
+    YR_EXPECT_TRUE(FilmsEqual(single.film, threaded.film));
+    YR_EXPECT_EQ(single.stats.rays_traced, threaded.stats.rays_traced);
 }
 
 YR_TEST(cpu_path_tracer_is_deterministic_for_same_seed) {
