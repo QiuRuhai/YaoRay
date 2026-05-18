@@ -58,6 +58,7 @@ add_library(yaoray_render STATIC
     src/render/light_sampling.cpp
     src/render/mis.cpp
     src/render/scene_compiler.cpp
+    src/render/texture.cpp
 )
 target_include_directories(yaoray_render PUBLIC include)
 target_link_libraries(yaoray_render PUBLIC yaoray_core yaoray_scene PRIVATE yaoray_assets)
@@ -85,6 +86,7 @@ add_executable(yaoray_tests
     tests/bsdf_tests.cpp
     tests/mis_tests.cpp
     tests/light_sampling_tests.cpp
+    tests/texture_tests.cpp
     tests/backend_tests.cpp
     tests/cpu_debug_renderer_tests.cpp
     tests/cpu_tile_scheduler_tests.cpp
