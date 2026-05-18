@@ -407,6 +407,83 @@ YR_TEST(scene_compiler_expands_obj_asset) {
     YR_EXPECT_NEAR(result.scene.value().triangles[0].normal.z, 1.0, 1e-6);
 }
 
+YR_TEST(scene_compiler_imports_obj_material_texture_and_uvs) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"quad", FixturePath("assets/textured_quad.obj")});
+    scene.instances.push_back(yr::InstanceDescription{"quad", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderScene& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
+    YR_EXPECT_EQ(compiled.textures.size(), std::size_t{1});
+    YR_EXPECT_EQ(compiled.triangles.size(), std::size_t{2});
+    YR_EXPECT_EQ(compiled.materials[0].albedo_texture, 0);
+    YR_EXPECT_NEAR(compiled.materials[0].albedo.x, 0.25, 1e-6);
+    YR_EXPECT_TRUE(compiled.triangles[0].has_uv);
+    YR_EXPECT_NEAR(compiled.triangles[0].uv1.x, 1.0, 1e-6);
+}
+
+YR_TEST(scene_compiler_caches_duplicate_obj_textures) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"first", FixturePath("assets/textured_quad.obj")});
+    scene.assets.push_back(yr::AssetDescription{"second", FixturePath("assets/textured_quad.obj")});
+    scene.instances.push_back(yr::InstanceDescription{"first", {}});
+    yr::InstanceDescription second;
+    second.asset = "second";
+    second.transform.translate = yr::Vec3f{2.0f, 0.0f, 0.0f};
+    scene.instances.push_back(second);
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderScene& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.textures.size(), std::size_t{1});
+    YR_EXPECT_EQ(compiled.materials.size(), std::size_t{2});
+    YR_EXPECT_EQ(compiled.materials[0].albedo_texture, 0);
+    YR_EXPECT_EQ(compiled.materials[1].albedo_texture, 0);
+}
+
+YR_TEST(scene_compiler_scene_material_overrides_imported_obj_material) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"quad", FixturePath("assets/textured_quad.obj")});
+    scene.materials.push_back(yr::MaterialDescription{
+        "override",
+        yr::MaterialKind::Diffuse,
+        yr::Color3f{0.9f, 0.1f, 0.2f},
+        yr::Color3f{}
+    });
+    yr::InstanceDescription instance;
+    instance.asset = "quad";
+    instance.material = "override";
+    scene.instances.push_back(instance);
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderScene& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
+    YR_EXPECT_TRUE(compiled.textures.empty());
+    YR_EXPECT_EQ(compiled.triangles[0].material_index, 0);
+    YR_EXPECT_EQ(compiled.materials[0].albedo_texture, -1);
+}
+
+YR_TEST(scene_compiler_reports_missing_obj_texture) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"bad", FixturePath("assets/missing_texture.obj")});
+    scene.instances.push_back(yr::InstanceDescription{"bad", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "assets.path", "texture file not found"));
+}
+
 YR_TEST(scene_compiler_expands_inline_quad_asset) {
     yr::SceneDescription scene = MakeBaseScene();
     scene.assets.push_back(yr::AssetDescription{

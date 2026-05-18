@@ -5,6 +5,7 @@
 
 #include <yaoray/core/vec.hpp>
 #include <yaoray/render/bvh.hpp>
+#include <yaoray/render/texture.hpp>
 #include <yaoray/scene/scene.hpp>
 
 namespace yr {
@@ -31,6 +32,7 @@ struct RenderMaterial {
     Color3f emission;
     float roughness = 0.0f;
     float specular = 0.04f;
+    int albedo_texture = -1;
 };
 
 struct RenderTriangle {
@@ -39,6 +41,10 @@ struct RenderTriangle {
     Point3f p2;
     Vec3f normal{0.0f, 0.0f, 1.0f};
     int material_index = 0;
+    Vec2f uv0;
+    Vec2f uv1;
+    Vec2f uv2;
+    bool has_uv = false;
 };
 
 struct RenderAreaLight {
@@ -62,6 +68,7 @@ struct RenderScene {
     RenderCamera camera;
     RenderEnvironment environment;
     std::vector<RenderMaterial> materials;
+    std::vector<RenderTexture> textures;
     std::vector<RenderTriangle> triangles;
     std::vector<RenderAreaLight> area_lights;
     RenderBvh bvh;

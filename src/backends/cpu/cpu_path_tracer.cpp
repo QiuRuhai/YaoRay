@@ -7,6 +7,7 @@
 #include <yaoray/render/bsdf.hpp>
 #include <yaoray/render/light_sampling.hpp>
 #include <yaoray/render/mis.hpp>
+#include <yaoray/render/texture.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -36,6 +37,52 @@ struct PreviousBounce {
 
 Color3f Multiply(Color3f a, Color3f b) {
     return Color3f{a.x * b.x, a.y * b.y, a.z * b.z};
+}
+
+Vec3f Barycentric(Point3f point, const RenderTriangle& triangle) {
+    const Vec3f v0 = triangle.p1 - triangle.p0;
+    const Vec3f v1 = triangle.p2 - triangle.p0;
+    const Vec3f v2 = point - triangle.p0;
+    const float d00 = Dot(v0, v0);
+    const float d01 = Dot(v0, v1);
+    const float d11 = Dot(v1, v1);
+    const float d20 = Dot(v2, v0);
+    const float d21 = Dot(v2, v1);
+    const float denom = d00 * d11 - d01 * d01;
+    if (std::fabs(denom) <= 1.0e-12f) {
+        return Vec3f{1.0f, 0.0f, 0.0f};
+    }
+    const float v = (d11 * d20 - d01 * d21) / denom;
+    const float w = (d00 * d21 - d01 * d20) / denom;
+    const float u = 1.0f - v - w;
+    return Vec3f{u, v, w};
+}
+
+Vec2f InterpolateUv(const RenderTriangle& triangle, Vec3f barycentric) {
+    return Vec2f{
+        triangle.uv0.x * barycentric.x + triangle.uv1.x * barycentric.y + triangle.uv2.x * barycentric.z,
+        triangle.uv0.y * barycentric.x + triangle.uv1.y * barycentric.y + triangle.uv2.y * barycentric.z
+    };
+}
+
+RenderMaterial ResolveHitMaterial(
+    const RenderScene& scene,
+    const RenderTriangle& triangle,
+    const RenderMaterial& material,
+    Point3f hit_point
+) {
+    RenderMaterial resolved = material;
+    if (material.albedo_texture < 0 || !triangle.has_uv) {
+        return resolved;
+    }
+    const std::size_t texture_index = static_cast<std::size_t>(material.albedo_texture);
+    if (texture_index >= scene.textures.size()) {
+        return resolved;
+    }
+    const Vec3f barycentric = Barycentric(hit_point, triangle);
+    const Vec2f uv = InterpolateUv(triangle, barycentric);
+    resolved.albedo = SampleTextureNearest(scene.textures[texture_index], uv);
+    return resolved;
 }
 
 bool IsNearBlack(Color3f color) {
@@ -239,8 +286,9 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
         }
 
         const RenderTriangle& triangle = *hit.triangle;
-        const RenderMaterial& material = scene.materials[static_cast<std::size_t>(triangle.material_index)];
+        const RenderMaterial& base_material = scene.materials[static_cast<std::size_t>(triangle.material_index)];
         const Point3f hit_point = ray.At(hit.t);
+        const RenderMaterial material = ResolveHitMaterial(scene, triangle, base_material, hit_point);
         const Vec3f normal = FaceForward(Normalize(triangle.normal), -ray.direction);
         const Vec3f wo = -ray.direction;
 
