@@ -1,8 +1,22 @@
 #include "yr_test.hpp"
 
 #include <cstddef>
+#include <filesystem>
+#include <string>
 
 #include <yaoray/render/texture.hpp>
+
+#ifndef YAORAY_TEST_DATA_DIR
+#error "YAORAY_TEST_DATA_DIR must be defined"
+#endif
+
+namespace {
+
+std::filesystem::path TextureFixturePath(const std::string& relative) {
+    return std::filesystem::path{YAORAY_TEST_DATA_DIR} / relative;
+}
+
+} // namespace
 
 YR_TEST(texture_nearest_samples_expected_texels) {
     yr::RenderTexture texture;
@@ -52,4 +66,35 @@ YR_TEST(texture_nearest_returns_black_for_empty_texture) {
     YR_EXPECT_NEAR(color.x, 0.0, 1e-6);
     YR_EXPECT_NEAR(color.y, 0.0, 1e-6);
     YR_EXPECT_NEAR(color.z, 0.0, 1e-6);
+}
+
+YR_TEST(texture_loader_reads_png_texels) {
+    const yr::TextureLoadResult result = yr::LoadPngTexture(TextureFixturePath("assets/checker_2x2.png"));
+
+    YR_EXPECT_TRUE(result.ok);
+    YR_EXPECT_TRUE(result.error.empty());
+    YR_EXPECT_EQ(result.texture.width, 2);
+    YR_EXPECT_EQ(result.texture.height, 2);
+    YR_EXPECT_EQ(result.texture.texels.size(), std::size_t{4});
+    YR_EXPECT_NEAR(result.texture.texels[0].x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(result.texture.texels[0].y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(result.texture.texels[1].y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(result.texture.texels[2].z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(result.texture.texels[3].x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(result.texture.texels[3].y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(result.texture.texels[3].z, 1.0, 1e-6);
+}
+
+YR_TEST(texture_loader_rejects_non_png_extension) {
+    const yr::TextureLoadResult result = yr::LoadPngTexture(TextureFixturePath("assets/triangle.obj"));
+
+    YR_EXPECT_TRUE(!result.ok);
+    YR_EXPECT_TRUE(result.error.find(".png") != std::string::npos);
+}
+
+YR_TEST(texture_loader_reports_missing_file) {
+    const yr::TextureLoadResult result = yr::LoadPngTexture(TextureFixturePath("assets/missing_texture.png"));
+
+    YR_EXPECT_TRUE(!result.ok);
+    YR_EXPECT_TRUE(result.error.find("not found") != std::string::npos);
 }

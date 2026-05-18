@@ -61,7 +61,7 @@ add_library(yaoray_render STATIC
     src/render/texture.cpp
 )
 target_include_directories(yaoray_render PUBLIC include)
-target_link_libraries(yaoray_render PUBLIC yaoray_core yaoray_scene PRIVATE yaoray_assets)
+target_link_libraries(yaoray_render PUBLIC yaoray_core yaoray_scene PRIVATE yaoray_assets stb)
 
 add_library(yaoray_backends STATIC
     src/backends/backend.cpp
