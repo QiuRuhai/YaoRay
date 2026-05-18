@@ -2,6 +2,7 @@
 
 #include <yaoray/assets/obj_loader.hpp>
 #include <yaoray/render/bvh.hpp>
+#include <yaoray/render/texture.hpp>
 
 #include <cmath>
 #include <filesystem>
@@ -101,6 +102,10 @@ Point3f ApplyTransform(Point3f point, const TransformDescription& transform) {
 
 constexpr float DegenerateTriangleEpsilon = 1.0e-12f;
 
+struct TextureCache {
+    std::unordered_map<std::string, int> indices;
+};
+
 bool AppendTriangle(
     const SceneDescription& scene,
     RenderScene& compiled,
@@ -156,6 +161,69 @@ int AddDefaultMaterial(RenderScene& compiled) {
     return material_index;
 }
 
+std::string CanonicalTextureKey(const std::filesystem::path& path) {
+    std::error_code ec;
+    const std::filesystem::path canonical = std::filesystem::weakly_canonical(path, ec);
+    return ec ? path.lexically_normal().generic_string() : canonical.generic_string();
+}
+
+std::optional<int> LoadTextureIndex(
+    const SceneDescription& scene,
+    RenderScene& compiled,
+    const std::filesystem::path& path,
+    TextureCache& texture_cache,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const std::string key = CanonicalTextureKey(path);
+    const auto found = texture_cache.indices.find(key);
+    if (found != texture_cache.indices.end()) {
+        return found->second;
+    }
+
+    TextureLoadResult load = LoadPngTexture(path);
+    if (!load.ok) {
+        diagnostics.push_back(Error(scene, "assets.path", load.error));
+        return std::nullopt;
+    }
+
+    const int texture_index = static_cast<int>(compiled.textures.size());
+    compiled.textures.push_back(std::move(load.texture));
+    texture_cache.indices.emplace(key, texture_index);
+    return texture_index;
+}
+
+std::vector<int> CompileImportedMaterials(
+    const SceneDescription& scene,
+    RenderScene& compiled,
+    const ImportedMesh& mesh,
+    TextureCache& texture_cache,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    std::vector<int> material_indices;
+    material_indices.reserve(mesh.materials.size());
+
+    for (const ImportedMaterial& material : mesh.materials) {
+        RenderMaterial render_material;
+        render_material.type = MaterialKind::Diffuse;
+        render_material.albedo = material.diffuse;
+        if (material.has_diffuse_texture) {
+            const std::optional<int> texture_index =
+                LoadTextureIndex(scene, compiled, material.diffuse_texture_path, texture_cache, diagnostics);
+            if (!texture_index.has_value()) {
+                material_indices.push_back(-1);
+                continue;
+            }
+            render_material.albedo_texture = *texture_index;
+        }
+
+        const int render_material_index = static_cast<int>(compiled.materials.size());
+        compiled.materials.push_back(render_material);
+        material_indices.push_back(render_material_index);
+    }
+
+    return material_indices;
+}
+
 std::optional<int> ResolveMaterialIndex(
     const SceneDescription& scene,
     const InstanceDescription& instance,
@@ -193,18 +261,41 @@ void AppendBuiltinTriangle(RenderScene& compiled, const TransformDescription& tr
     });
 }
 
-void AppendImportedMesh(RenderScene& compiled, const ImportedMesh& mesh, const TransformDescription& transform, int material_index) {
+void AppendImportedMesh(
+    RenderScene& compiled,
+    const ImportedMesh& mesh,
+    const TransformDescription& transform,
+    std::optional<int> override_material_index,
+    const std::vector<int>& imported_material_indices
+) {
+    int fallback_material_index = -1;
     for (const ImportedTriangle& triangle : mesh.triangles) {
         const Point3f world_p0 = ApplyTransform(triangle.p0, transform);
         const Point3f world_p1 = ApplyTransform(triangle.p1, transform);
         const Point3f world_p2 = ApplyTransform(triangle.p2, transform);
+        int material_index = override_material_index.value_or(-1);
+        if (!override_material_index.has_value() &&
+            triangle.material_index >= 0 &&
+            static_cast<std::size_t>(triangle.material_index) < imported_material_indices.size()) {
+            material_index = imported_material_indices[static_cast<std::size_t>(triangle.material_index)];
+        }
+        if (material_index < 0) {
+            if (fallback_material_index < 0) {
+                fallback_material_index = AddDefaultMaterial(compiled);
+            }
+            material_index = fallback_material_index;
+        }
 
         compiled.triangles.push_back(RenderTriangle{
             world_p0,
             world_p1,
             world_p2,
             Normalize(Cross(world_p1 - world_p0, world_p2 - world_p0)),
-            material_index
+            material_index,
+            triangle.uv0,
+            triangle.uv1,
+            triangle.uv2,
+            triangle.has_uv
         });
     }
 }
@@ -233,8 +324,9 @@ void AppendObjAsset(
     RenderScene& compiled,
     const std::filesystem::path& asset_path,
     const TransformDescription& transform,
-    int material_index,
+    std::optional<int> override_material_index,
     std::unordered_map<std::string, ImportedMesh>& mesh_cache,
+    TextureCache& texture_cache,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
     const std::string cache_key = asset_path.generic_string();
@@ -257,7 +349,15 @@ void AppendObjAsset(
         cached = mesh_cache.emplace(cache_key, std::move(load_result.mesh.value())).first;
     }
 
-    AppendImportedMesh(compiled, cached->second, transform, material_index);
+    std::vector<int> imported_material_indices;
+    if (!override_material_index.has_value()) {
+        imported_material_indices = CompileImportedMaterials(scene, compiled, cached->second, texture_cache, diagnostics);
+        if (HasSceneErrors(diagnostics)) {
+            return;
+        }
+    }
+
+    AppendImportedMesh(compiled, cached->second, transform, override_material_index, imported_material_indices);
 }
 
 } // namespace
@@ -295,6 +395,7 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
     const std::unordered_map<std::string, const AssetDescription*> assets = BuildAssetMap(scene);
     const std::unordered_map<std::string, int> materials = BuildMaterialMap(scene, compiled);
     std::unordered_map<std::string, ImportedMesh> mesh_cache;
+    TextureCache texture_cache;
     for (const InstanceDescription& instance : scene.instances) {
         const auto asset = assets.find(instance.asset);
         if (asset == assets.end()) {
@@ -305,18 +406,41 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
         const AssetDescription& asset_description = *asset->second;
         const std::filesystem::path& asset_path = asset_description.path;
         const std::string asset_path_string = asset_path.generic_string();
-        const std::optional<int> material_index =
-            ResolveMaterialIndex(scene, instance, materials, compiled, result.diagnostics);
-        if (!material_index.has_value()) {
-            continue;
+        std::optional<int> material_index;
+        if (!instance.material.empty()) {
+            material_index = ResolveMaterialIndex(scene, instance, materials, compiled, result.diagnostics);
+            if (!material_index.has_value()) {
+                continue;
+            }
         }
 
         if (!asset_description.quads.empty()) {
+            if (!material_index.has_value()) {
+                material_index = ResolveMaterialIndex(scene, instance, materials, compiled, result.diagnostics);
+                if (!material_index.has_value()) {
+                    continue;
+                }
+            }
             AppendInlineQuadAsset(scene, compiled, asset_description, instance.transform, *material_index, result.diagnostics);
         } else if (asset_path_string == "builtin:triangle") {
+            if (!material_index.has_value()) {
+                material_index = ResolveMaterialIndex(scene, instance, materials, compiled, result.diagnostics);
+                if (!material_index.has_value()) {
+                    continue;
+                }
+            }
             AppendBuiltinTriangle(compiled, instance.transform, *material_index);
         } else if (HasObjExtension(asset_path)) {
-            AppendObjAsset(scene, compiled, asset_path, instance.transform, *material_index, mesh_cache, result.diagnostics);
+            AppendObjAsset(
+                scene,
+                compiled,
+                asset_path,
+                instance.transform,
+                material_index,
+                mesh_cache,
+                texture_cache,
+                result.diagnostics
+            );
         } else {
             result.diagnostics.push_back(Error(scene, "assets.path", "asset import not implemented yet: " + asset_path_string));
         }
