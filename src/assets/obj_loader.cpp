@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace yr {
@@ -35,6 +36,21 @@ Point3f ReadPosition(const tinyobj::attrib_t& attrib, int vertex_index, bool& ok
         attrib.vertices[base + 1],
         attrib.vertices[base + 2]
     };
+}
+
+Vec2f ReadTexCoord(const tinyobj::attrib_t& attrib, int texcoord_index, bool& ok) {
+    if (texcoord_index < 0) {
+        ok = false;
+        return {};
+    }
+
+    const std::size_t base = static_cast<std::size_t>(texcoord_index) * 2;
+    if (base + 1 >= attrib.texcoords.size()) {
+        ok = false;
+        return {};
+    }
+
+    return Vec2f{attrib.texcoords[base + 0], attrib.texcoords[base + 1]};
 }
 
 void AddIfNotEmpty(std::vector<std::string>& values, const std::string& value) {
@@ -78,6 +94,27 @@ AssetLoadResult LoadObjMesh(const std::filesystem::path& path) {
     ImportedMesh mesh;
     const tinyobj::attrib_t& attrib = reader.GetAttrib();
     const std::vector<tinyobj::shape_t>& shapes = reader.GetShapes();
+    std::unordered_map<std::string, int> material_names;
+
+    for (const tinyobj::material_t& material : reader.GetMaterials()) {
+        if (material.name.empty()) {
+            continue;
+        }
+        if (material_names.find(material.name) != material_names.end()) {
+            result.errors.push_back("duplicate OBJ material: " + material.name);
+            return result;
+        }
+
+        ImportedMaterial imported;
+        imported.name = material.name;
+        imported.diffuse = Color3f{material.diffuse[0], material.diffuse[1], material.diffuse[2]};
+        if (!material.diffuse_texname.empty()) {
+            imported.diffuse_texture_path = path.parent_path() / material.diffuse_texname;
+            imported.has_diffuse_texture = true;
+        }
+        material_names.emplace(imported.name, static_cast<int>(mesh.materials.size()));
+        mesh.materials.push_back(std::move(imported));
+    }
 
     for (const tinyobj::shape_t& shape : shapes) {
         std::size_t index_offset = 0;
@@ -98,6 +135,11 @@ AssetLoadResult LoadObjMesh(const std::filesystem::path& path) {
             const Point3f p0 = ReadPosition(attrib, shape.mesh.indices[index_offset + 0].vertex_index, positions_ok);
             const Point3f p1 = ReadPosition(attrib, shape.mesh.indices[index_offset + 1].vertex_index, positions_ok);
             const Point3f p2 = ReadPosition(attrib, shape.mesh.indices[index_offset + 2].vertex_index, positions_ok);
+            bool uvs_ok = true;
+            const Vec2f uv0 = ReadTexCoord(attrib, shape.mesh.indices[index_offset + 0].texcoord_index, uvs_ok);
+            const Vec2f uv1 = ReadTexCoord(attrib, shape.mesh.indices[index_offset + 1].texcoord_index, uvs_ok);
+            const Vec2f uv2 = ReadTexCoord(attrib, shape.mesh.indices[index_offset + 2].texcoord_index, uvs_ok);
+            const int material_index = face_index < shape.mesh.material_ids.size() ? shape.mesh.material_ids[face_index] : -1;
             index_offset += 3;
 
             if (!positions_ok) {
@@ -111,7 +153,17 @@ AssetLoadResult LoadObjMesh(const std::filesystem::path& path) {
                 continue;
             }
 
-            mesh.triangles.push_back(ImportedTriangle{p0, p1, p2, normal});
+            mesh.triangles.push_back(ImportedTriangle{
+                p0,
+                p1,
+                p2,
+                normal,
+                uv0,
+                uv1,
+                uv2,
+                uvs_ok,
+                material_index
+            });
         }
     }
 
