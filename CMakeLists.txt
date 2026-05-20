@@ -37,6 +37,9 @@ target_include_directories(tomlplusplus INTERFACE external/tomlplusplus)
 add_library(tinyobjloader INTERFACE)
 target_include_directories(tinyobjloader INTERFACE external/tinyobjloader)
 
+add_library(tinygltf INTERFACE)
+target_include_directories(tinygltf INTERFACE external/tinygltf external/stb)
+
 add_library(yaoray_scene STATIC
     src/scene/diagnostic.cpp
     src/scene/scene.cpp
@@ -46,10 +49,11 @@ target_include_directories(yaoray_scene PUBLIC include)
 target_link_libraries(yaoray_scene PUBLIC yaoray_core PRIVATE tomlplusplus)
 
 add_library(yaoray_assets STATIC
+    src/assets/gltf_loader.cpp
     src/assets/obj_loader.cpp
 )
 target_include_directories(yaoray_assets PUBLIC include)
-target_link_libraries(yaoray_assets PUBLIC yaoray_core PRIVATE tinyobjloader)
+target_link_libraries(yaoray_assets PUBLIC yaoray_core yaoray_scene PRIVATE tinygltf tinyobjloader)
 target_compile_options(yaoray_assets PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
 
 add_library(yaoray_render STATIC
@@ -58,6 +62,7 @@ add_library(yaoray_render STATIC
     src/render/light_sampling.cpp
     src/render/mis.cpp
     src/render/scene_compiler.cpp
+    src/render/shading.cpp
     src/render/texture.cpp
 )
 target_include_directories(yaoray_render PUBLIC include)
@@ -121,6 +126,10 @@ if(BUILD_TESTING)
         COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
             "$outPath = '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/textured_quad.png'; Remove-Item -Force -ErrorAction SilentlyContinue $outPath; $out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/textured_quad.toml' --backend cpu 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -ne 0) { exit 1 }; if ($out -notmatch 'Integrator: path') { exit 1 }; if ($out -notmatch 'Compiled triangles: 2') { exit 1 }; if ($out -notmatch 'Rendered image:') { exit 1 }; if (-not (Test-Path $outPath)) { exit 1 }; [byte[]]$bytes = [System.IO.File]::ReadAllBytes($outPath); [byte[]]$expected = 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A; if ($bytes.Length -lt 8) { exit 1 }; for ($i = 0; $i -lt 8; $i++) { if ($bytes[$i] -ne $expected[$i]) { exit 1 } }"
     )
+    add_test(NAME yaoray_cli_render_gltf
+        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
+            "$outPath = '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/gltf_textured_asset.png'; Remove-Item -Force -ErrorAction SilentlyContinue $outPath; $out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/gltf_textured_asset.toml' --backend cpu 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -ne 0) { exit 1 }; if ($out -notmatch 'Integrator: path') { exit 1 }; if ($out -notmatch 'Compiled triangles: 2') { exit 1 }; if ($out -notmatch 'Rendered image:') { exit 1 }; if (-not (Test-Path $outPath)) { exit 1 }; [byte[]]$bytes = [System.IO.File]::ReadAllBytes($outPath); [byte[]]$expected = 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A; if ($bytes.Length -lt 8) { exit 1 }; for ($i = 0; $i -lt 8; $i++) { if ($bytes[$i] -ne $expected[$i]) { exit 1 } }"
+    )
     add_test(NAME yaoray_cli_render_cornell_box
         COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
             "$outPath = '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/cornell_box.png'; Remove-Item -Force -ErrorAction SilentlyContinue $outPath; $out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/cornell_box.toml' --backend cpu 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -ne 0) { exit 1 }; if ($out -notmatch 'Integrator: debug_direct') { exit 1 }; if ($out -notmatch 'Compiled triangles: 38') { exit 1 }; if ($out -notmatch 'Rendered image:') { exit 1 }; if ($out -notmatch 'Shadow rays:') { exit 1 }; if ($out -notmatch 'BVH nodes:') { exit 1 }; if (-not (Test-Path $outPath)) { exit 1 }; [byte[]]$bytes = [System.IO.File]::ReadAllBytes($outPath); [byte[]]$expected = 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A; if ($bytes.Length -lt 8) { exit 1 }; for ($i = 0; $i -lt 8; $i++) { if ($bytes[$i] -ne $expected[$i]) { exit 1 } }"
@@ -135,7 +144,7 @@ if(BUILD_TESTING)
     )
     add_test(NAME yaoray_cli_render_unsupported_asset
         COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-            "$out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/minimal.toml' 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -eq 0) { exit 1 }; if ($out -notmatch 'asset import not implemented yet') { exit 1 }"
+            "$out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/unsupported_asset.toml' 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -eq 0) { exit 1 }; if ($out -notmatch 'asset import not implemented yet') { exit 1 }"
     )
     add_test(NAME yaoray_cli_render_missing_file
         COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command

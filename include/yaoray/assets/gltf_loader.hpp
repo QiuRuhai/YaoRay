@@ -6,6 +6,6 @@
 
 namespace yr {
 
-AssetLoadResult LoadObjMesh(const std::filesystem::path& path);
+AssetLoadResult LoadGltfMesh(const std::filesystem::path& path);
 
 } // namespace yr

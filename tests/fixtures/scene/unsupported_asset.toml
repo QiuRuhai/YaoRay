@@ -1,0 +1,34 @@
+[render]
+backend = "cpu"
+width = 64
+height = 64
+spp = 1
+max_depth = 1
+seed = 1
+
+[film]
+output = "out/unsupported_asset.png"
+
+[camera]
+type = "perspective"
+position = [0, 0, 3]
+target = [0, 0, 0]
+fov_y = 45
+
+[[assets]]
+name = "model"
+path = "assets/models/model.fbx"
+
+[[instances]]
+asset = "model"
+
+[[lights]]
+type = "area"
+position = [0, 2, 2]
+size = [1, 1]
+radiance = [1, 1, 1]
+
+[environment]
+type = "constant"
+radiance = [0, 0, 0]
+strength = 1

@@ -7,6 +7,7 @@
 #include <yaoray/backends/cpu/cpu_path_tracer.hpp>
 #include <yaoray/render/bvh.hpp>
 #include <yaoray/render/render_scene.hpp>
+#include <yaoray/render/shading.hpp>
 
 namespace {
 
@@ -24,6 +25,53 @@ void RebuildBvh(yr::RenderScene& scene) {
         throw std::runtime_error(build.errors[0]);
     }
     scene.bvh = build.bvh;
+}
+
+YR_TEST(shading_normal_interpolates_vertex_normals) {
+    yr::RenderTriangle triangle;
+    triangle.p0 = yr::Point3f{0.0f, 0.0f, 0.0f};
+    triangle.p1 = yr::Point3f{1.0f, 0.0f, 0.0f};
+    triangle.p2 = yr::Point3f{0.0f, 1.0f, 0.0f};
+    triangle.normal = yr::Vec3f{0.0f, 0.0f, 1.0f};
+    triangle.n0 = yr::Vec3f{0.0f, 0.0f, 1.0f};
+    triangle.n1 = yr::Normalize(yr::Vec3f{0.0f, 1.0f, 1.0f});
+    triangle.n2 = yr::Normalize(yr::Vec3f{1.0f, 0.0f, 1.0f});
+    triangle.has_vertex_normals = true;
+
+    const yr::Vec3f barycentric{0.2f, 0.3f, 0.5f};
+    const yr::Vec3f normal = yr::ResolveShadingNormal(triangle, barycentric, yr::Vec3f{0.0f, 0.0f, 1.0f});
+
+    YR_EXPECT_TRUE(normal.z > 0.8f);
+    YR_EXPECT_TRUE(normal.x > 0.2f);
+    YR_EXPECT_TRUE(normal.y > 0.1f);
+}
+
+YR_TEST(shading_normal_falls_back_to_geometric_normal) {
+    yr::RenderTriangle triangle;
+    triangle.normal = yr::Vec3f{0.0f, 0.0f, 1.0f};
+
+    const yr::Vec3f normal =
+        yr::ResolveShadingNormal(triangle, yr::Vec3f{0.2f, 0.3f, 0.5f}, yr::Vec3f{0.0f, 0.0f, 1.0f});
+
+    YR_EXPECT_NEAR(normal.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(normal.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(normal.z, 1.0, 1e-6);
+}
+
+YR_TEST(shading_normal_is_corrected_to_geometric_hemisphere) {
+    yr::RenderTriangle triangle;
+    triangle.normal = yr::Vec3f{0.0f, 0.0f, 1.0f};
+    triangle.n0 = yr::Vec3f{0.0f, 0.0f, -1.0f};
+    triangle.n1 = yr::Vec3f{0.0f, 0.0f, -1.0f};
+    triangle.n2 = yr::Vec3f{0.0f, 0.0f, -1.0f};
+    triangle.has_vertex_normals = true;
+
+    const yr::Vec3f normal =
+        yr::ResolveShadingNormal(triangle, yr::Vec3f{0.3f, 0.3f, 0.4f}, yr::Vec3f{0.0f, 0.0f, 1.0f});
+
+    YR_EXPECT_NEAR(normal.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(normal.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(normal.z, 1.0, 1e-6);
 }
 
 yr::RenderScene MakeTexturedTriangleScene(std::uint64_t seed = 7, int threads = 1) {

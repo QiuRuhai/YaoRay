@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include <yaoray/assets/gltf_loader.hpp>
 #include <yaoray/assets/obj_loader.hpp>
 
 #ifndef YAORAY_TEST_DATA_DIR
@@ -27,6 +28,15 @@ bool ErrorContains(const yr::AssetLoadResult& result, std::string_view text) {
 }
 
 } // namespace
+
+YR_TEST(imported_triangle_defaults_do_not_claim_vertex_normals) {
+    const yr::ImportedTriangle triangle;
+
+    YR_EXPECT_TRUE(!triangle.has_vertex_normals);
+    YR_EXPECT_NEAR(triangle.n0.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(triangle.n1.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(triangle.n2.z, 0.0, 1e-6);
+}
 
 YR_TEST(obj_loader_loads_triangle_obj) {
     const yr::AssetLoadResult result = yr::LoadObjMesh(FixturePath("assets/triangle.obj"));
@@ -103,6 +113,43 @@ YR_TEST(obj_loader_triangulates_quad_with_uvs) {
     YR_EXPECT_NEAR(result.mesh->triangles[1].uv2.y, 1.0, 1e-6);
 }
 
+YR_TEST(obj_loader_preserves_triangle_vertex_normals) {
+    const yr::AssetLoadResult result = yr::LoadObjMesh(FixturePath("assets/normal_triangle.obj"));
+
+    YR_EXPECT_TRUE(result.mesh.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_EQ(result.mesh->triangles.size(), std::size_t{1});
+
+    const yr::ImportedTriangle& triangle = result.mesh->triangles[0];
+    YR_EXPECT_TRUE(triangle.has_vertex_normals);
+    YR_EXPECT_NEAR(triangle.n0.z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(triangle.n1.y, 0.70710678, 1e-6);
+    YR_EXPECT_NEAR(triangle.n1.z, 0.70710678, 1e-6);
+    YR_EXPECT_NEAR(triangle.n2.x, 0.70710678, 1e-6);
+    YR_EXPECT_NEAR(triangle.n2.z, 0.70710678, 1e-6);
+}
+
+YR_TEST(obj_loader_triangulates_quad_with_uvs_and_normals) {
+    const yr::AssetLoadResult result = yr::LoadObjMesh(FixturePath("assets/normal_quad.obj"));
+
+    YR_EXPECT_TRUE(result.mesh.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_EQ(result.mesh->triangles.size(), std::size_t{2});
+
+    const yr::ImportedTriangle& first = result.mesh->triangles[0];
+    const yr::ImportedTriangle& second = result.mesh->triangles[1];
+    YR_EXPECT_TRUE(first.has_uv);
+    YR_EXPECT_TRUE(second.has_uv);
+    YR_EXPECT_TRUE(first.has_vertex_normals);
+    YR_EXPECT_TRUE(second.has_vertex_normals);
+    YR_EXPECT_NEAR(first.n0.z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(first.n1.y, 0.2, 1e-6);
+    YR_EXPECT_NEAR(first.n2.y, -0.2, 1e-6);
+    YR_EXPECT_NEAR(second.n0.y, 0.2, 1e-6);
+    YR_EXPECT_NEAR(second.n1.x, 0.2, 1e-6);
+    YR_EXPECT_NEAR(second.n2.y, -0.2, 1e-6);
+}
+
 YR_TEST(obj_loader_imports_basic_mtl_material) {
     const yr::AssetLoadResult result = yr::LoadObjMesh(FixturePath("assets/textured_quad.obj"));
 
@@ -123,4 +170,57 @@ YR_TEST(obj_loader_rejects_duplicate_mtl_material_names) {
 
     YR_EXPECT_TRUE(!result.mesh.has_value());
     YR_EXPECT_TRUE(ErrorContains(result, "duplicate OBJ material"));
+}
+
+YR_TEST(gltf_loader_rejects_non_gltf_extension) {
+    const yr::AssetLoadResult result = yr::LoadGltfMesh(FixturePath("assets/not_obj.txt"));
+
+    YR_EXPECT_TRUE(!result.mesh.has_value());
+    YR_EXPECT_TRUE(ErrorContains(result, ".gltf or .glb"));
+}
+
+YR_TEST(gltf_loader_returns_error_for_missing_file) {
+    const yr::AssetLoadResult result = yr::LoadGltfMesh(FixturePath("assets/missing.gltf"));
+
+    YR_EXPECT_TRUE(!result.mesh.has_value());
+    YR_EXPECT_TRUE(ErrorContains(result, "glTF file not found"));
+}
+
+YR_TEST(gltf_loader_loads_indexed_triangle) {
+    const yr::AssetLoadResult result =
+        yr::LoadGltfMesh(FixturePath("assets/gltf/Triangle/glTF/Triangle.gltf"));
+
+    YR_EXPECT_TRUE(result.mesh.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_EQ(result.mesh->triangles.size(), std::size_t{1});
+    YR_EXPECT_NEAR(result.mesh->triangles[0].normal.z, 1.0, 1e-6);
+}
+
+YR_TEST(gltf_loader_loads_non_indexed_triangle) {
+    const yr::AssetLoadResult result =
+        yr::LoadGltfMesh(FixturePath("assets/gltf/TriangleWithoutIndices/glTF/TriangleWithoutIndices.gltf"));
+
+    YR_EXPECT_TRUE(result.mesh.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_EQ(result.mesh->triangles.size(), std::size_t{1});
+}
+
+YR_TEST(gltf_loader_loads_base_color_texture_material) {
+    const yr::AssetLoadResult result =
+        yr::LoadGltfMesh(FixturePath("assets/gltf/SimpleTexture/glTF/SimpleTexture.gltf"));
+
+    YR_EXPECT_TRUE(result.mesh.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_TRUE(!result.mesh->materials.empty());
+    YR_EXPECT_TRUE(result.mesh->materials[0].has_diffuse_texture);
+    YR_EXPECT_TRUE(result.mesh->materials[0].diffuse_texture_path.generic_string().find("testTexture.png") != std::string::npos);
+}
+
+YR_TEST(gltf_loader_loads_binary_glb) {
+    const yr::AssetLoadResult result =
+        yr::LoadGltfMesh(FixturePath("assets/gltf/BoxTextured/glTF-Binary/BoxTextured.glb"));
+
+    YR_EXPECT_TRUE(result.mesh.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_TRUE(result.mesh->triangles.size() >= std::size_t{12});
 }
