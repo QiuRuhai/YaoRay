@@ -214,6 +214,20 @@ YR_TEST(gltf_loader_loads_base_color_texture_material) {
     YR_EXPECT_TRUE(!result.mesh->materials.empty());
     YR_EXPECT_TRUE(result.mesh->materials[0].has_diffuse_texture);
     YR_EXPECT_TRUE(result.mesh->materials[0].diffuse_texture_path.generic_string().find("testTexture.png") != std::string::npos);
+    YR_EXPECT_EQ(result.mesh->materials[0].diffuse_texture_wrap_s, yr::TextureWrap::MirroredRepeat);
+    YR_EXPECT_EQ(result.mesh->materials[0].diffuse_texture_wrap_t, yr::TextureWrap::MirroredRepeat);
+}
+
+YR_TEST(gltf_loader_warns_and_defaults_for_unsupported_texture_wraps) {
+    const yr::AssetLoadResult result =
+        yr::LoadGltfMesh(FixturePath("assets/gltf/SimpleTextureBadWrap/glTF/SimpleTextureBadWrap.gltf"));
+
+    YR_EXPECT_TRUE(result.mesh.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_TRUE(!result.warnings.empty());
+    YR_EXPECT_TRUE(result.warnings[0].find("unsupported glTF texture wrap") != std::string::npos);
+    YR_EXPECT_EQ(result.mesh->materials[0].diffuse_texture_wrap_s, yr::TextureWrap::Repeat);
+    YR_EXPECT_EQ(result.mesh->materials[0].diffuse_texture_wrap_t, yr::TextureWrap::Repeat);
 }
 
 YR_TEST(gltf_loader_loads_binary_glb) {

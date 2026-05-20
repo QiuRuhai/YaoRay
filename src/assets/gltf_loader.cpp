@@ -12,6 +12,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace yr {
 namespace {
@@ -257,10 +258,27 @@ std::optional<std::uint32_t> ReadIndexAccessorValue(
     return std::nullopt;
 }
 
+TextureWrap ConvertTextureWrap(int value, std::string_view field, AssetLoadResult& result) {
+    if (value < 0 || value == TINYGLTF_TEXTURE_WRAP_REPEAT) {
+        return TextureWrap::Repeat;
+    }
+    if (value == TINYGLTF_TEXTURE_WRAP_CLAMP_TO_EDGE) {
+        return TextureWrap::ClampToEdge;
+    }
+    if (value == TINYGLTF_TEXTURE_WRAP_MIRRORED_REPEAT) {
+        return TextureWrap::MirroredRepeat;
+    }
+    result.warnings.push_back(
+        "unsupported glTF texture wrap " + std::string{field} + ": " + std::to_string(value) + "; using repeat"
+    );
+    return TextureWrap::Repeat;
+}
+
 ImportedMaterial ConvertMaterial(
     const tinygltf::Model& model,
     const tinygltf::Material& material,
-    const std::filesystem::path& asset_dir
+    const std::filesystem::path& asset_dir,
+    AssetLoadResult& result
 ) {
     ImportedMaterial imported;
     imported.name = material.name;
@@ -289,6 +307,11 @@ ImportedMaterial ConvertMaterial(
     if (pbr.baseColorTexture.index >= 0 &&
         static_cast<std::size_t>(pbr.baseColorTexture.index) < model.textures.size()) {
         const tinygltf::Texture& texture = model.textures[static_cast<std::size_t>(pbr.baseColorTexture.index)];
+        if (texture.sampler >= 0 && static_cast<std::size_t>(texture.sampler) < model.samplers.size()) {
+            const tinygltf::Sampler& sampler = model.samplers[static_cast<std::size_t>(texture.sampler)];
+            imported.diffuse_texture_wrap_s = ConvertTextureWrap(sampler.wrapS, "wrapS", result);
+            imported.diffuse_texture_wrap_t = ConvertTextureWrap(sampler.wrapT, "wrapT", result);
+        }
         if (texture.source >= 0 && static_cast<std::size_t>(texture.source) < model.images.size()) {
             const tinygltf::Image& image = model.images[static_cast<std::size_t>(texture.source)];
             if (!image.uri.empty()) {
@@ -469,7 +492,7 @@ AssetLoadResult LoadGltfMesh(const std::filesystem::path& path) {
     const std::filesystem::path asset_dir = path.parent_path();
     mesh.materials.reserve(model.materials.size());
     for (const tinygltf::Material& material : model.materials) {
-        mesh.materials.push_back(ConvertMaterial(model, material, asset_dir));
+        mesh.materials.push_back(ConvertMaterial(model, material, asset_dir, result));
     }
 
     if (model.scenes.empty()) {
