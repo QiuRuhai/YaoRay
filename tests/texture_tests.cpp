@@ -173,6 +173,40 @@ YR_TEST(texture_loader_reads_png_texels) {
     YR_EXPECT_NEAR(result.texture.texels[3].z, 1.0, 1e-6);
 }
 
+YR_TEST(texture_loader_reads_hdr_texels_as_linear_float) {
+    const yr::TextureLoadResult result = yr::LoadHdrTexture(TextureFixturePath("assets/tiny_env.hdr"));
+
+    YR_EXPECT_TRUE(result.ok);
+    YR_EXPECT_TRUE(result.error.empty());
+    YR_EXPECT_EQ(result.texture.width, 2);
+    YR_EXPECT_EQ(result.texture.height, 2);
+    YR_EXPECT_EQ(result.texture.filter, yr::TextureFilter::Bilinear);
+    YR_EXPECT_EQ(result.texture.wrap_s, yr::TextureWrap::Repeat);
+    YR_EXPECT_EQ(result.texture.wrap_t, yr::TextureWrap::ClampToEdge);
+    YR_EXPECT_EQ(result.texture.texels.size(), std::size_t{4});
+    YR_EXPECT_NEAR(result.texture.texels[0].x, 1.0, 1e-5);
+    YR_EXPECT_NEAR(result.texture.texels[0].y, 0.0, 1e-5);
+    YR_EXPECT_NEAR(result.texture.texels[1].y, 1.0, 1e-5);
+    YR_EXPECT_NEAR(result.texture.texels[2].z, 1.0, 1e-5);
+    YR_EXPECT_NEAR(result.texture.texels[3].x, 1.0, 1e-5);
+    YR_EXPECT_NEAR(result.texture.texels[3].y, 1.0, 1e-5);
+    YR_EXPECT_NEAR(result.texture.texels[3].z, 1.0, 1e-5);
+}
+
+YR_TEST(texture_loader_rejects_non_hdr_extension_for_hdr_load) {
+    const yr::TextureLoadResult result = yr::LoadHdrTexture(TextureFixturePath("assets/checker_2x2.png"));
+
+    YR_EXPECT_TRUE(!result.ok);
+    YR_EXPECT_TRUE(result.error.find(".hdr") != std::string::npos);
+}
+
+YR_TEST(texture_loader_reports_missing_hdr_file) {
+    const yr::TextureLoadResult result = yr::LoadHdrTexture(TextureFixturePath("assets/missing_environment.hdr"));
+
+    YR_EXPECT_TRUE(!result.ok);
+    YR_EXPECT_TRUE(result.error.find("not found") != std::string::npos);
+}
+
 YR_TEST(texture_loader_rejects_non_png_extension) {
     const yr::TextureLoadResult result = yr::LoadPngTexture(TextureFixturePath("assets/triangle.obj"));
 

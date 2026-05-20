@@ -31,5 +31,6 @@ Color3f SampleTextureNearest(const RenderTexture& texture, Vec2f uv);
 Color3f SampleTextureBilinear(const RenderTexture& texture, Vec2f uv);
 
 TextureLoadResult LoadPngTexture(const std::filesystem::path& path);
+TextureLoadResult LoadHdrTexture(const std::filesystem::path& path);
 
 } // namespace yr

@@ -1,6 +1,5 @@
 #include <yaoray/render/texture.hpp>
 
-#define STBI_ONLY_PNG
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
@@ -70,6 +69,10 @@ std::string LowerExtension(const std::filesystem::path& path) {
         return static_cast<char>(std::tolower(ch));
     });
     return extension;
+}
+
+bool IsFiniteColor(Color3f color) {
+    return std::isfinite(color.x) && std::isfinite(color.y) && std::isfinite(color.z);
 }
 
 } // namespace
@@ -161,6 +164,76 @@ TextureLoadResult LoadPngTexture(const std::filesystem::path& path) {
     }
     stbi_image_free(pixels);
 
+    return TextureLoadResult{std::move(texture), true, {}};
+}
+
+TextureLoadResult LoadHdrTexture(const std::filesystem::path& path) {
+    if (LowerExtension(path) != ".hdr") {
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "HDR environment path must use a .hdr extension: " + path.generic_string()
+        };
+    }
+    if (!std::filesystem::exists(path)) {
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "HDR environment file not found: " + path.generic_string()
+        };
+    }
+
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    float* pixels = stbi_loadf(path.string().c_str(), &width, &height, &channels, 3);
+    if (pixels == nullptr) {
+        const char* reason = stbi_failure_reason();
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "failed to load HDR environment: " + path.generic_string() +
+                (reason == nullptr ? "" : std::string{" ("} + reason + ")")
+        };
+    }
+    if (width <= 0 || height <= 0) {
+        stbi_image_free(pixels);
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "HDR environment has invalid dimensions: " + path.generic_string()
+        };
+    }
+
+    RenderTexture texture;
+    texture.width = width;
+    texture.height = height;
+    texture.filter = TextureFilter::Bilinear;
+    texture.wrap_s = TextureWrap::Repeat;
+    texture.wrap_t = TextureWrap::ClampToEdge;
+    texture.texels.reserve(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+    for (int i = 0; i < width * height; ++i) {
+        const int base = i * 3;
+        const Color3f color{pixels[base + 0], pixels[base + 1], pixels[base + 2]};
+        if (!IsFiniteColor(color)) {
+            stbi_image_free(pixels);
+            return TextureLoadResult{
+                RenderTexture{},
+                false,
+                "HDR environment contains non-finite texels: " + path.generic_string()
+            };
+        }
+        texture.texels.push_back(color);
+    }
+    stbi_image_free(pixels);
+
+    if (texture.texels.empty()) {
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "HDR environment contains no texels: " + path.generic_string()
+        };
+    }
     return TextureLoadResult{std::move(texture), true, {}};
 }
 
