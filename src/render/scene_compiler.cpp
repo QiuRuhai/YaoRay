@@ -178,20 +178,35 @@ int AddDefaultMaterial(RenderScene& compiled) {
     return material_index;
 }
 
-std::string CanonicalTextureKey(const std::filesystem::path& path) {
+std::string TextureWrapName(TextureWrap wrap) {
+    switch (wrap) {
+        case TextureWrap::Repeat:
+            return "repeat";
+        case TextureWrap::ClampToEdge:
+            return "clamp";
+        case TextureWrap::MirroredRepeat:
+            return "mirror";
+    }
+    return "repeat";
+}
+
+std::string CanonicalTextureKey(const std::filesystem::path& path, TextureWrap wrap_s, TextureWrap wrap_t) {
     std::error_code ec;
     const std::filesystem::path canonical = std::filesystem::weakly_canonical(path, ec);
-    return ec ? path.lexically_normal().generic_string() : canonical.generic_string();
+    const std::string normalized = ec ? path.lexically_normal().generic_string() : canonical.generic_string();
+    return normalized + "|s=" + TextureWrapName(wrap_s) + "|t=" + TextureWrapName(wrap_t);
 }
 
 std::optional<int> LoadTextureIndex(
     const SceneDescription& scene,
     RenderScene& compiled,
     const std::filesystem::path& path,
+    TextureWrap wrap_s,
+    TextureWrap wrap_t,
     TextureCache& texture_cache,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
-    const std::string key = CanonicalTextureKey(path);
+    const std::string key = CanonicalTextureKey(path, wrap_s, wrap_t);
     const auto found = texture_cache.indices.find(key);
     if (found != texture_cache.indices.end()) {
         return found->second;
@@ -202,6 +217,9 @@ std::optional<int> LoadTextureIndex(
         diagnostics.push_back(Error(scene, "assets.path", load.error));
         return std::nullopt;
     }
+    load.texture.wrap_s = wrap_s;
+    load.texture.wrap_t = wrap_t;
+    load.texture.filter = TextureFilter::Bilinear;
 
     const int texture_index = static_cast<int>(compiled.textures.size());
     compiled.textures.push_back(std::move(load.texture));
@@ -227,8 +245,15 @@ std::vector<int> CompileImportedMaterials(
         render_material.roughness = material.roughness;
         render_material.specular = material.specular;
         if (material.has_diffuse_texture) {
-            const std::optional<int> texture_index =
-                LoadTextureIndex(scene, compiled, material.diffuse_texture_path, texture_cache, diagnostics);
+            const std::optional<int> texture_index = LoadTextureIndex(
+                scene,
+                compiled,
+                material.diffuse_texture_path,
+                material.diffuse_texture_wrap_s,
+                material.diffuse_texture_wrap_t,
+                texture_cache,
+                diagnostics
+            );
             if (!texture_index.has_value()) {
                 material_indices.push_back(-1);
                 continue;

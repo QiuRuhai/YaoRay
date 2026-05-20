@@ -442,6 +442,51 @@ YR_TEST(scene_compiler_imports_gltf_texture_and_uvs) {
     YR_EXPECT_EQ(compiled.materials[0].albedo_texture, 0);
 }
 
+YR_TEST(scene_compiler_propagates_gltf_texture_wrap_modes) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "textured",
+        FixturePath("assets/gltf/SimpleTexture/glTF/SimpleTexture.gltf")
+    });
+    scene.instances.push_back(yr::InstanceDescription{"textured", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderScene& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.textures.size(), std::size_t{1});
+    YR_EXPECT_EQ(compiled.textures[0].filter, yr::TextureFilter::Bilinear);
+    YR_EXPECT_EQ(compiled.textures[0].wrap_s, yr::TextureWrap::MirroredRepeat);
+    YR_EXPECT_EQ(compiled.textures[0].wrap_t, yr::TextureWrap::MirroredRepeat);
+}
+
+YR_TEST(scene_compiler_texture_cache_keeps_distinct_sampler_state) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "mirrored",
+        FixturePath("assets/gltf/SimpleTexture/glTF/SimpleTexture.gltf")
+    });
+    scene.assets.push_back(yr::AssetDescription{
+        "clamped",
+        FixturePath("assets/gltf/SimpleTextureClamp/glTF/SimpleTextureClamp.gltf")
+    });
+    scene.instances.push_back(yr::InstanceDescription{"mirrored", {}});
+    yr::InstanceDescription second;
+    second.asset = "clamped";
+    second.transform.translate = yr::Vec3f{2.0f, 0.0f, 0.0f};
+    scene.instances.push_back(second);
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderScene& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.textures.size(), std::size_t{2});
+    YR_EXPECT_EQ(compiled.textures[0].wrap_s, yr::TextureWrap::MirroredRepeat);
+    YR_EXPECT_EQ(compiled.textures[1].wrap_s, yr::TextureWrap::ClampToEdge);
+}
+
 YR_TEST(scene_compiler_scene_material_overrides_imported_gltf_material) {
     yr::SceneDescription scene = MakeBaseScene();
     scene.assets.push_back(yr::AssetDescription{

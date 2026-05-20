@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <yaoray/core/texture_sampler.hpp>
 #include <yaoray/core/vec.hpp>
 #include <yaoray/scene/scene.hpp>
 
@@ -19,6 +20,8 @@ struct ImportedMaterial {
     float specular = 0.04f;
     std::filesystem::path diffuse_texture_path;
     bool has_diffuse_texture = false;
+    TextureWrap diffuse_texture_wrap_s = TextureWrap::Repeat;
+    TextureWrap diffuse_texture_wrap_t = TextureWrap::Repeat;
 };
 
 struct ImportedTriangle {
