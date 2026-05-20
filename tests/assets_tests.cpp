@@ -112,6 +112,43 @@ YR_TEST(obj_loader_triangulates_quad_with_uvs) {
     YR_EXPECT_NEAR(result.mesh->triangles[1].uv2.y, 1.0, 1e-6);
 }
 
+YR_TEST(obj_loader_preserves_triangle_vertex_normals) {
+    const yr::AssetLoadResult result = yr::LoadObjMesh(FixturePath("assets/normal_triangle.obj"));
+
+    YR_EXPECT_TRUE(result.mesh.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_EQ(result.mesh->triangles.size(), std::size_t{1});
+
+    const yr::ImportedTriangle& triangle = result.mesh->triangles[0];
+    YR_EXPECT_TRUE(triangle.has_vertex_normals);
+    YR_EXPECT_NEAR(triangle.n0.z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(triangle.n1.y, 0.70710678, 1e-6);
+    YR_EXPECT_NEAR(triangle.n1.z, 0.70710678, 1e-6);
+    YR_EXPECT_NEAR(triangle.n2.x, 0.70710678, 1e-6);
+    YR_EXPECT_NEAR(triangle.n2.z, 0.70710678, 1e-6);
+}
+
+YR_TEST(obj_loader_triangulates_quad_with_uvs_and_normals) {
+    const yr::AssetLoadResult result = yr::LoadObjMesh(FixturePath("assets/normal_quad.obj"));
+
+    YR_EXPECT_TRUE(result.mesh.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_EQ(result.mesh->triangles.size(), std::size_t{2});
+
+    const yr::ImportedTriangle& first = result.mesh->triangles[0];
+    const yr::ImportedTriangle& second = result.mesh->triangles[1];
+    YR_EXPECT_TRUE(first.has_uv);
+    YR_EXPECT_TRUE(second.has_uv);
+    YR_EXPECT_TRUE(first.has_vertex_normals);
+    YR_EXPECT_TRUE(second.has_vertex_normals);
+    YR_EXPECT_NEAR(first.n0.z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(first.n1.y, 0.2, 1e-6);
+    YR_EXPECT_NEAR(first.n2.y, -0.2, 1e-6);
+    YR_EXPECT_NEAR(second.n0.y, 0.2, 1e-6);
+    YR_EXPECT_NEAR(second.n1.x, 0.2, 1e-6);
+    YR_EXPECT_NEAR(second.n2.y, -0.2, 1e-6);
+}
+
 YR_TEST(obj_loader_imports_basic_mtl_material) {
     const yr::AssetLoadResult result = yr::LoadObjMesh(FixturePath("assets/textured_quad.obj"));
 

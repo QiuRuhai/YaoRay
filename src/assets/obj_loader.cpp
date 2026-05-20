@@ -53,6 +53,25 @@ Vec2f ReadTexCoord(const tinyobj::attrib_t& attrib, int texcoord_index, bool& ok
     return Vec2f{attrib.texcoords[base + 0], attrib.texcoords[base + 1]};
 }
 
+Vec3f ReadNormal(const tinyobj::attrib_t& attrib, int normal_index, bool& ok) {
+    if (normal_index < 0) {
+        ok = false;
+        return {};
+    }
+
+    const std::size_t base = static_cast<std::size_t>(normal_index) * 3;
+    if (base + 2 >= attrib.normals.size()) {
+        ok = false;
+        return {};
+    }
+
+    return Normalize(Vec3f{
+        attrib.normals[base + 0],
+        attrib.normals[base + 1],
+        attrib.normals[base + 2]
+    });
+}
+
 void AddIfNotEmpty(std::vector<std::string>& values, const std::string& value) {
     if (!value.empty()) {
         values.push_back(value);
@@ -139,6 +158,10 @@ AssetLoadResult LoadObjMesh(const std::filesystem::path& path) {
             const Vec2f uv0 = ReadTexCoord(attrib, shape.mesh.indices[index_offset + 0].texcoord_index, uvs_ok);
             const Vec2f uv1 = ReadTexCoord(attrib, shape.mesh.indices[index_offset + 1].texcoord_index, uvs_ok);
             const Vec2f uv2 = ReadTexCoord(attrib, shape.mesh.indices[index_offset + 2].texcoord_index, uvs_ok);
+            bool normals_ok = true;
+            const Vec3f n0 = ReadNormal(attrib, shape.mesh.indices[index_offset + 0].normal_index, normals_ok);
+            const Vec3f n1 = ReadNormal(attrib, shape.mesh.indices[index_offset + 1].normal_index, normals_ok);
+            const Vec3f n2 = ReadNormal(attrib, shape.mesh.indices[index_offset + 2].normal_index, normals_ok);
             const int material_index = face_index < shape.mesh.material_ids.size() ? shape.mesh.material_ids[face_index] : -1;
             index_offset += 3;
 
@@ -162,6 +185,14 @@ AssetLoadResult LoadObjMesh(const std::filesystem::path& path) {
             imported.uv1 = uv1;
             imported.uv2 = uv2;
             imported.has_uv = uvs_ok;
+            imported.n0 = n0;
+            imported.n1 = n1;
+            imported.n2 = n2;
+            imported.has_vertex_normals =
+                normals_ok &&
+                LengthSquared(n0) > 0.0f &&
+                LengthSquared(n1) > 0.0f &&
+                LengthSquared(n2) > 0.0f;
             imported.material_index = material_index;
             mesh.triangles.push_back(imported);
         }
