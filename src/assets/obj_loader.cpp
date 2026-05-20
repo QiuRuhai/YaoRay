@@ -153,17 +153,17 @@ AssetLoadResult LoadObjMesh(const std::filesystem::path& path) {
                 continue;
             }
 
-            mesh.triangles.push_back(ImportedTriangle{
-                p0,
-                p1,
-                p2,
-                normal,
-                uv0,
-                uv1,
-                uv2,
-                uvs_ok,
-                material_index
-            });
+            ImportedTriangle imported;
+            imported.p0 = p0;
+            imported.p1 = p1;
+            imported.p2 = p2;
+            imported.normal = normal;
+            imported.uv0 = uv0;
+            imported.uv1 = uv1;
+            imported.uv2 = uv2;
+            imported.has_uv = uvs_ok;
+            imported.material_index = material_index;
+            mesh.triangles.push_back(imported);
         }
     }
 

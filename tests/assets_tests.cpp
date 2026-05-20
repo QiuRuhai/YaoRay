@@ -28,6 +28,15 @@ bool ErrorContains(const yr::AssetLoadResult& result, std::string_view text) {
 
 } // namespace
 
+YR_TEST(imported_triangle_defaults_do_not_claim_vertex_normals) {
+    const yr::ImportedTriangle triangle;
+
+    YR_EXPECT_TRUE(!triangle.has_vertex_normals);
+    YR_EXPECT_NEAR(triangle.n0.x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(triangle.n1.y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(triangle.n2.z, 0.0, 1e-6);
+}
+
 YR_TEST(obj_loader_loads_triangle_obj) {
     const yr::AssetLoadResult result = yr::LoadObjMesh(FixturePath("assets/triangle.obj"));
 
