@@ -24,6 +24,20 @@ struct RenderEnvironment {
     EnvironmentKind type = EnvironmentKind::None;
     Color3f radiance;
     float strength = 1.0f;
+    float rotation_radians = 0.0f;
+    int texture_index = -1;
+    int distribution_index = -1;
+};
+
+struct RenderEnvironmentDistribution {
+    int width = 0;
+    int height = 0;
+    std::vector<float> texel_weights;
+    std::vector<float> row_weights;
+    std::vector<float> row_cdf;
+    std::vector<float> conditional_cdfs;
+    float total_weight = 0.0f;
+    bool uniform = false;
 };
 
 struct RenderMaterial {
@@ -73,6 +87,7 @@ struct RenderScene {
     RenderEnvironment environment;
     std::vector<RenderMaterial> materials;
     std::vector<RenderTexture> textures;
+    std::vector<RenderEnvironmentDistribution> environment_distributions;
     std::vector<RenderTriangle> triangles;
     std::vector<RenderAreaLight> area_lights;
     RenderBvh bvh;
