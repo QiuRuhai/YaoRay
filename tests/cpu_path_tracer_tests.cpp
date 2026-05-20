@@ -129,6 +129,22 @@ yr::RenderScene MakeTexturedTriangleScene(std::uint64_t seed = 7, int threads = 
     return scene;
 }
 
+yr::RenderScene MakeBilinearTexturedTriangleScene() {
+    yr::RenderScene scene = MakeTexturedTriangleScene();
+    scene.textures[0].filter = yr::TextureFilter::Bilinear;
+    scene.triangles[0].uv0 = yr::Vec2f{0.5f, 0.5f};
+    scene.triangles[0].uv1 = yr::Vec2f{0.5f, 0.5f};
+    scene.triangles[0].uv2 = yr::Vec2f{0.5f, 0.5f};
+    RebuildBvh(scene);
+    return scene;
+}
+
+yr::RenderScene MakeNearestCenterTexturedTriangleScene() {
+    yr::RenderScene scene = MakeBilinearTexturedTriangleScene();
+    scene.textures[0].filter = yr::TextureFilter::Nearest;
+    return scene;
+}
+
 yr::RenderScene MakeBaseScene(int width, int height) {
     yr::RenderScene scene;
     scene.width = width;
@@ -608,6 +624,18 @@ YR_TEST(cpu_path_tracer_uses_diffuse_texture_albedo_on_hit) {
     YR_EXPECT_TRUE(pixel.x > 0.0f);
     YR_EXPECT_TRUE(pixel.y < pixel.x * 0.1f);
     YR_EXPECT_TRUE(pixel.z < pixel.x * 0.1f);
+}
+
+YR_TEST(cpu_path_tracer_uses_bilinear_texture_sampling) {
+    const yr::CpuPathTraceResult nearest = yr::RenderCpuPathTrace(MakeNearestCenterTexturedTriangleScene());
+    const yr::CpuPathTraceResult bilinear = yr::RenderCpuPathTrace(MakeBilinearTexturedTriangleScene());
+    const yr::Color3f nearest_pixel = nearest.film.LinearPixel(0, 0);
+    const yr::Color3f bilinear_pixel = bilinear.film.LinearPixel(0, 0);
+
+    YR_EXPECT_TRUE(bilinear_pixel.x > 0.0f);
+    YR_EXPECT_NEAR(bilinear_pixel.x, bilinear_pixel.y, 1e-5);
+    YR_EXPECT_NEAR(bilinear_pixel.y, bilinear_pixel.z, 1e-5);
+    YR_EXPECT_TRUE(bilinear_pixel.x < nearest_pixel.x * 0.75f);
 }
 
 YR_TEST(cpu_path_tracer_textured_scene_is_deterministic_across_thread_counts) {

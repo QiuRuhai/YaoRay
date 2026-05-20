@@ -56,7 +56,7 @@ RenderMaterial ResolveHitMaterial(
     }
     const Vec3f barycentric = BarycentricCoordinates(hit_point, triangle);
     const Vec2f uv = InterpolateUv(triangle, barycentric);
-    resolved.albedo = SampleTextureNearest(scene.textures[texture_index], uv);
+    resolved.albedo = SampleTexture(scene.textures[texture_index], uv);
     return resolved;
 }
 
