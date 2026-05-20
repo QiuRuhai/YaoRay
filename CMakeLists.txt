@@ -58,6 +58,7 @@ add_library(yaoray_render STATIC
     src/render/light_sampling.cpp
     src/render/mis.cpp
     src/render/scene_compiler.cpp
+    src/render/shading.cpp
     src/render/texture.cpp
 )
 target_include_directories(yaoray_render PUBLIC include)

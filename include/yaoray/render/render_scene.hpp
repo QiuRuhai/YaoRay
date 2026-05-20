@@ -45,6 +45,10 @@ struct RenderTriangle {
     Vec2f uv1;
     Vec2f uv2;
     bool has_uv = false;
+    Vec3f n0;
+    Vec3f n1;
+    Vec3f n2;
+    bool has_vertex_normals = false;
 };
 
 struct RenderAreaLight {
