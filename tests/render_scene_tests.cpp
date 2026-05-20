@@ -370,7 +370,7 @@ YR_TEST(scene_compiler_applies_builtin_triangle_transform) {
 
 YR_TEST(scene_compiler_rejects_external_assets) {
     yr::SceneDescription scene = MakeBaseScene();
-    scene.assets.push_back(yr::AssetDescription{"model", "assets/model.glb"});
+    scene.assets.push_back(yr::AssetDescription{"model", "assets/model.fbx"});
     scene.instances.push_back(yr::InstanceDescription{"model", {}});
 
     const yr::SceneCompileResult result = yr::CompileScene(scene);
@@ -405,6 +405,68 @@ YR_TEST(scene_compiler_expands_obj_asset) {
     YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{2});
     YR_EXPECT_EQ(result.scene.value().triangles[0].material_index, 0);
     YR_EXPECT_NEAR(result.scene.value().triangles[0].normal.z, 1.0, 1e-6);
+}
+
+YR_TEST(scene_compiler_expands_gltf_asset) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "triangle",
+        FixturePath("assets/gltf/Triangle/glTF/Triangle.gltf")
+    });
+    scene.instances.push_back(yr::InstanceDescription{"triangle", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().materials.size(), std::size_t{1});
+}
+
+YR_TEST(scene_compiler_imports_gltf_texture_and_uvs) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "textured",
+        FixturePath("assets/gltf/SimpleTexture/glTF/SimpleTexture.gltf")
+    });
+    scene.instances.push_back(yr::InstanceDescription{"textured", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderScene& compiled = result.scene.value();
+    YR_EXPECT_TRUE(!compiled.triangles.empty());
+    YR_EXPECT_TRUE(compiled.triangles[0].has_uv);
+    YR_EXPECT_EQ(compiled.textures.size(), std::size_t{1});
+    YR_EXPECT_EQ(compiled.materials[0].albedo_texture, 0);
+}
+
+YR_TEST(scene_compiler_scene_material_overrides_imported_gltf_material) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "textured",
+        FixturePath("assets/gltf/SimpleTexture/glTF/SimpleTexture.gltf")
+    });
+    scene.materials.push_back(yr::MaterialDescription{
+        "override",
+        yr::MaterialKind::Diffuse,
+        yr::Color3f{0.9f, 0.1f, 0.2f},
+        yr::Color3f{}
+    });
+    yr::InstanceDescription instance;
+    instance.asset = "textured";
+    instance.material = "override";
+    scene.instances.push_back(instance);
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderScene& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
+    YR_EXPECT_TRUE(compiled.textures.empty());
+    YR_EXPECT_EQ(compiled.triangles[0].material_index, 0);
 }
 
 YR_TEST(scene_compiler_preserves_obj_vertex_normals) {

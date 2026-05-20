@@ -1,5 +1,6 @@
 #include <yaoray/render/scene_compiler.hpp>
 
+#include <yaoray/assets/gltf_loader.hpp>
 #include <yaoray/assets/obj_loader.hpp>
 #include <yaoray/render/bvh.hpp>
 #include <yaoray/render/texture.hpp>
@@ -31,6 +32,10 @@ SceneDiagnostic Warning(const SceneDescription& scene, std::string field, std::s
 
 bool HasObjExtension(const std::filesystem::path& path) {
     return path.extension() == ".obj";
+}
+
+bool HasGltfExtension(const std::filesystem::path& path) {
+    return path.extension() == ".gltf" || path.extension() == ".glb";
 }
 
 RenderCamera CompileCamera(const CameraDescription& camera) {
@@ -216,8 +221,11 @@ std::vector<int> CompileImportedMaterials(
 
     for (const ImportedMaterial& material : mesh.materials) {
         RenderMaterial render_material;
-        render_material.type = MaterialKind::Diffuse;
+        render_material.type = material.type;
         render_material.albedo = material.diffuse;
+        render_material.emission = material.emission;
+        render_material.roughness = material.roughness;
+        render_material.specular = material.specular;
         if (material.has_diffuse_texture) {
             const std::optional<int> texture_index =
                 LoadTextureIndex(scene, compiled, material.diffuse_texture_path, texture_cache, diagnostics);
@@ -384,6 +392,47 @@ void AppendObjAsset(
     AppendImportedMesh(compiled, cached->second, transform, override_material_index, imported_material_indices);
 }
 
+void AppendGltfAsset(
+    const SceneDescription& scene,
+    RenderScene& compiled,
+    const std::filesystem::path& asset_path,
+    const TransformDescription& transform,
+    std::optional<int> override_material_index,
+    std::unordered_map<std::string, ImportedMesh>& mesh_cache,
+    TextureCache& texture_cache,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const std::string cache_key = asset_path.generic_string();
+    auto cached = mesh_cache.find(cache_key);
+    if (cached == mesh_cache.end()) {
+        AssetLoadResult load_result = LoadGltfMesh(asset_path);
+        for (const std::string& warning : load_result.warnings) {
+            diagnostics.push_back(Warning(scene, "assets.path", warning));
+        }
+        for (const std::string& error : load_result.errors) {
+            diagnostics.push_back(Error(scene, "assets.path", error));
+        }
+        if (!load_result.errors.empty()) {
+            return;
+        }
+        if (!load_result.mesh.has_value()) {
+            diagnostics.push_back(Error(scene, "assets.path", "glTF loader returned no mesh: " + cache_key));
+            return;
+        }
+        cached = mesh_cache.emplace(cache_key, std::move(load_result.mesh.value())).first;
+    }
+
+    std::vector<int> imported_material_indices;
+    if (!override_material_index.has_value()) {
+        imported_material_indices = CompileImportedMaterials(scene, compiled, cached->second, texture_cache, diagnostics);
+        if (HasSceneErrors(diagnostics)) {
+            return;
+        }
+    }
+
+    AppendImportedMesh(compiled, cached->second, transform, override_material_index, imported_material_indices);
+}
+
 } // namespace
 
 SceneCompileResult CompileScene(const SceneDescription& scene) {
@@ -456,6 +505,17 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
             AppendBuiltinTriangle(compiled, instance.transform, *material_index);
         } else if (HasObjExtension(asset_path)) {
             AppendObjAsset(
+                scene,
+                compiled,
+                asset_path,
+                instance.transform,
+                material_index,
+                mesh_cache,
+                texture_cache,
+                result.diagnostics
+            );
+        } else if (HasGltfExtension(asset_path)) {
+            AppendGltfAsset(
                 scene,
                 compiled,
                 asset_path,
