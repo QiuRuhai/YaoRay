@@ -134,6 +134,7 @@ struct EnvironmentDescription {
     Color3f radiance;
     std::filesystem::path path;
     float strength = 1.0f;
+    float rotation_degrees = 0.0f;
 };
 
 struct SceneDescription {

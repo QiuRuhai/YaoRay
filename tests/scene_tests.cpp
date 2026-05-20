@@ -110,6 +110,13 @@ YR_TEST(scene_defaults_match_schema) {
     YR_EXPECT_TRUE(scene.assets.empty());
 }
 
+YR_TEST(scene_defaults_include_environment_rotation) {
+    const yr::SceneDescription scene;
+
+    YR_EXPECT_NEAR(scene.environment.strength, 1.0, 1e-6);
+    YR_EXPECT_NEAR(scene.environment.rotation_degrees, 0.0, 1e-6);
+}
+
 YR_TEST(scene_enum_names_are_stable) {
     YR_EXPECT_EQ(yr::RenderBackendName(yr::RenderBackendKind::Cpu), std::string_view{"cpu"});
     YR_EXPECT_EQ(yr::RenderBackendName(yr::RenderBackendKind::Cuda), std::string_view{"cuda"});
@@ -511,6 +518,104 @@ fov_y = 45
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
     YR_EXPECT_EQ(result.scene.value().render.light_samples, 4);
+}
+
+YR_TEST(scene_parser_loads_hdri_environment_rotation) {
+    const std::filesystem::path path = WriteTempScene(
+        "hdri_environment_rotation.toml",
+        R"toml(
+[render]
+width = 64
+height = 32
+
+[film]
+output = "out/test.png"
+
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+
+[environment]
+type = "hdri"
+path = "assets/env/studio.hdr"
+strength = 1.5
+rotation_degrees = 45.0
+)toml"
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::EnvironmentDescription& environment = result.scene.value().environment;
+    YR_EXPECT_EQ(environment.type, yr::EnvironmentKind::Hdri);
+    YR_EXPECT_EQ(environment.path.filename().generic_string(), std::string{"studio.hdr"});
+    YR_EXPECT_NEAR(environment.strength, 1.5, 1e-6);
+    YR_EXPECT_NEAR(environment.rotation_degrees, 45.0, 1e-6);
+}
+
+YR_TEST(scene_parser_rejects_negative_environment_strength) {
+    const std::filesystem::path path = WriteTempScene(
+        "negative_environment_strength.toml",
+        R"toml(
+[render]
+width = 64
+height = 32
+
+[film]
+output = "out/test.png"
+
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+
+[environment]
+type = "constant"
+radiance = [1, 1, 1]
+strength = -0.25
+)toml"
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "environment.strength", "must be non-negative"));
+}
+
+YR_TEST(scene_parser_rejects_non_numeric_environment_rotation) {
+    const std::filesystem::path path = WriteTempScene(
+        "bad_environment_rotation.toml",
+        R"toml(
+[render]
+width = 64
+height = 32
+
+[film]
+output = "out/test.png"
+
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+
+[environment]
+type = "hdri"
+path = "assets/env/studio.hdr"
+rotation_degrees = "east"
+)toml"
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "environment.rotation_degrees", "must be a finite float"));
 }
 
 YR_TEST(scene_parser_rejects_zero_render_light_samples) {

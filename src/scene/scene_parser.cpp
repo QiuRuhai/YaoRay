@@ -780,7 +780,7 @@ void ParseEnvironment(
     const std::filesystem::path& file,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
-    CheckUnknownFields(table, "environment", {"type", "radiance", "path", "strength"}, file, diagnostics);
+    CheckUnknownFields(table, "environment", {"type", "radiance", "path", "strength", "rotation_degrees"}, file, diagnostics);
 
     if (const auto type = ReadValue<std::string>(table, "type")) {
         if (const auto parsed = ParseEnvironmentKindName(*type)) {
@@ -796,7 +796,14 @@ void ParseEnvironment(
         scene.environment.path = path->empty() ? std::filesystem::path{} : NormalizeScenePath(scene_dir, *path);
     }
     if (const auto strength = ReadFloat(table, "strength", file, "environment.strength", diagnostics)) {
-        scene.environment.strength = *strength;
+        if (*strength < 0.0f) {
+            diagnostics.push_back(Error(file, "environment.strength", "must be non-negative"));
+        } else {
+            scene.environment.strength = *strength;
+        }
+    }
+    if (const auto rotation = ReadFloat(table, "rotation_degrees", file, "environment.rotation_degrees", diagnostics)) {
+        scene.environment.rotation_degrees = *rotation;
     }
 }
 
