@@ -185,3 +185,42 @@ YR_TEST(gltf_loader_returns_error_for_missing_file) {
     YR_EXPECT_TRUE(!result.mesh.has_value());
     YR_EXPECT_TRUE(ErrorContains(result, "glTF file not found"));
 }
+
+YR_TEST(gltf_loader_loads_indexed_triangle) {
+    const yr::AssetLoadResult result =
+        yr::LoadGltfMesh(FixturePath("assets/gltf/Triangle/glTF/Triangle.gltf"));
+
+    YR_EXPECT_TRUE(result.mesh.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_EQ(result.mesh->triangles.size(), std::size_t{1});
+    YR_EXPECT_NEAR(result.mesh->triangles[0].normal.z, 1.0, 1e-6);
+}
+
+YR_TEST(gltf_loader_loads_non_indexed_triangle) {
+    const yr::AssetLoadResult result =
+        yr::LoadGltfMesh(FixturePath("assets/gltf/TriangleWithoutIndices/glTF/TriangleWithoutIndices.gltf"));
+
+    YR_EXPECT_TRUE(result.mesh.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_EQ(result.mesh->triangles.size(), std::size_t{1});
+}
+
+YR_TEST(gltf_loader_loads_base_color_texture_material) {
+    const yr::AssetLoadResult result =
+        yr::LoadGltfMesh(FixturePath("assets/gltf/SimpleTexture/glTF/SimpleTexture.gltf"));
+
+    YR_EXPECT_TRUE(result.mesh.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_TRUE(!result.mesh->materials.empty());
+    YR_EXPECT_TRUE(result.mesh->materials[0].has_diffuse_texture);
+    YR_EXPECT_TRUE(result.mesh->materials[0].diffuse_texture_path.generic_string().find("testTexture.png") != std::string::npos);
+}
+
+YR_TEST(gltf_loader_loads_binary_glb) {
+    const yr::AssetLoadResult result =
+        yr::LoadGltfMesh(FixturePath("assets/gltf/BoxTextured/glTF-Binary/BoxTextured.glb"));
+
+    YR_EXPECT_TRUE(result.mesh.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_TRUE(result.mesh->triangles.size() >= std::size_t{12});
+}
