@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include <yaoray/assets/gltf_loader.hpp>
 #include <yaoray/assets/obj_loader.hpp>
 
 #ifndef YAORAY_TEST_DATA_DIR
@@ -169,4 +170,18 @@ YR_TEST(obj_loader_rejects_duplicate_mtl_material_names) {
 
     YR_EXPECT_TRUE(!result.mesh.has_value());
     YR_EXPECT_TRUE(ErrorContains(result, "duplicate OBJ material"));
+}
+
+YR_TEST(gltf_loader_rejects_non_gltf_extension) {
+    const yr::AssetLoadResult result = yr::LoadGltfMesh(FixturePath("assets/not_obj.txt"));
+
+    YR_EXPECT_TRUE(!result.mesh.has_value());
+    YR_EXPECT_TRUE(ErrorContains(result, ".gltf or .glb"));
+}
+
+YR_TEST(gltf_loader_returns_error_for_missing_file) {
+    const yr::AssetLoadResult result = yr::LoadGltfMesh(FixturePath("assets/missing.gltf"));
+
+    YR_EXPECT_TRUE(!result.mesh.has_value());
+    YR_EXPECT_TRUE(ErrorContains(result, "glTF file not found"));
 }

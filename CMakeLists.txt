@@ -37,6 +37,9 @@ target_include_directories(tomlplusplus INTERFACE external/tomlplusplus)
 add_library(tinyobjloader INTERFACE)
 target_include_directories(tinyobjloader INTERFACE external/tinyobjloader)
 
+add_library(tinygltf INTERFACE)
+target_include_directories(tinygltf INTERFACE external/tinygltf external/stb)
+
 add_library(yaoray_scene STATIC
     src/scene/diagnostic.cpp
     src/scene/scene.cpp
@@ -46,10 +49,11 @@ target_include_directories(yaoray_scene PUBLIC include)
 target_link_libraries(yaoray_scene PUBLIC yaoray_core PRIVATE tomlplusplus)
 
 add_library(yaoray_assets STATIC
+    src/assets/gltf_loader.cpp
     src/assets/obj_loader.cpp
 )
 target_include_directories(yaoray_assets PUBLIC include)
-target_link_libraries(yaoray_assets PUBLIC yaoray_core PRIVATE tinyobjloader)
+target_link_libraries(yaoray_assets PUBLIC yaoray_core yaoray_scene PRIVATE tinygltf tinyobjloader)
 target_compile_options(yaoray_assets PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
 
 add_library(yaoray_render STATIC
