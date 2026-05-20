@@ -3,6 +3,7 @@
 #include <yaoray/assets/gltf_loader.hpp>
 #include <yaoray/assets/obj_loader.hpp>
 #include <yaoray/render/bvh.hpp>
+#include <yaoray/render/environment.hpp>
 #include <yaoray/render/texture.hpp>
 
 #include <cmath>
@@ -69,6 +70,46 @@ void CopyAreaLights(const SceneDescription& scene, RenderScene& compiled) {
             light.area.radiance
         });
     }
+}
+
+void CompileEnvironment(
+    const SceneDescription& scene,
+    RenderScene& compiled,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    if (scene.environment.type == EnvironmentKind::None || scene.environment.type == EnvironmentKind::Constant) {
+        compiled.environment.type = scene.environment.type;
+        compiled.environment.radiance = scene.environment.radiance;
+        compiled.environment.strength = scene.environment.strength;
+        return;
+    }
+
+    if (scene.environment.type != EnvironmentKind::Hdri) {
+        return;
+    }
+    if (scene.environment.path.empty()) {
+        diagnostics.push_back(Error(scene, "environment.path", "must not be empty for hdri environment"));
+        return;
+    }
+
+    TextureLoadResult load = LoadHdrTexture(scene.environment.path);
+    if (!load.ok) {
+        diagnostics.push_back(Error(scene, "environment.path", load.error));
+        return;
+    }
+
+    const int texture_index = static_cast<int>(compiled.textures.size());
+    compiled.textures.push_back(std::move(load.texture));
+    const int distribution_index = static_cast<int>(compiled.environment_distributions.size());
+    compiled.environment_distributions.push_back(
+        BuildEnvironmentDistribution(compiled.textures[static_cast<std::size_t>(texture_index)])
+    );
+
+    compiled.environment.type = EnvironmentKind::Hdri;
+    compiled.environment.strength = scene.environment.strength;
+    compiled.environment.rotation_radians = DegreesToRadians(scene.environment.rotation_degrees);
+    compiled.environment.texture_index = texture_index;
+    compiled.environment.distribution_index = distribution_index;
 }
 
 Vec3f RotateX(Vec3f value, float radians) {
@@ -480,13 +521,7 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
         compiled.camera = CompileCamera(scene.camera.value());
     }
 
-    if (scene.environment.type == EnvironmentKind::None || scene.environment.type == EnvironmentKind::Constant) {
-        compiled.environment.type = scene.environment.type;
-        compiled.environment.radiance = scene.environment.radiance;
-        compiled.environment.strength = scene.environment.strength;
-    } else if (scene.environment.type == EnvironmentKind::Hdri) {
-        result.diagnostics.push_back(Error(scene, "environment.path", "HDRI environment import not implemented yet"));
-    }
+    CompileEnvironment(scene, compiled, result.diagnostics);
 
     CopyAreaLights(scene, compiled);
 

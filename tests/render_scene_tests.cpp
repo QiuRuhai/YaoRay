@@ -380,16 +380,48 @@ YR_TEST(scene_compiler_rejects_external_assets) {
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "assets.path", "asset import not implemented yet"));
 }
 
-YR_TEST(scene_compiler_rejects_hdri_environment) {
+YR_TEST(scene_compiler_compiles_hdri_environment) {
     yr::SceneDescription scene = MakeBaseScene();
     scene.environment.type = yr::EnvironmentKind::Hdri;
-    scene.environment.path = "assets/hdri/studio.hdr";
+    scene.environment.path = FixturePath("assets/tiny_env.hdr");
+    scene.environment.strength = 1.5f;
+    scene.environment.rotation_degrees = 90.0f;
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderScene& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.environment.type, yr::EnvironmentKind::Hdri);
+    YR_EXPECT_NEAR(compiled.environment.strength, 1.5, 1e-6);
+    YR_EXPECT_NEAR(compiled.environment.rotation_radians, 1.57079637, 1e-5);
+    YR_EXPECT_EQ(compiled.environment.texture_index, 0);
+    YR_EXPECT_EQ(compiled.environment.distribution_index, 0);
+    YR_EXPECT_EQ(compiled.textures.size(), std::size_t{1});
+    YR_EXPECT_EQ(compiled.environment_distributions.size(), std::size_t{1});
+}
+
+YR_TEST(scene_compiler_rejects_hdri_environment_without_path) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.environment.type = yr::EnvironmentKind::Hdri;
 
     const yr::SceneCompileResult result = yr::CompileScene(scene);
 
     YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(!result.scene.has_value());
-    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "environment.path", "HDRI environment import not implemented yet"));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "environment.path", "must not be empty"));
+}
+
+YR_TEST(scene_compiler_rejects_hdri_environment_non_hdr_path) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.environment.type = yr::EnvironmentKind::Hdri;
+    scene.environment.path = FixturePath("assets/checker_2x2.png");
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "environment.path", ".hdr"));
 }
 
 YR_TEST(scene_compiler_expands_obj_asset) {
