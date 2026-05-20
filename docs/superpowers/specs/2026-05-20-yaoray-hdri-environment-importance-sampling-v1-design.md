@@ -356,3 +356,15 @@ Expected command shape:
 - LDR environment map support with explicit color-space rules.
 - EXR input and output.
 - CUDA environment sampling parity.
+
+## Implementation Status
+
+Implemented in HDRI Environment Importance Sampling v1:
+
+- Radiance `.hdr` loading through stb floating-point decode.
+- Equirectangular HDRI evaluation with horizontal rotation.
+- Luminance- and solid-angle-weighted environment importance distribution.
+- CPU path tracer miss, direct environment lighting, shadow visibility, and
+  BSDF-to-environment MIS integration.
+- Parser, compiler, texture loader, environment module, path tracer, and CLI
+  smoke tests.
