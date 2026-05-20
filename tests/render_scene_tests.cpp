@@ -407,6 +407,40 @@ YR_TEST(scene_compiler_expands_obj_asset) {
     YR_EXPECT_NEAR(result.scene.value().triangles[0].normal.z, 1.0, 1e-6);
 }
 
+YR_TEST(scene_compiler_preserves_obj_vertex_normals) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"triangle", FixturePath("assets/normal_triangle.obj")});
+    scene.instances.push_back(yr::InstanceDescription{"triangle", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderTriangle& triangle = result.scene.value().triangles[0];
+    YR_EXPECT_TRUE(triangle.has_vertex_normals);
+    YR_EXPECT_NEAR(triangle.n0.z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(triangle.n1.y, 0.70710678, 1e-6);
+    YR_EXPECT_NEAR(triangle.n2.x, 0.70710678, 1e-6);
+}
+
+YR_TEST(scene_compiler_transforms_obj_vertex_normals) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"triangle", FixturePath("assets/normal_triangle.obj")});
+    yr::InstanceDescription instance;
+    instance.asset = "triangle";
+    instance.transform.rotate_degrees = yr::Vec3f{0.0f, 90.0f, 0.0f};
+    scene.instances.push_back(instance);
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderTriangle& triangle = result.scene.value().triangles[0];
+    YR_EXPECT_TRUE(triangle.has_vertex_normals);
+    YR_EXPECT_TRUE(triangle.n0.x > 0.99f);
+    YR_EXPECT_NEAR(triangle.n0.z, 0.0, 1e-5);
+}
+
 YR_TEST(scene_compiler_imports_obj_material_texture_and_uvs) {
     yr::SceneDescription scene = MakeBaseScene();
     scene.assets.push_back(yr::AssetDescription{"quad", FixturePath("assets/textured_quad.obj")});

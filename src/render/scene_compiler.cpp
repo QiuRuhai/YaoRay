@@ -100,6 +100,18 @@ Point3f ApplyTransform(Point3f point, const TransformDescription& transform) {
     };
 }
 
+Vec3f ApplyNormalTransform(Vec3f normal, const TransformDescription& transform) {
+    Vec3f value{
+        transform.scale.x != 0.0f ? normal.x / transform.scale.x : normal.x,
+        transform.scale.y != 0.0f ? normal.y / transform.scale.y : normal.y,
+        transform.scale.z != 0.0f ? normal.z / transform.scale.z : normal.z
+    };
+    value = RotateX(value, DegreesToRadians(transform.rotate_degrees.x));
+    value = RotateY(value, DegreesToRadians(transform.rotate_degrees.y));
+    value = RotateZ(value, DegreesToRadians(transform.rotate_degrees.z));
+    return Normalize(value);
+}
+
 constexpr float DegenerateTriangleEpsilon = 1.0e-12f;
 
 struct TextureCache {
@@ -273,6 +285,14 @@ void AppendImportedMesh(
         const Point3f world_p0 = ApplyTransform(triangle.p0, transform);
         const Point3f world_p1 = ApplyTransform(triangle.p1, transform);
         const Point3f world_p2 = ApplyTransform(triangle.p2, transform);
+        const Vec3f n0 = ApplyNormalTransform(triangle.n0, transform);
+        const Vec3f n1 = ApplyNormalTransform(triangle.n1, transform);
+        const Vec3f n2 = ApplyNormalTransform(triangle.n2, transform);
+        const bool has_vertex_normals =
+            triangle.has_vertex_normals &&
+            LengthSquared(n0) > 0.0f &&
+            LengthSquared(n1) > 0.0f &&
+            LengthSquared(n2) > 0.0f;
         int material_index = override_material_index.value_or(-1);
         if (!override_material_index.has_value() &&
             triangle.material_index >= 0 &&
@@ -286,17 +306,21 @@ void AppendImportedMesh(
             material_index = fallback_material_index;
         }
 
-        compiled.triangles.push_back(RenderTriangle{
-            world_p0,
-            world_p1,
-            world_p2,
-            Normalize(Cross(world_p1 - world_p0, world_p2 - world_p0)),
-            material_index,
-            triangle.uv0,
-            triangle.uv1,
-            triangle.uv2,
-            triangle.has_uv
-        });
+        RenderTriangle render_triangle;
+        render_triangle.p0 = world_p0;
+        render_triangle.p1 = world_p1;
+        render_triangle.p2 = world_p2;
+        render_triangle.normal = Normalize(Cross(world_p1 - world_p0, world_p2 - world_p0));
+        render_triangle.material_index = material_index;
+        render_triangle.uv0 = triangle.uv0;
+        render_triangle.uv1 = triangle.uv1;
+        render_triangle.uv2 = triangle.uv2;
+        render_triangle.has_uv = triangle.has_uv;
+        render_triangle.n0 = n0;
+        render_triangle.n1 = n1;
+        render_triangle.n2 = n2;
+        render_triangle.has_vertex_normals = has_vertex_normals;
+        compiled.triangles.push_back(render_triangle);
     }
 }
 
