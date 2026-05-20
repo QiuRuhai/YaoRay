@@ -5,6 +5,7 @@
 #include <yaoray/core/ray.hpp>
 #include <yaoray/render/bvh.hpp>
 #include <yaoray/render/bsdf.hpp>
+#include <yaoray/render/environment.hpp>
 #include <yaoray/render/light_sampling.hpp>
 #include <yaoray/render/mis.hpp>
 #include <yaoray/render/shading.hpp>
@@ -87,11 +88,8 @@ Vec3f FaceForward(Vec3f normal, Vec3f reference) {
     return Dot(normal, reference) < 0.0f ? -normal : normal;
 }
 
-Color3f EnvironmentColor(const RenderScene& scene) {
-    if (scene.environment.type == EnvironmentKind::Constant) {
-        return scene.environment.radiance * scene.environment.strength;
-    }
-    return Color3f{};
+Color3f EnvironmentColor(const RenderScene& scene, Vec3f direction) {
+    return EvaluateEnvironment(scene, direction);
 }
 
 float EmissiveHitMisWeight(const RenderScene& scene, const PreviousBounce& previous, Point3f hit_point) {
@@ -100,6 +98,15 @@ float EmissiveHitMisWeight(const RenderScene& scene, const PreviousBounce& previ
     }
 
     const float pdf_light = PdfAreaLightsForPointSolidAngle(scene, previous.origin, hit_point);
+    return PowerHeuristic(1, previous.bsdf_pdf, previous.light_sample_count, pdf_light);
+}
+
+float EnvironmentHitMisWeight(const RenderScene& scene, const PreviousBounce& previous, Vec3f direction) {
+    if (!previous.valid || previous.delta) {
+        return 1.0f;
+    }
+
+    const float pdf_light = PdfEnvironment(scene, direction);
     return PowerHeuristic(1, previous.bsdf_pdf, previous.light_sample_count, pdf_light);
 }
 
@@ -157,6 +164,57 @@ Ray3f MakeCameraRay(const RenderScene& scene, int x, int y, float pixel_u, float
         scene.camera.up * screen_y
     );
     return Ray3f{scene.camera.origin, direction};
+}
+
+Color3f EstimateDirectEnvironmentLight(
+    const RenderScene& scene,
+    const RenderMaterial& material,
+    Point3f hit_point,
+    Vec3f normal,
+    Vec3f wo,
+    CpuSampler& sampler,
+    CpuPathTraceStats& stats
+) {
+    if (!HasSampleableEnvironment(scene)) {
+        return Color3f{};
+    }
+
+    Color3f radiance;
+    const int light_sample_count = DirectLightSampleCount(scene);
+    const float inverse_light_sample_count = 1.0f / static_cast<float>(light_sample_count);
+    for (int sample_index = 0; sample_index < light_sample_count; ++sample_index) {
+        const EnvironmentSample sample = SampleEnvironment(scene, sampler.NextLight2D(sample_index));
+        if (!sample.valid || sample.pdf_solid_angle <= 0.0f || IsNearBlack(sample.radiance)) {
+            continue;
+        }
+
+        const Vec3f wi = sample.direction;
+        const float cos_surface = std::max(0.0f, Dot(normal, wi));
+        if (cos_surface <= 0.0f) {
+            continue;
+        }
+
+        const Color3f bsdf = EvaluateBsdf(material, wo, wi, normal);
+        if (IsNearBlack(bsdf)) {
+            continue;
+        }
+
+        const Point3f shadow_origin = hit_point + normal * SurfaceBias(hit_point);
+        ++stats.shadow_rays;
+        BvhTraceStats shadow_trace;
+        const BvhHit shadow_hit = IntersectBvh(scene, Ray3f{shadow_origin, wi}, shadow_trace);
+        AccumulateTraceStats(stats, shadow_trace);
+        if (shadow_hit.hit) {
+            ++stats.occluded_shadow_rays;
+            continue;
+        }
+
+        const float pdf_bsdf = PdfBsdf(material, wo, wi, normal);
+        const float mis_weight = PowerHeuristic(light_sample_count, sample.pdf_solid_angle, 1, pdf_bsdf);
+        radiance = radiance + Multiply(bsdf, sample.radiance) * (cos_surface * mis_weight / sample.pdf_solid_angle);
+    }
+
+    return radiance * inverse_light_sample_count;
 }
 
 Color3f EstimateDirectLight(
@@ -233,6 +291,7 @@ Color3f EstimateDirectLight(
 
         radiance = radiance + light_radiance * inverse_light_sample_count;
     }
+    radiance = radiance + EstimateDirectEnvironmentLight(scene, material, hit_point, normal, wo, sampler, stats);
     return radiance;
 }
 
@@ -250,7 +309,8 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
         AccumulateTraceStats(stats, trace_stats);
         if (!hit.hit || hit.triangle == nullptr) {
             ++stats.misses;
-            radiance = radiance + Multiply(throughput, EnvironmentColor(scene));
+            const float environment_weight = EnvironmentHitMisWeight(scene, previous_bounce, ray.direction);
+            radiance = radiance + Multiply(throughput, EnvironmentColor(scene, ray.direction)) * environment_weight;
             break;
         }
 

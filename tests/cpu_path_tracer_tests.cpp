@@ -6,6 +6,7 @@
 
 #include <yaoray/backends/cpu/cpu_path_tracer.hpp>
 #include <yaoray/render/bvh.hpp>
+#include <yaoray/render/environment.hpp>
 #include <yaoray/render/render_scene.hpp>
 #include <yaoray/render/shading.hpp>
 
@@ -168,6 +169,89 @@ yr::RenderScene MakeBaseScene(int width, int height) {
         yr::Vec3f{0.0f, 0.0f, 1.0f},
         0
     });
+    RebuildBvh(scene);
+    return scene;
+}
+
+yr::RenderScene MakeHdriMissScene(yr::Color3f env_color) {
+    yr::RenderScene scene;
+    scene.integrator = yr::RenderIntegratorKind::Path;
+    scene.width = 1;
+    scene.height = 1;
+    scene.spp = 1;
+    scene.max_depth = 2;
+    scene.seed = 7;
+    scene.threads = 1;
+    scene.light_samples = 1;
+    scene.camera.origin = yr::Point3f{0.0f, 0.0f, 0.0f};
+    scene.camera.forward = yr::Vec3f{0.0f, 0.0f, -1.0f};
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Vec3f{0.0f, 1.0f, 0.0f};
+    scene.environment.type = yr::EnvironmentKind::Hdri;
+    scene.environment.strength = 1.0f;
+    scene.environment.texture_index = 0;
+    scene.environment.distribution_index = 0;
+
+    yr::RenderTexture texture;
+    texture.width = 1;
+    texture.height = 1;
+    texture.wrap_s = yr::TextureWrap::Repeat;
+    texture.wrap_t = yr::TextureWrap::ClampToEdge;
+    texture.texels = {env_color};
+    scene.textures.push_back(texture);
+    scene.environment_distributions.push_back(yr::BuildEnvironmentDistribution(scene.textures[0]));
+    RebuildBvh(scene);
+    return scene;
+}
+
+yr::RenderScene MakeDiffusePlaneUnderHdriScene(bool with_occluder) {
+    yr::RenderScene scene = MakeHdriMissScene(yr::Color3f{2.0f, 2.0f, 2.0f});
+    scene.spp = 4;
+    scene.max_depth = 1;
+    scene.light_samples = 16;
+    scene.camera.origin = yr::Point3f{0.0f, 1.0f, 2.0f};
+    scene.camera.forward = yr::Normalize(yr::Vec3f{0.0f, -0.45f, -1.0f});
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Normalize(yr::Cross(scene.camera.right, scene.camera.forward));
+    scene.camera.fov_y_radians = 0.01f;
+    scene.materials.push_back(yr::RenderMaterial{yr::MaterialKind::Diffuse, yr::Color3f{0.8f, 0.8f, 0.8f}});
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-2.0f, 0.0f, -2.0f},
+        yr::Point3f{2.0f, 0.0f, -2.0f},
+        yr::Point3f{0.0f, 0.0f, 2.0f},
+        yr::Vec3f{0.0f, 1.0f, 0.0f},
+        0
+    });
+    if (with_occluder) {
+        const auto add_ceiling_quad = [&](yr::Point3f p0, yr::Point3f p1, yr::Point3f p2, yr::Point3f p3) {
+            scene.triangles.push_back(yr::RenderTriangle{p0, p1, p2, yr::Vec3f{0.0f, -1.0f, 0.0f}, 0});
+            scene.triangles.push_back(yr::RenderTriangle{p0, p2, p3, yr::Vec3f{0.0f, -1.0f, 0.0f}, 0});
+        };
+        add_ceiling_quad(
+            yr::Point3f{-5.0f, 0.5f, -5.0f},
+            yr::Point3f{-0.2f, 0.5f, -5.0f},
+            yr::Point3f{-0.2f, 0.5f, 5.0f},
+            yr::Point3f{-5.0f, 0.5f, 5.0f}
+        );
+        add_ceiling_quad(
+            yr::Point3f{0.2f, 0.5f, -5.0f},
+            yr::Point3f{5.0f, 0.5f, -5.0f},
+            yr::Point3f{5.0f, 0.5f, 5.0f},
+            yr::Point3f{0.2f, 0.5f, 5.0f}
+        );
+        add_ceiling_quad(
+            yr::Point3f{-0.2f, 0.5f, -5.0f},
+            yr::Point3f{0.2f, 0.5f, -5.0f},
+            yr::Point3f{0.2f, 0.5f, 0.7f},
+            yr::Point3f{-0.2f, 0.5f, 0.7f}
+        );
+        add_ceiling_quad(
+            yr::Point3f{-0.2f, 0.5f, 1.1f},
+            yr::Point3f{0.2f, 0.5f, 1.1f},
+            yr::Point3f{0.2f, 0.5f, 5.0f},
+            yr::Point3f{-0.2f, 0.5f, 5.0f}
+        );
+    }
     RebuildBvh(scene);
     return scene;
 }
@@ -570,6 +654,38 @@ YR_TEST(cpu_path_tracer_sees_emissive_surfaces) {
     YR_EXPECT_NEAR(center.x, 0.25, 1e-6);
     YR_EXPECT_NEAR(center.y, 0.5, 1e-6);
     YR_EXPECT_NEAR(center.z, 0.75, 1e-6);
+}
+
+YR_TEST(cpu_path_tracer_camera_miss_sees_hdri_environment) {
+    yr::RenderScene scene = MakeHdriMissScene(yr::Color3f{0.25f, 0.5f, 1.0f});
+
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+    const yr::Color3f pixel = result.film.LinearPixel(0, 0);
+
+    YR_EXPECT_NEAR(pixel.x, 0.25, 1e-5);
+    YR_EXPECT_NEAR(pixel.y, 0.5, 1e-5);
+    YR_EXPECT_NEAR(pixel.z, 1.0, 1e-5);
+}
+
+YR_TEST(cpu_path_tracer_diffuse_surface_receives_direct_hdri_light) {
+    yr::RenderScene scene = MakeDiffusePlaneUnderHdriScene(false);
+
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+    const yr::Color3f pixel = result.film.LinearPixel(0, 0);
+
+    YR_EXPECT_TRUE(pixel.x > 0.05f);
+    YR_EXPECT_TRUE(result.stats.shadow_rays > 0);
+}
+
+YR_TEST(cpu_path_tracer_occluder_blocks_direct_hdri_light) {
+    const yr::CpuPathTraceResult open_result = yr::RenderCpuPathTrace(MakeDiffusePlaneUnderHdriScene(false));
+    const yr::CpuPathTraceResult occluded_result = yr::RenderCpuPathTrace(MakeDiffusePlaneUnderHdriScene(true));
+
+    const float open_luminance = open_result.film.LinearPixel(0, 0).x;
+    const float occluded_luminance = occluded_result.film.LinearPixel(0, 0).x;
+
+    YR_EXPECT_TRUE(open_luminance > occluded_luminance);
+    YR_EXPECT_TRUE(occluded_result.stats.occluded_shadow_rays > 0);
 }
 
 YR_TEST(cpu_path_tracer_mirror_reflects_environment) {
