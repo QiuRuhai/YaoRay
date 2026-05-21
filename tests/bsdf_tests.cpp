@@ -81,6 +81,13 @@ yr::RenderMaterial RoughGlassMaterial() {
     return material;
 }
 
+yr::RenderMaterial ThinGlassMaterial(float roughness = 0.0f) {
+    yr::RenderMaterial material = SmoothGlassMaterial();
+    material.thin = true;
+    material.roughness = roughness;
+    return material;
+}
+
 yr::RenderMaterial UnknownMaterial() {
     return yr::RenderMaterial{
         static_cast<yr::MaterialKind>(999),
@@ -340,6 +347,35 @@ YR_TEST(bsdf_rough_dielectric_samples_reflection_and_transmission) {
     YR_EXPECT_TRUE(transmission.pdf > 0.0f);
     YR_EXPECT_TRUE(reflection.weight.x > 0.0f);
     YR_EXPECT_TRUE(transmission.weight.x > 0.0f);
+}
+
+YR_TEST(bsdf_thin_glass_transmits_straight_through) {
+    const yr::RenderMaterial material = ThinGlassMaterial();
+    const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
+    const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.2f, 0.0f, 1.0f});
+
+    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.8f, 0.5f});
+
+    YR_EXPECT_TRUE(yr::IsDeltaBsdf(material));
+    YR_EXPECT_TRUE(sample.valid);
+    YR_EXPECT_TRUE(sample.specular);
+    YR_EXPECT_NEAR(sample.wi.x, -wo.x, 1e-6);
+    YR_EXPECT_NEAR(sample.wi.y, -wo.y, 1e-6);
+    YR_EXPECT_NEAR(sample.wi.z, -wo.z, 1e-6);
+}
+
+YR_TEST(bsdf_rough_thin_glass_is_non_delta_and_finite) {
+    const yr::RenderMaterial material = ThinGlassMaterial(0.3f);
+    const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
+    const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.1f, 0.0f, 1.0f});
+
+    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.95f, 0.4f});
+
+    YR_EXPECT_TRUE(!yr::IsDeltaBsdf(material));
+    YR_EXPECT_TRUE(sample.valid);
+    YR_EXPECT_TRUE(!sample.specular);
+    YR_EXPECT_TRUE(sample.pdf > 0.0f);
+    YR_EXPECT_TRUE(sample.weight.x > 0.0f);
 }
 
 YR_TEST(bsdf_unknown_material_fails_closed) {

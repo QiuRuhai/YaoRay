@@ -278,6 +278,36 @@ yr::RenderScene MakeMirrorTriangleScene() {
     return scene;
 }
 
+yr::RenderScene MakeGlassPanelScene(yr::MaterialKind type, float roughness, bool thin) {
+    yr::RenderScene scene = MakeBaseScene(1, 1);
+    scene.integrator = yr::RenderIntegratorKind::Path;
+    scene.spp = 16;
+    scene.max_depth = 3;
+    scene.seed = 71;
+    scene.threads = 1;
+    scene.light_samples = 4;
+    scene.camera.origin = yr::Point3f{0.0f, 0.0f, 3.0f};
+    scene.camera.forward = yr::Vec3f{0.0f, 0.0f, -1.0f};
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Vec3f{0.0f, 1.0f, 0.0f};
+    scene.camera.fov_y_radians = 0.01f;
+    scene.environment.radiance = yr::Color3f{0.25f, 0.5f, 1.0f};
+    scene.materials[0].type = type;
+    scene.materials[0].albedo = yr::Color3f{1.0f, 1.0f, 1.0f};
+    scene.materials[0].roughness = roughness;
+    scene.materials[0].ior = 1.5f;
+    scene.materials[0].thin = thin;
+    scene.triangles[0] = yr::RenderTriangle{
+        yr::Point3f{-2.0f, -2.0f, 0.0f},
+        yr::Point3f{2.0f, -2.0f, 0.0f},
+        yr::Point3f{0.0f, 2.0f, 0.0f},
+        yr::Vec3f{0.0f, 0.0f, 1.0f},
+        0
+    };
+    RebuildBvh(scene);
+    return scene;
+}
+
 yr::RenderScene MakeStochasticEdgeScene(std::uint64_t seed) {
     yr::RenderScene scene = MakeBaseScene(3, 3);
     scene.spp = 8;
@@ -731,6 +761,38 @@ YR_TEST(cpu_path_tracer_black_mirror_stops_after_emission) {
     YR_EXPECT_NEAR(center.x, 0.25, 1e-6);
     YR_EXPECT_NEAR(center.y, 0.5, 1e-6);
     YR_EXPECT_NEAR(center.z, 0.75, 1e-6);
+}
+
+YR_TEST(cpu_path_tracer_smooth_glass_transmits_environment) {
+    yr::RenderScene scene = MakeGlassPanelScene(yr::MaterialKind::Dielectric, 0.0f, false);
+    scene.spp = 1;
+    scene.max_depth = 2;
+
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+    const yr::Color3f pixel = result.film.LinearPixel(0, 0);
+
+    YR_EXPECT_TRUE(pixel.z > 0.1f);
+    YR_EXPECT_TRUE(result.stats.rays_traced > 1);
+}
+
+YR_TEST(cpu_path_tracer_thin_glass_panel_does_not_black_out_environment) {
+    const yr::CpuPathTraceResult result =
+        yr::RenderCpuPathTrace(MakeGlassPanelScene(yr::MaterialKind::Dielectric, 0.0f, true));
+    const yr::Color3f pixel = result.film.LinearPixel(0, 0);
+
+    YR_EXPECT_TRUE(pixel.z > 0.1f);
+    YR_EXPECT_TRUE(result.stats.rays_traced > 1);
+}
+
+YR_TEST(cpu_path_tracer_rough_glass_is_deterministic) {
+    const yr::RenderScene scene = MakeGlassPanelScene(yr::MaterialKind::Dielectric, 0.35f, false);
+
+    const yr::CpuPathTraceResult first = yr::RenderCpuPathTrace(scene);
+    const yr::CpuPathTraceResult second = yr::RenderCpuPathTrace(scene);
+
+    YR_EXPECT_TRUE(FilmsEqual(first.film, second.film));
+    YR_EXPECT_TRUE(CoreStatsEqual(first.stats, second.stats));
+    YR_EXPECT_TRUE(Luminance(first.film.LinearPixel(0, 0)) > 0.0f);
 }
 
 YR_TEST(cpu_path_tracer_uses_diffuse_texture_albedo_on_hit) {

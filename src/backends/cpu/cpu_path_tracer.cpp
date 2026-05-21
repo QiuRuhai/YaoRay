@@ -360,7 +360,8 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
             bsdf_sample.pdf,
             DirectLightSampleCount(scene)
         };
-        ray = Ray3f{hit_point + normal * SurfaceBias(hit_point), bsdf_sample.wi};
+        const Vec3f bias_normal = Dot(bsdf_sample.wi, normal) >= 0.0f ? normal : -normal;
+        ray = Ray3f{hit_point + bias_normal * SurfaceBias(hit_point), bsdf_sample.wi};
     }
 
     return radiance;

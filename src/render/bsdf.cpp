@@ -378,7 +378,19 @@ Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f n
             return diffuse + glossy;
         }
         case MaterialKind::Dielectric:
-            if (material.thin || material.roughness <= DeltaRoughness) {
+            if (material.thin) {
+                if (material.roughness <= DeltaRoughness) {
+                    return Color3f{};
+                }
+                const Vec3f forward = Normalize(-wo);
+                const float cos_forward = std::max(0.0f, Dot(forward, wi));
+                if (cos_forward <= 0.0f) {
+                    return Color3f{};
+                }
+                const float fresnel = FresnelDielectric(std::fabs(Dot(normal, wo)), 1.0f, std::max(1.0f, material.ior));
+                return LambertianBrdf(material.albedo) * (1.0f - fresnel);
+            }
+            if (material.roughness <= DeltaRoughness) {
                 return Color3f{};
             }
             return SameHemisphere(wo, wi, normal)
@@ -415,7 +427,14 @@ float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal) 
             return 0.5f * diffuse_pdf + 0.5f * glossy_pdf;
         }
         case MaterialKind::Dielectric:
-            if (material.thin || material.roughness <= DeltaRoughness) {
+            if (material.thin) {
+                if (material.roughness <= DeltaRoughness) {
+                    return 0.0f;
+                }
+                const Vec3f forward = Normalize(-wo);
+                return std::max(0.0f, Dot(forward, wi)) / Pi;
+            }
+            if (material.roughness <= DeltaRoughness) {
                 return 0.0f;
             }
             return SameHemisphere(wo, wi, normal)
@@ -510,17 +529,35 @@ BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Ve
                 return BsdfSample{};
             }
             if (material.thin) {
-                const float fresnel = FresnelDielectric(std::fabs(Dot(normal, wo)), 1.0f, std::max(1.0f, material.ior));
-                if (sample.x < fresnel) {
-                    return BsdfSample{
-                        Reflect(-wo, Dot(normal, wo) >= 0.0f ? normal : -normal),
-                        material.albedo,
-                        1.0f,
-                        true,
-                        true
-                    };
+                const Vec3f oriented_normal = Dot(normal, wo) >= 0.0f ? normal : -normal;
+                const float fresnel =
+                    FresnelDielectric(std::fabs(Dot(oriented_normal, wo)), 1.0f, std::max(1.0f, material.ior));
+                if (material.roughness <= DeltaRoughness) {
+                    if (sample.x < fresnel) {
+                        return BsdfSample{Reflect(-wo, oriented_normal), material.albedo, 1.0f, true, true};
+                    }
+                    return BsdfSample{Normalize(-wo), material.albedo, 1.0f, true, true};
                 }
-                return BsdfSample{Normalize(-wo), material.albedo, 1.0f, true, true};
+
+                Vec2f remapped = sample;
+                if (sample.x < fresnel) {
+                    remapped.x = fresnel > 0.0f ? sample.x / fresnel : sample.x;
+                    BsdfSample reflection =
+                        SampleGgxReflection(wo, oriented_normal, remapped, material.albedo * fresnel, material.roughness);
+                    if (reflection.valid) {
+                        reflection.specular = false;
+                    }
+                    return reflection;
+                }
+
+                remapped.x = (1.0f - fresnel) > 0.0f ? (sample.x - fresnel) / (1.0f - fresnel) : sample.x;
+                const Vec3f forward = Normalize(-wo);
+                const Vec3f wi = SampleCosineHemisphere(forward, remapped);
+                const float pdf = std::max(0.0f, Dot(forward, wi)) / Pi;
+                if (pdf <= 0.0f) {
+                    return BsdfSample{};
+                }
+                return BsdfSample{wi, material.albedo * (1.0f - fresnel), pdf, true, false};
             }
             if (material.roughness <= DeltaRoughness) {
                 const DielectricFrame frame = MakeDielectricFrame(wo, normal, material.ior);
