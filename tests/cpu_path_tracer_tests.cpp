@@ -308,6 +308,48 @@ yr::RenderScene MakeGlassPanelScene(yr::MaterialKind type, float roughness, bool
     return scene;
 }
 
+yr::RenderScene MakeAbsorbingGlassSlabScene(bool thin = false) {
+    yr::RenderScene scene = MakeBaseScene(1, 1);
+    scene.integrator = yr::RenderIntegratorKind::Path;
+    scene.spp = 32;
+    scene.max_depth = 4;
+    scene.seed = 5;
+    scene.threads = 1;
+    scene.area_lights.clear();
+    scene.camera.origin = yr::Point3f{0.0f, 0.0f, 3.0f};
+    scene.camera.forward = yr::Vec3f{0.0f, 0.0f, -1.0f};
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Vec3f{0.0f, 1.0f, 0.0f};
+    scene.camera.fov_y_radians = 0.01f;
+    scene.environment.radiance = yr::Color3f{1.0f, 1.0f, 1.0f};
+    scene.environment.strength = 1.0f;
+    scene.materials[0].type = yr::MaterialKind::Dielectric;
+    scene.materials[0].albedo = yr::Color3f{1.0f, 1.0f, 1.0f};
+    scene.materials[0].roughness = 0.0f;
+    scene.materials[0].ior = 1.5f;
+    scene.materials[0].thin = thin;
+    scene.materials[0].absorption_color = yr::Color3f{0.25f, 0.70f, 1.0f};
+    scene.materials[0].absorption_distance = 1.0f;
+    scene.triangles = {
+        yr::RenderTriangle{
+            yr::Point3f{-2.0f, -2.0f, 0.0f},
+            yr::Point3f{2.0f, -2.0f, 0.0f},
+            yr::Point3f{0.0f, 2.0f, 0.0f},
+            yr::Vec3f{0.0f, 0.0f, 1.0f},
+            0
+        },
+        yr::RenderTriangle{
+            yr::Point3f{-2.0f, -2.0f, -1.0f},
+            yr::Point3f{0.0f, 2.0f, -1.0f},
+            yr::Point3f{2.0f, -2.0f, -1.0f},
+            yr::Vec3f{0.0f, 0.0f, -1.0f},
+            0
+        }
+    };
+    RebuildBvh(scene);
+    return scene;
+}
+
 yr::RenderScene MakeStochasticEdgeScene(std::uint64_t seed) {
     yr::RenderScene scene = MakeBaseScene(3, 3);
     scene.spp = 8;
@@ -793,6 +835,36 @@ YR_TEST(cpu_path_tracer_rough_glass_is_deterministic) {
     YR_EXPECT_TRUE(FilmsEqual(first.film, second.film));
     YR_EXPECT_TRUE(CoreStatsEqual(first.stats, second.stats));
     YR_EXPECT_TRUE(Luminance(first.film.LinearPixel(0, 0)) > 0.0f);
+}
+
+YR_TEST(cpu_path_tracer_absorbing_glass_tints_transmitted_environment) {
+    yr::RenderScene neutral = MakeAbsorbingGlassSlabScene(false);
+    neutral.materials[0].absorption_color = yr::Color3f{1.0f, 1.0f, 1.0f};
+
+    const yr::CpuPathTraceResult neutral_result = yr::RenderCpuPathTrace(neutral);
+    const yr::CpuPathTraceResult tinted_result = yr::RenderCpuPathTrace(MakeAbsorbingGlassSlabScene(false));
+    const yr::Color3f neutral_pixel = neutral_result.film.LinearPixel(0, 0);
+    const yr::Color3f tinted_pixel = tinted_result.film.LinearPixel(0, 0);
+
+    YR_EXPECT_TRUE(tinted_pixel.x < neutral_pixel.x * 0.8f);
+    YR_EXPECT_TRUE(tinted_pixel.y < neutral_pixel.y);
+    YR_EXPECT_TRUE(tinted_pixel.z > tinted_pixel.x * 1.5f);
+    YR_EXPECT_TRUE(tinted_pixel.z > tinted_pixel.y);
+}
+
+YR_TEST(cpu_path_tracer_thin_glass_ignores_thickness_absorption) {
+    yr::RenderScene thin_absorbing = MakeAbsorbingGlassSlabScene(true);
+    yr::RenderScene thin_neutral = thin_absorbing;
+    thin_neutral.materials[0].absorption_color = yr::Color3f{1.0f, 1.0f, 1.0f};
+
+    const yr::CpuPathTraceResult absorbing_result = yr::RenderCpuPathTrace(thin_absorbing);
+    const yr::CpuPathTraceResult neutral_result = yr::RenderCpuPathTrace(thin_neutral);
+    const yr::Color3f absorbing_pixel = absorbing_result.film.LinearPixel(0, 0);
+    const yr::Color3f neutral_pixel = neutral_result.film.LinearPixel(0, 0);
+
+    YR_EXPECT_NEAR(absorbing_pixel.x, neutral_pixel.x, 1e-5);
+    YR_EXPECT_NEAR(absorbing_pixel.y, neutral_pixel.y, 1e-5);
+    YR_EXPECT_NEAR(absorbing_pixel.z, neutral_pixel.z, 1e-5);
 }
 
 YR_TEST(cpu_path_tracer_uses_diffuse_texture_albedo_on_hit) {

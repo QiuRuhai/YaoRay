@@ -28,6 +28,7 @@ constexpr float MaxShadowBiasDistanceFraction = 1.0e-2f;
 constexpr int RussianRouletteStartDepth = 3;
 constexpr float RussianRouletteMinSurvival = 0.05f;
 constexpr float RussianRouletteMaxSurvival = 0.95f;
+constexpr float AbsorptionEpsilon = 1.0e-6f;
 
 struct PreviousBounce {
     bool valid = false;
@@ -35,6 +36,12 @@ struct PreviousBounce {
     Point3f origin;
     float bsdf_pdf = 0.0f;
     int light_sample_count = 1;
+};
+
+struct PathMediumState {
+    bool active = false;
+    Color3f absorption_color{1.0f, 1.0f, 1.0f};
+    float absorption_distance = 1.0f;
 };
 
 Color3f Multiply(Color3f a, Color3f b) {
@@ -67,6 +74,49 @@ bool IsNearBlack(Color3f color) {
 
 float MaxComponent(Color3f color) {
     return std::max(color.x, std::max(color.y, color.z));
+}
+
+float SafeAbsorptionChannel(float value) {
+    return std::clamp(value, AbsorptionEpsilon, 1.0f);
+}
+
+Color3f BeerLambertTransmittance(Color3f absorption_color, float absorption_distance, float distance) {
+    if (distance <= 0.0f || absorption_distance <= 0.0f) {
+        return Color3f{1.0f, 1.0f, 1.0f};
+    }
+    const float inverse_distance = 1.0f / absorption_distance;
+    return Color3f{
+        std::exp(std::log(SafeAbsorptionChannel(absorption_color.x)) * distance * inverse_distance),
+        std::exp(std::log(SafeAbsorptionChannel(absorption_color.y)) * distance * inverse_distance),
+        std::exp(std::log(SafeAbsorptionChannel(absorption_color.z)) * distance * inverse_distance)
+    };
+}
+
+void ApplyMediumAttenuation(Color3f& throughput, const PathMediumState& medium, float distance) {
+    if (!medium.active) {
+        return;
+    }
+    throughput = Multiply(
+        throughput,
+        BeerLambertTransmittance(medium.absorption_color, medium.absorption_distance, distance)
+    );
+}
+
+bool IsThickDielectricTransmission(const RenderMaterial& material, Vec3f normal, Vec3f wi) {
+    return material.type == MaterialKind::Dielectric && !material.thin && Dot(wi, normal) < 0.0f;
+}
+
+void UpdateMediumStateAfterBsdf(PathMediumState& medium, const RenderMaterial& material, Vec3f normal, Vec3f wi) {
+    if (!IsThickDielectricTransmission(material, normal, wi)) {
+        return;
+    }
+    if (medium.active) {
+        medium = PathMediumState{};
+        return;
+    }
+    medium.active = true;
+    medium.absorption_color = material.absorption_color;
+    medium.absorption_distance = material.absorption_distance;
 }
 
 float MaxAbsComponent(Point3f point) {
@@ -299,6 +349,7 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
     Color3f radiance;
     Color3f throughput{1.0f, 1.0f, 1.0f};
     PreviousBounce previous_bounce;
+    PathMediumState medium;
     const int max_depth = std::max(1, scene.max_depth);
 
     for (int depth = 0; depth < max_depth; ++depth) {
@@ -315,6 +366,11 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
         }
 
         ++stats.hits;
+        ApplyMediumAttenuation(throughput, medium, hit.t);
+        if (IsNearBlack(throughput)) {
+            break;
+        }
+
         if (!IsValidMaterialIndex(scene, hit.triangle->material_index)) {
             radiance = radiance + Multiply(throughput, Color3f{1.0f, 0.0f, 1.0f});
             break;
@@ -353,6 +409,7 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
             break;
         }
 
+        UpdateMediumStateAfterBsdf(medium, material, normal, bsdf_sample.wi);
         previous_bounce = PreviousBounce{
             true,
             bsdf_sample.specular,
