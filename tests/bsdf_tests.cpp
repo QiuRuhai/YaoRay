@@ -75,6 +75,12 @@ yr::RenderMaterial TintedSmoothGlassMaterial() {
     return material;
 }
 
+yr::RenderMaterial RoughGlassMaterial() {
+    yr::RenderMaterial material = SmoothGlassMaterial();
+    material.roughness = 0.35f;
+    return material;
+}
+
 yr::RenderMaterial UnknownMaterial() {
     return yr::RenderMaterial{
         static_cast<yr::MaterialKind>(999),
@@ -283,6 +289,57 @@ YR_TEST(bsdf_smooth_dielectric_total_internal_reflection_reflects) {
     YR_EXPECT_TRUE(sample.specular);
     YR_EXPECT_TRUE(yr::Dot(sample.wi, normal) < 0.0f);
     YR_EXPECT_NEAR(sample.pdf, 1.0, 1e-6);
+}
+
+YR_TEST(bsdf_rough_dielectric_has_finite_reflection_response) {
+    const yr::RenderMaterial material = RoughGlassMaterial();
+    const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
+    const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.0f, 0.25f, 1.0f});
+    const yr::Vec3f wi = yr::Normalize(yr::Vec3f{0.25f, 0.0f, 1.0f});
+
+    const yr::Color3f value = yr::EvaluateBsdf(material, wo, wi, normal);
+    const float pdf = yr::PdfBsdf(material, wo, wi, normal);
+
+    YR_EXPECT_TRUE(!yr::IsDeltaBsdf(material));
+    YR_EXPECT_TRUE(value.x > 0.0f);
+    YR_EXPECT_TRUE(value.y > 0.0f);
+    YR_EXPECT_TRUE(value.z > 0.0f);
+    YR_EXPECT_TRUE(pdf > 0.0f);
+}
+
+YR_TEST(bsdf_rough_dielectric_has_finite_transmission_response) {
+    const yr::RenderMaterial material = RoughGlassMaterial();
+    const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
+    const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.0f, 0.25f, 1.0f});
+    const yr::Vec3f wi = yr::Normalize(yr::Vec3f{0.1f, -0.05f, -1.0f});
+
+    const yr::Color3f value = yr::EvaluateBsdf(material, wo, wi, normal);
+    const float pdf = yr::PdfBsdf(material, wo, wi, normal);
+
+    YR_EXPECT_TRUE(value.x > 0.0f);
+    YR_EXPECT_TRUE(value.y > 0.0f);
+    YR_EXPECT_TRUE(value.z > 0.0f);
+    YR_EXPECT_TRUE(pdf > 0.0f);
+}
+
+YR_TEST(bsdf_rough_dielectric_samples_reflection_and_transmission) {
+    const yr::RenderMaterial material = RoughGlassMaterial();
+    const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
+    const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.0f, 0.2f, 1.0f});
+
+    const yr::BsdfSample reflection = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.0f, 0.35f});
+    const yr::BsdfSample transmission = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.95f, 0.35f});
+
+    YR_EXPECT_TRUE(reflection.valid);
+    YR_EXPECT_TRUE(transmission.valid);
+    YR_EXPECT_TRUE(!reflection.specular);
+    YR_EXPECT_TRUE(!transmission.specular);
+    YR_EXPECT_TRUE(yr::Dot(reflection.wi, normal) > 0.0f);
+    YR_EXPECT_TRUE(yr::Dot(transmission.wi, normal) < 0.0f);
+    YR_EXPECT_TRUE(reflection.pdf > 0.0f);
+    YR_EXPECT_TRUE(transmission.pdf > 0.0f);
+    YR_EXPECT_TRUE(reflection.weight.x > 0.0f);
+    YR_EXPECT_TRUE(transmission.weight.x > 0.0f);
 }
 
 YR_TEST(bsdf_unknown_material_fails_closed) {
