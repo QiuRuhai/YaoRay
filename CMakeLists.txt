@@ -148,6 +148,13 @@ if(BUILD_TESTING)
         COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
             "$outPath = '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/glass_showcase.png'; Remove-Item -Force -ErrorAction SilentlyContinue $outPath; $out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/glass_showcase.toml' --backend cpu 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -ne 0) { exit 1 }; if ($out -notmatch 'Integrator: path') { exit 1 }; if ($out -notmatch 'Rendered image:') { exit 1 }; if ($out -notmatch 'Shadow rays:') { exit 1 }; if (-not (Test-Path $outPath)) { exit 1 }; [byte[]]$bytes = [System.IO.File]::ReadAllBytes($outPath); [byte[]]$expected = 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A; if ($bytes.Length -lt 8) { exit 1 }; for ($i = 0; $i -lt 8; $i++) { if ($bytes[$i] -ne $expected[$i]) { exit 1 } }"
     )
+    add_test(NAME yaoray_cli_render_glass_showcase_visual_sanity
+        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_glass_showcase_visual.ps1"
+            "$<TARGET_FILE:yaoray>"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/glass_showcase.toml"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/glass_showcase.png"
+    )
     add_test(NAME yaoray_cli_render_cuda
         COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
             "$out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/builtin_triangle.toml' --backend cuda 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -eq 0) { exit 1 }; if ($out -notmatch 'CUDA backend not implemented yet') { exit 1 }"
