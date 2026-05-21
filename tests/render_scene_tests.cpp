@@ -26,6 +26,7 @@ yr::SceneDescription MakeBaseScene() {
     scene.render.seed = std::uint64_t{123};
     scene.render.threads = 4;
     scene.render.light_samples = 4;
+    scene.render.radiance_clamp = 18.0f;
     scene.camera = yr::CameraDescription{};
     scene.camera->position = yr::Point3f{0.0f, 0.0f, 4.0f};
     scene.camera->target = yr::Point3f{0.0f, 0.0f, 0.0f};
@@ -113,6 +114,7 @@ YR_TEST(scene_compiler_copies_render_settings) {
     YR_EXPECT_EQ(compiled.seed, std::uint64_t{123});
     YR_EXPECT_EQ(compiled.threads, 4);
     YR_EXPECT_EQ(compiled.light_samples, 4);
+    YR_EXPECT_NEAR(compiled.radiance_clamp, 18.0, 1e-6);
 }
 
 YR_TEST(scene_compiler_builds_camera_basis) {
@@ -266,7 +268,9 @@ YR_TEST(scene_compiler_copies_dielectric_material_fields) {
         0.15f,
         0.04f,
         1.45f,
-        true
+        true,
+        yr::Color3f{0.55f, 0.75f, 1.0f},
+        2.5f
     });
 
     const yr::SceneCompileResult result = yr::CompileScene(scene);
@@ -282,6 +286,10 @@ YR_TEST(scene_compiler_copies_dielectric_material_fields) {
     YR_EXPECT_NEAR(material.specular, 0.04, 1e-6);
     YR_EXPECT_NEAR(material.ior, 1.45, 1e-6);
     YR_EXPECT_TRUE(material.thin);
+    YR_EXPECT_NEAR(material.absorption_color.x, 0.55, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_color.y, 0.75, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_color.z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_distance, 2.5, 1e-6);
 }
 
 YR_TEST(scene_compiler_preserves_default_dielectric_fields) {
@@ -298,6 +306,10 @@ YR_TEST(scene_compiler_preserves_default_dielectric_fields) {
     YR_EXPECT_EQ(material.type, yr::MaterialKind::Dielectric);
     YR_EXPECT_NEAR(material.ior, 1.5, 1e-6);
     YR_EXPECT_TRUE(!material.thin);
+    YR_EXPECT_NEAR(material.absorption_color.x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_color.y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_color.z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_distance, 1.0, 1e-6);
 }
 
 YR_TEST(scene_compiler_binds_builtin_instance_to_named_material) {
@@ -656,6 +668,10 @@ YR_TEST(scene_compiler_imports_obj_material_texture_and_uvs) {
     YR_EXPECT_EQ(compiled.triangles.size(), std::size_t{2});
     YR_EXPECT_EQ(compiled.materials[0].albedo_texture, 0);
     YR_EXPECT_NEAR(compiled.materials[0].albedo.x, 0.25, 1e-6);
+    YR_EXPECT_NEAR(compiled.materials[0].absorption_color.x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(compiled.materials[0].absorption_color.y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(compiled.materials[0].absorption_color.z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(compiled.materials[0].absorption_distance, 1.0, 1e-6);
     YR_EXPECT_TRUE(compiled.triangles[0].has_uv);
     YR_EXPECT_NEAR(compiled.triangles[0].uv1.x, 1.0, 1e-6);
 }

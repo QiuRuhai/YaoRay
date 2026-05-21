@@ -209,6 +209,8 @@ std::unordered_map<std::string, int> BuildMaterialMap(const SceneDescription& sc
         render_material.specular = material.specular;
         render_material.ior = material.ior;
         render_material.thin = material.thin;
+        render_material.absorption_color = material.absorption_color;
+        render_material.absorption_distance = material.absorption_distance;
         compiled.materials.push_back(render_material);
         materials.emplace(material.name, material_index);
     }
@@ -516,6 +518,7 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
     compiled.seed = scene.render.seed;
     compiled.threads = scene.render.threads;
     compiled.light_samples = scene.render.light_samples;
+    compiled.radiance_clamp = scene.render.radiance_clamp;
 
     if (!scene.camera.has_value()) {
         result.diagnostics.push_back(Error(scene, "camera", "missing camera"));
