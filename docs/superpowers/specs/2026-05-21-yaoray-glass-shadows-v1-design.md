@@ -216,3 +216,20 @@ or visual sanity thresholds in the implementation plan, not in this spec.
 - Fresnel-aware deterministic shadow opacity controls.
 - glTF transmission and volume extension import.
 - CUDA parity for transparent shadow visibility.
+
+## Implementation Status
+
+Implemented in Glass Shadows v1:
+
+- Shared CPU path tracer shadow visibility helper for area-light and HDRI direct-light samples.
+- Straight-line transparent direct shadows through dielectric materials.
+- Beer-Lambert tinting for thick dielectric shadow segments.
+- Thin-glass surface transmittance without thickness absorption.
+- Opaque fallback for non-dielectric blockers and transparent-hit guard failures.
+
+Remaining limitations:
+
+- No refracted shadow rays or true caustics.
+- No nested medium stack or overlapping medium correctness.
+- No glTF transmission/volume import.
+- No CUDA parity.
