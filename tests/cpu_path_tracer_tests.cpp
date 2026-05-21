@@ -728,6 +728,31 @@ YR_TEST(cpu_path_tracer_sees_emissive_surfaces) {
     YR_EXPECT_NEAR(center.z, 0.75, 1e-6);
 }
 
+YR_TEST(cpu_path_tracer_radiance_clamp_limits_sample_max_component) {
+    yr::RenderScene scene = MakeEmissiveTriangleScene();
+    scene.radiance_clamp = 10.0f;
+    scene.materials[0].emission = yr::Color3f{100.0f, 50.0f, 25.0f};
+
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+    const yr::Color3f center = result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_NEAR(center.x, 10.0, 1e-5);
+    YR_EXPECT_NEAR(center.y, 5.0, 1e-5);
+    YR_EXPECT_NEAR(center.z, 2.5, 1e-5);
+}
+
+YR_TEST(cpu_path_tracer_radiance_clamp_is_disabled_by_default) {
+    yr::RenderScene scene = MakeEmissiveTriangleScene();
+    scene.materials[0].emission = yr::Color3f{100.0f, 50.0f, 25.0f};
+
+    const yr::CpuPathTraceResult result = yr::RenderCpuPathTrace(scene);
+    const yr::Color3f center = result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_NEAR(center.x, 100.0, 1e-5);
+    YR_EXPECT_NEAR(center.y, 50.0, 1e-5);
+    YR_EXPECT_NEAR(center.z, 25.0, 1e-5);
+}
+
 YR_TEST(cpu_path_tracer_camera_miss_sees_hdri_environment) {
     yr::RenderScene scene = MakeHdriMissScene(yr::Color3f{0.25f, 0.5f, 1.0f});
 

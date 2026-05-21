@@ -76,6 +76,17 @@ float MaxComponent(Color3f color) {
     return std::max(color.x, std::max(color.y, color.z));
 }
 
+Color3f ClampMaxComponent(Color3f value, float limit) {
+    if (limit <= 0.0f) {
+        return value;
+    }
+    const float max_component = MaxComponent(value);
+    if (max_component <= limit || max_component <= 0.0f) {
+        return value;
+    }
+    return value * (limit / max_component);
+}
+
 float SafeAbsorptionChannel(float value) {
     return std::clamp(value, AbsorptionEpsilon, 1.0f);
 }
@@ -450,7 +461,9 @@ CpuPathTraceResult RenderCpuPathTrace(const RenderScene& scene) {
                     };
                     const Vec2f pixel_sample = sampler.NextPixel2D();
                     const Ray3f ray = MakeCameraRay(scene, x, y, pixel_sample.x, pixel_sample.y);
-                    result.film.AddSample(x, y, TracePath(scene, ray, sampler, stats));
+                    Color3f sample_radiance = TracePath(scene, ray, sampler, stats);
+                    sample_radiance = ClampMaxComponent(sample_radiance, scene.radiance_clamp);
+                    result.film.AddSample(x, y, sample_radiance);
                 }
             }
         }
