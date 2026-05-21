@@ -537,6 +537,37 @@ fov_y = 45
     YR_EXPECT_EQ(result.scene.value().render.light_samples, 4);
 }
 
+YR_TEST(scene_parser_loads_render_radiance_clamp) {
+    const std::filesystem::path path = WriteTempScene(
+        "render_radiance_clamp.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+radiance_clamp = 12.5
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_NEAR(result.scene.value().render.radiance_clamp, 12.5, 1e-6);
+}
+
 YR_TEST(scene_parser_loads_hdri_environment_rotation) {
     const std::filesystem::path path = WriteTempScene(
         "hdri_environment_rotation.toml",
@@ -726,6 +757,37 @@ fov_y = 45
     YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(!result.scene.has_value());
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.light_samples", "must be positive"));
+}
+
+YR_TEST(scene_parser_rejects_negative_render_radiance_clamp) {
+    const std::filesystem::path path = WriteTempScene(
+        "negative_render_radiance_clamp.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+radiance_clamp = -1.0
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "render.radiance_clamp", "must be non-negative"));
 }
 
 YR_TEST(scene_parser_rejects_float_render_threads) {
@@ -1127,6 +1189,8 @@ albedo = [0.95, 0.98, 1.0]
 ior = 1.45
 roughness = 0.1
 thin = true
+absorption_color = [0.55, 0.75, 1.0]
+absorption_distance = 2.5
 )toml")
     );
 
@@ -1142,6 +1206,10 @@ thin = true
     YR_EXPECT_NEAR(material.ior, 1.45, 1e-6);
     YR_EXPECT_NEAR(material.roughness, 0.1, 1e-6);
     YR_EXPECT_TRUE(material.thin);
+    YR_EXPECT_NEAR(material.absorption_color.x, 0.55, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_color.y, 0.75, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_color.z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_distance, 2.5, 1e-6);
 }
 
 YR_TEST(scene_parser_loads_glass_alias_defaults) {
@@ -1412,6 +1480,42 @@ ior = 0.8
     YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(!result.scene.has_value());
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.ior", "must be in [1, 3]"));
+}
+
+YR_TEST(scene_parser_rejects_out_of_range_material_absorption_color) {
+    const std::filesystem::path path = WriteTempScene(
+        "out_of_range_material_absorption_color.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "bad_absorption"
+type = "dielectric"
+absorption_color = [0.4, 1.2, 0.8]
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.absorption_color", "must be in [0, 1]"));
+}
+
+YR_TEST(scene_parser_rejects_non_positive_material_absorption_distance) {
+    const std::filesystem::path path = WriteTempScene(
+        "non_positive_material_absorption_distance.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "bad_absorption_distance"
+type = "dielectric"
+absorption_distance = 0.0
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.absorption_distance", "must be positive"));
 }
 
 YR_TEST(scene_parser_rejects_non_bool_material_thin) {

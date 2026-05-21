@@ -294,6 +294,25 @@ std::optional<Vec3f> ReadVec3(
     return value;
 }
 
+std::optional<Vec3f> ReadUnitVec3(
+    const toml::table& table,
+    std::string_view key,
+    const std::filesystem::path& file,
+    std::string field,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    std::optional<Vec3f> value = ReadVec3(table, key, file, field, diagnostics);
+    if (!value.has_value()) {
+        return std::nullopt;
+    }
+    if (value->x < 0.0f || value->x > 1.0f || value->y < 0.0f || value->y > 1.0f ||
+        value->z < 0.0f || value->z > 1.0f) {
+        diagnostics.push_back(Error(file, std::move(field), "must be in [0, 1]"));
+        return std::nullopt;
+    }
+    return value;
+}
+
 std::optional<std::array<float, 2>> ReadVec2(
     const toml::table& table,
     std::string_view key,
@@ -416,7 +435,19 @@ void ParseRender(
     CheckUnknownFields(
         table,
         "render",
-        {"backend", "integrator", "sampler", "width", "height", "spp", "max_depth", "seed", "threads", "light_samples"},
+        {
+            "backend",
+            "integrator",
+            "sampler",
+            "width",
+            "height",
+            "spp",
+            "max_depth",
+            "seed",
+            "threads",
+            "light_samples",
+            "radiance_clamp",
+        },
         file,
         diagnostics
     );
@@ -477,6 +508,13 @@ void ParseRender(
     }
     if (const auto light_samples = ReadInt(table, "light_samples", file, "render.light_samples", diagnostics)) {
         scene.render.light_samples = *light_samples;
+    }
+    if (const auto radiance_clamp = ReadFloat(table, "radiance_clamp", file, "render.radiance_clamp", diagnostics)) {
+        if (*radiance_clamp < 0.0f) {
+            diagnostics.push_back(Error(file, "render.radiance_clamp", "must be non-negative"));
+        } else {
+            scene.render.radiance_clamp = *radiance_clamp;
+        }
     }
 
     if (scene.render.width <= 0) {
@@ -668,7 +706,18 @@ void ParseMaterials(
         CheckUnknownFields(
             *table,
             "materials",
-            {"name", "type", "albedo", "emission", "roughness", "specular", "ior", "thin"},
+            {
+                "name",
+                "type",
+                "albedo",
+                "emission",
+                "roughness",
+                "specular",
+                "ior",
+                "thin",
+                "absorption_color",
+                "absorption_distance",
+            },
             file,
             diagnostics
         );
@@ -714,6 +763,18 @@ void ParseMaterials(
         }
         if (const auto thin = ReadBool(*table, "thin", file, "materials.thin", diagnostics)) {
             material.thin = *thin;
+        }
+        if (const auto absorption_color =
+                ReadUnitVec3(*table, "absorption_color", file, "materials.absorption_color", diagnostics)) {
+            material.absorption_color = *absorption_color;
+        }
+        if (const auto absorption_distance =
+                ReadFloat(*table, "absorption_distance", file, "materials.absorption_distance", diagnostics)) {
+            if (*absorption_distance <= 0.0f) {
+                diagnostics.push_back(Error(file, "materials.absorption_distance", "must be positive"));
+            } else {
+                material.absorption_distance = *absorption_distance;
+            }
         }
         if (!roughness_authored && material.type == MaterialKind::Plastic) {
             material.roughness = 0.25f;
