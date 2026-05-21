@@ -46,6 +46,7 @@ enum class MaterialKind {
     Mirror,
     Metal,
     Plastic,
+    Dielectric,
 };
 
 enum class EnvironmentKind {
@@ -110,6 +111,8 @@ struct MaterialDescription {
     Color3f emission;
     float roughness = 0.0f;
     float specular = 0.04f;
+    float ior = 1.5f;
+    bool thin = false;
 };
 
 struct InstanceDescription {

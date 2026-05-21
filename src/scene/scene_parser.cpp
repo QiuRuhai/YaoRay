@@ -215,6 +215,47 @@ std::optional<float> ReadUnitFloat(
     return value;
 }
 
+std::optional<float> ReadIorFloat(
+    const toml::table& table,
+    std::string_view key,
+    const std::filesystem::path& file,
+    std::string field,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const toml::node* node = table.get(key);
+    if (node == nullptr) {
+        return std::nullopt;
+    }
+    const std::optional<float> value = ReadNodeFloat(*node);
+    if (!value) {
+        diagnostics.push_back(Error(file, field, "must be a finite float in [1, 3]"));
+        return std::nullopt;
+    }
+    if (*value < 1.0f || *value > 3.0f) {
+        diagnostics.push_back(Error(file, std::move(field), "must be in [1, 3]"));
+        return std::nullopt;
+    }
+    return value;
+}
+
+std::optional<bool> ReadBool(
+    const toml::table& table,
+    std::string_view key,
+    const std::filesystem::path& file,
+    std::string field,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const toml::node* node = table.get(key);
+    if (node == nullptr) {
+        return std::nullopt;
+    }
+    if (const auto value = node->value<bool>()) {
+        return *value;
+    }
+    diagnostics.push_back(Error(file, std::move(field), "must be a bool"));
+    return std::nullopt;
+}
+
 std::optional<Vec3f> ReadVec3(
     const toml::table& table,
     std::string_view key,
@@ -627,7 +668,7 @@ void ParseMaterials(
         CheckUnknownFields(
             *table,
             "materials",
-            {"name", "type", "albedo", "emission", "roughness", "specular"},
+            {"name", "type", "albedo", "emission", "roughness", "specular", "ior", "thin"},
             file,
             diagnostics
         );
@@ -645,7 +686,9 @@ void ParseMaterials(
             diagnostics.push_back(Error(file, "materials.name", "missing required field"));
         }
 
+        std::string material_type_name;
         if (const auto type = ReadString(*table, "type", file, "materials.type", diagnostics)) {
+            material_type_name = *type;
             if (const auto parsed = ParseMaterialKindName(*type)) {
                 material.type = *parsed;
             } else {
@@ -659,14 +702,29 @@ void ParseMaterials(
             material.emission = *emission;
         }
         const bool roughness_authored = table->contains("roughness");
+        const bool thin_authored = table->contains("thin");
         if (const auto roughness = ReadUnitFloat(*table, "roughness", file, "materials.roughness", diagnostics)) {
             material.roughness = *roughness;
         }
         if (const auto specular = ReadUnitFloat(*table, "specular", file, "materials.specular", diagnostics)) {
             material.specular = *specular;
         }
+        if (const auto ior = ReadIorFloat(*table, "ior", file, "materials.ior", diagnostics)) {
+            material.ior = *ior;
+        }
+        if (const auto thin = ReadBool(*table, "thin", file, "materials.thin", diagnostics)) {
+            material.thin = *thin;
+        }
         if (!roughness_authored && material.type == MaterialKind::Plastic) {
             material.roughness = 0.25f;
+        }
+        if (material.type == MaterialKind::Dielectric) {
+            if (!roughness_authored && material_type_name == "rough_glass") {
+                material.roughness = 0.25f;
+            }
+            if (!thin_authored && material_type_name == "thin_glass") {
+                material.thin = true;
+            }
         }
 
         if (!material.name.empty() && !names.insert(material.name).second) {

@@ -127,6 +127,8 @@ std::string_view MaterialKindName(MaterialKind kind) {
             return "metal";
         case MaterialKind::Plastic:
             return "plastic";
+        case MaterialKind::Dielectric:
+            return "dielectric";
     }
     return "unknown";
 }
@@ -143,6 +145,9 @@ std::optional<MaterialKind> ParseMaterialKindName(std::string_view name) {
     }
     if (name == "plastic") {
         return MaterialKind::Plastic;
+    }
+    if (name == "dielectric" || name == "glass" || name == "rough_glass" || name == "thin_glass") {
+        return MaterialKind::Dielectric;
     }
     return std::nullopt;
 }

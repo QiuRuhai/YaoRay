@@ -117,6 +117,13 @@ YR_TEST(scene_defaults_include_environment_rotation) {
     YR_EXPECT_NEAR(scene.environment.rotation_degrees, 0.0, 1e-6);
 }
 
+YR_TEST(scene_defaults_include_dielectric_material_fields) {
+    const yr::MaterialDescription material;
+
+    YR_EXPECT_NEAR(material.ior, 1.5, 1e-6);
+    YR_EXPECT_TRUE(!material.thin);
+}
+
 YR_TEST(scene_enum_names_are_stable) {
     YR_EXPECT_EQ(yr::RenderBackendName(yr::RenderBackendKind::Cpu), std::string_view{"cpu"});
     YR_EXPECT_EQ(yr::RenderBackendName(yr::RenderBackendKind::Cuda), std::string_view{"cuda"});
@@ -128,6 +135,7 @@ YR_TEST(scene_enum_names_are_stable) {
     YR_EXPECT_EQ(yr::MaterialKindName(yr::MaterialKind::Mirror), std::string_view{"mirror"});
     YR_EXPECT_EQ(yr::MaterialKindName(yr::MaterialKind::Metal), std::string_view{"metal"});
     YR_EXPECT_EQ(yr::MaterialKindName(yr::MaterialKind::Plastic), std::string_view{"plastic"});
+    YR_EXPECT_EQ(yr::MaterialKindName(yr::MaterialKind::Dielectric), std::string_view{"dielectric"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::None), std::string_view{"none"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::Reinhard), std::string_view{"reinhard"});
     YR_EXPECT_EQ(yr::ToneMapperName(yr::ToneMapperKind::Aces), std::string_view{"aces"});
@@ -149,6 +157,10 @@ YR_TEST(scene_enum_parsers_accept_stable_names) {
     YR_EXPECT_EQ(yr::ParseMaterialKindName("mirror").value(), yr::MaterialKind::Mirror);
     YR_EXPECT_EQ(yr::ParseMaterialKindName("metal").value(), yr::MaterialKind::Metal);
     YR_EXPECT_EQ(yr::ParseMaterialKindName("plastic").value(), yr::MaterialKind::Plastic);
+    YR_EXPECT_EQ(yr::ParseMaterialKindName("dielectric").value(), yr::MaterialKind::Dielectric);
+    YR_EXPECT_EQ(yr::ParseMaterialKindName("glass").value(), yr::MaterialKind::Dielectric);
+    YR_EXPECT_EQ(yr::ParseMaterialKindName("rough_glass").value(), yr::MaterialKind::Dielectric);
+    YR_EXPECT_EQ(yr::ParseMaterialKindName("thin_glass").value(), yr::MaterialKind::Dielectric);
     YR_EXPECT_EQ(yr::ParseToneMapperName("none").value(), yr::ToneMapperKind::None);
     YR_EXPECT_EQ(yr::ParseToneMapperName("reinhard").value(), yr::ToneMapperKind::Reinhard);
     YR_EXPECT_EQ(yr::ParseToneMapperName("aces").value(), yr::ToneMapperKind::Aces);
@@ -163,7 +175,7 @@ YR_TEST(scene_enum_parsers_reject_unknown_names) {
     YR_EXPECT_TRUE(!yr::ParseRenderBackendName("metal").has_value());
     YR_EXPECT_TRUE(!yr::ParseRenderIntegratorName("bidirectional").has_value());
     YR_EXPECT_TRUE(!yr::ParseRenderSamplerName("sobol").has_value());
-    YR_EXPECT_TRUE(!yr::ParseMaterialKindName("glass").has_value());
+    YR_EXPECT_TRUE(!yr::ParseMaterialKindName("velvet").has_value());
     YR_EXPECT_TRUE(!yr::ParseMaterialKindName("rough_metal").has_value());
     YR_EXPECT_TRUE(!yr::ParseToneMapperName("filmic").has_value());
     YR_EXPECT_TRUE(!yr::ParseCameraKindName("orthographic").has_value());
@@ -1099,6 +1111,97 @@ type = "plastic"
     YR_EXPECT_NEAR(material.specular, 0.04, 1e-6);
 }
 
+YR_TEST(scene_parser_loads_dielectric_material_fields) {
+    const std::filesystem::path path = WriteTempScene(
+        "dielectric_material.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "clear_glass"
+type = "dielectric"
+albedo = [0.95, 0.98, 1.0]
+ior = 1.45
+roughness = 0.1
+thin = true
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::MaterialDescription& material = result.scene.value().materials[0];
+    YR_EXPECT_EQ(material.type, yr::MaterialKind::Dielectric);
+    YR_EXPECT_NEAR(material.albedo.x, 0.95, 1e-6);
+    YR_EXPECT_NEAR(material.albedo.y, 0.98, 1e-6);
+    YR_EXPECT_NEAR(material.albedo.z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.ior, 1.45, 1e-6);
+    YR_EXPECT_NEAR(material.roughness, 0.1, 1e-6);
+    YR_EXPECT_TRUE(material.thin);
+}
+
+YR_TEST(scene_parser_loads_glass_alias_defaults) {
+    const std::filesystem::path path = WriteTempScene(
+        "glass_alias.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "glass"
+type = "glass"
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::MaterialDescription& material = result.scene.value().materials[0];
+    YR_EXPECT_EQ(material.type, yr::MaterialKind::Dielectric);
+    YR_EXPECT_NEAR(material.ior, 1.5, 1e-6);
+    YR_EXPECT_NEAR(material.roughness, 0.0, 1e-6);
+    YR_EXPECT_TRUE(!material.thin);
+}
+
+YR_TEST(scene_parser_loads_rough_glass_alias_default_roughness) {
+    const std::filesystem::path path = WriteTempScene(
+        "rough_glass_alias.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "rough_glass"
+type = "rough_glass"
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::MaterialDescription& material = result.scene.value().materials[0];
+    YR_EXPECT_EQ(material.type, yr::MaterialKind::Dielectric);
+    YR_EXPECT_NEAR(material.ior, 1.5, 1e-6);
+    YR_EXPECT_NEAR(material.roughness, 0.25, 1e-6);
+    YR_EXPECT_TRUE(!material.thin);
+}
+
+YR_TEST(scene_parser_loads_thin_glass_alias_default_thin) {
+    const std::filesystem::path path = WriteTempScene(
+        "thin_glass_alias.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "thin_glass"
+type = "thin_glass"
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::MaterialDescription& material = result.scene.value().materials[0];
+    YR_EXPECT_EQ(material.type, yr::MaterialKind::Dielectric);
+    YR_EXPECT_NEAR(material.ior, 1.5, 1e-6);
+    YR_EXPECT_NEAR(material.roughness, 0.0, 1e-6);
+    YR_EXPECT_TRUE(material.thin);
+}
+
 YR_TEST(scene_parser_applies_material_defaults) {
     const std::filesystem::path path = WriteTempScene(
         "material_defaults.toml",
@@ -1169,8 +1272,8 @@ YR_TEST(scene_parser_rejects_unknown_material_type) {
         "unknown_material_type.toml",
         ValidSceneWith(R"toml(
 [[materials]]
-name = "glass_for_later"
-type = "glass"
+name = "velvet_for_later"
+type = "velvet"
 )toml")
     );
 
@@ -1268,6 +1371,60 @@ specular = -0.1
     YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(!result.scene.has_value());
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.specular", "must be in [0, 1]"));
+}
+
+YR_TEST(scene_parser_rejects_non_numeric_material_ior) {
+    const std::filesystem::path path = WriteTempScene(
+        "non_numeric_material_ior.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "bad_ior"
+type = "dielectric"
+ior = "dense"
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.ior", "must be a finite float in [1, 3]"));
+}
+
+YR_TEST(scene_parser_rejects_out_of_range_material_ior) {
+    const std::filesystem::path path = WriteTempScene(
+        "out_of_range_material_ior.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "bad_ior"
+type = "dielectric"
+ior = 0.8
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.ior", "must be in [1, 3]"));
+}
+
+YR_TEST(scene_parser_rejects_non_bool_material_thin) {
+    const std::filesystem::path path = WriteTempScene(
+        "non_bool_material_thin.toml",
+        ValidSceneWith(R"toml(
+[[materials]]
+name = "bad_thin"
+type = "dielectric"
+thin = "yes"
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "materials.thin", "must be a bool"));
 }
 
 YR_TEST(scene_parser_rejects_empty_and_non_string_instance_material) {
