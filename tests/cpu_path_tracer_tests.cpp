@@ -415,6 +415,83 @@ yr::RenderScene MakeBlockedDiffuseFloorScene() {
     return scene;
 }
 
+void AddHorizontalQuadOccluder(yr::RenderScene& scene, float y, int material_index) {
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-20.0f, y, -20.0f},
+        yr::Point3f{20.0f, y, -20.0f},
+        yr::Point3f{20.0f, y, 20.0f},
+        yr::Vec3f{0.0f, -1.0f, 0.0f},
+        material_index
+    });
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-20.0f, y, -20.0f},
+        yr::Point3f{20.0f, y, 20.0f},
+        yr::Point3f{-20.0f, y, 20.0f},
+        yr::Vec3f{0.0f, -1.0f, 0.0f},
+        material_index
+    });
+}
+
+yr::RenderMaterial MakeShadowGlassMaterial(
+    bool thin,
+    yr::Color3f albedo = yr::Color3f{1.0f, 1.0f, 1.0f},
+    yr::Color3f absorption_color = yr::Color3f{1.0f, 1.0f, 1.0f},
+    float absorption_distance = 1.0f
+) {
+    yr::RenderMaterial material;
+    material.type = yr::MaterialKind::Dielectric;
+    material.albedo = albedo;
+    material.ior = 1.5f;
+    material.roughness = 0.0f;
+    material.thin = thin;
+    material.absorption_color = absorption_color;
+    material.absorption_distance = absorption_distance;
+    return material;
+}
+
+yr::RenderScene MakeAreaShadowSceneWithPane(const yr::RenderMaterial& pane_material) {
+    yr::RenderScene scene = MakeDiffuseFloorScene(7);
+    scene.spp = 1;
+    scene.max_depth = 1;
+    scene.threads = 1;
+    scene.light_samples = 8;
+    scene.materials.push_back(pane_material);
+    AddHorizontalQuadOccluder(scene, 1.0f, 1);
+    RebuildBvh(scene);
+    return scene;
+}
+
+yr::RenderScene MakeAreaShadowSceneWithSlab(const yr::RenderMaterial& slab_material) {
+    yr::RenderScene scene = MakeDiffuseFloorScene(7);
+    scene.spp = 1;
+    scene.max_depth = 1;
+    scene.threads = 1;
+    scene.light_samples = 8;
+    scene.materials.push_back(slab_material);
+    AddHorizontalQuadOccluder(scene, 0.75f, 1);
+    AddHorizontalQuadOccluder(scene, 1.25f, 1);
+    RebuildBvh(scene);
+    return scene;
+}
+
+yr::RenderScene MakeAreaShadowSceneWithPaneAndOpaqueBlocker() {
+    yr::RenderScene scene = MakeDiffuseFloorScene(7);
+    scene.spp = 1;
+    scene.max_depth = 1;
+    scene.threads = 1;
+    scene.light_samples = 8;
+    scene.materials.push_back(MakeShadowGlassMaterial(true));
+    scene.materials.push_back(yr::RenderMaterial{
+        yr::MaterialKind::Diffuse,
+        yr::Color3f{1.0f, 1.0f, 1.0f},
+        yr::Color3f{}
+    });
+    AddHorizontalQuadOccluder(scene, 0.75f, 1);
+    AddHorizontalQuadOccluder(scene, 1.25f, 2);
+    RebuildBvh(scene);
+    return scene;
+}
+
 yr::RenderScene MakeDiffuseToExplicitEmitterScene(bool matching_explicit_area_light) {
     yr::RenderScene scene;
     scene.width = 1;
@@ -973,6 +1050,77 @@ YR_TEST(cpu_path_tracer_counts_shadow_occlusion_and_dims_direct_light) {
     YR_EXPECT_TRUE(blocked_result.stats.shadow_rays > 0);
     YR_EXPECT_TRUE(blocked_result.stats.occluded_shadow_rays > 0);
     YR_EXPECT_TRUE(Luminance(blocked_result.film.LinearPixel(1, 1)) < Luminance(unblocked_result.film.LinearPixel(1, 1)));
+}
+
+YR_TEST(cpu_path_tracer_opaque_shadow_occluder_still_blocks_direct_light) {
+    const yr::CpuPathTraceResult open_result = yr::RenderCpuPathTrace(MakeDiffuseFloorScene(7));
+    const yr::CpuPathTraceResult blocked_result = yr::RenderCpuPathTrace(MakeBlockedDiffuseFloorScene());
+
+    const float open_luminance = Luminance(open_result.film.LinearPixel(1, 1));
+    const float blocked_luminance = Luminance(blocked_result.film.LinearPixel(1, 1));
+
+    YR_EXPECT_TRUE(open_luminance > 0.0f);
+    YR_EXPECT_TRUE(blocked_luminance < open_luminance);
+    YR_EXPECT_TRUE(blocked_result.stats.occluded_shadow_rays > 0);
+}
+
+YR_TEST(cpu_path_tracer_clear_glass_pane_transmits_area_light_shadow) {
+    const yr::CpuPathTraceResult open_result = yr::RenderCpuPathTrace(MakeDiffuseFloorScene(7));
+    const yr::CpuPathTraceResult glass_result =
+        yr::RenderCpuPathTrace(MakeAreaShadowSceneWithPane(MakeShadowGlassMaterial(true)));
+
+    const float open_luminance = Luminance(open_result.film.LinearPixel(1, 1));
+    const float glass_luminance = Luminance(glass_result.film.LinearPixel(1, 1));
+
+    YR_EXPECT_TRUE(open_luminance > 0.0f);
+    YR_EXPECT_TRUE(glass_luminance > open_luminance * 0.8f);
+    YR_EXPECT_EQ(glass_result.stats.occluded_shadow_rays, std::uint64_t{0});
+}
+
+YR_TEST(cpu_path_tracer_absorbing_glass_slab_tints_area_light_shadow) {
+    const yr::CpuPathTraceResult clear_result =
+        yr::RenderCpuPathTrace(MakeAreaShadowSceneWithSlab(MakeShadowGlassMaterial(false)));
+    const yr::CpuPathTraceResult tinted_result = yr::RenderCpuPathTrace(MakeAreaShadowSceneWithSlab(
+        MakeShadowGlassMaterial(false, yr::Color3f{1.0f, 1.0f, 1.0f}, yr::Color3f{0.25f, 0.70f, 1.0f}, 0.5f)
+    ));
+
+    const yr::Color3f clear = clear_result.film.LinearPixel(1, 1);
+    const yr::Color3f tinted = tinted_result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_TRUE(clear.x > 0.0f);
+    YR_EXPECT_TRUE(tinted.x < clear.x * 0.8f);
+    YR_EXPECT_TRUE(tinted.y < clear.y);
+    YR_EXPECT_TRUE(tinted.z > tinted.x * 1.5f);
+    YR_EXPECT_TRUE(tinted.z > tinted.y);
+    YR_EXPECT_EQ(tinted_result.stats.occluded_shadow_rays, std::uint64_t{0});
+}
+
+YR_TEST(cpu_path_tracer_thin_glass_shadow_ignores_absorption_distance) {
+    const yr::CpuPathTraceResult neutral_result =
+        yr::RenderCpuPathTrace(MakeAreaShadowSceneWithPane(MakeShadowGlassMaterial(true)));
+    const yr::CpuPathTraceResult absorbing_result = yr::RenderCpuPathTrace(MakeAreaShadowSceneWithPane(
+        MakeShadowGlassMaterial(true, yr::Color3f{1.0f, 1.0f, 1.0f}, yr::Color3f{0.1f, 0.2f, 1.0f}, 0.25f)
+    ));
+
+    const yr::Color3f neutral = neutral_result.film.LinearPixel(1, 1);
+    const yr::Color3f absorbing = absorbing_result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_TRUE(Luminance(neutral) > 0.0f);
+    YR_EXPECT_NEAR(absorbing.x, neutral.x, 1e-5);
+    YR_EXPECT_NEAR(absorbing.y, neutral.y, 1e-5);
+    YR_EXPECT_NEAR(absorbing.z, neutral.z, 1e-5);
+}
+
+YR_TEST(cpu_path_tracer_glass_then_opaque_shadow_still_blocks_area_light) {
+    const yr::CpuPathTraceResult open_result = yr::RenderCpuPathTrace(MakeDiffuseFloorScene(7));
+    const yr::CpuPathTraceResult blocked_result = yr::RenderCpuPathTrace(MakeAreaShadowSceneWithPaneAndOpaqueBlocker());
+
+    const float open_luminance = Luminance(open_result.film.LinearPixel(1, 1));
+    const float blocked_luminance = Luminance(blocked_result.film.LinearPixel(1, 1));
+
+    YR_EXPECT_TRUE(open_luminance > 0.0f);
+    YR_EXPECT_TRUE(blocked_luminance < open_luminance);
+    YR_EXPECT_TRUE(blocked_result.stats.occluded_shadow_rays > 0);
 }
 
 YR_TEST(cpu_path_tracer_respects_max_depth_for_indirect_environment_bounce) {

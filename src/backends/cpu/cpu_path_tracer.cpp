@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -29,6 +30,7 @@ constexpr int RussianRouletteStartDepth = 3;
 constexpr float RussianRouletteMinSurvival = 0.05f;
 constexpr float RussianRouletteMaxSurvival = 0.95f;
 constexpr float AbsorptionEpsilon = 1.0e-6f;
+constexpr int MaxTransparentShadowHits = 16;
 
 struct PreviousBounce {
     bool valid = false;
@@ -42,6 +44,11 @@ struct PathMediumState {
     bool active = false;
     Color3f absorption_color{1.0f, 1.0f, 1.0f};
     float absorption_distance = 1.0f;
+};
+
+struct ShadowVisibility {
+    bool visible = true;
+    Color3f transmittance{1.0f, 1.0f, 1.0f};
 };
 
 Color3f Multiply(Color3f a, Color3f b) {
@@ -113,6 +120,40 @@ void ApplyMediumAttenuation(Color3f& throughput, const PathMediumState& medium, 
     );
 }
 
+bool IsShadowTransmittanceBlack(Color3f color) {
+    return MaxComponent(color) <= AbsorptionEpsilon;
+}
+
+float ClampTransmittanceChannel(float value) {
+    return std::clamp(value, 0.0f, 1.0f);
+}
+
+Color3f ClampTransmittance(Color3f value) {
+    return Color3f{
+        ClampTransmittanceChannel(value.x),
+        ClampTransmittanceChannel(value.y),
+        ClampTransmittanceChannel(value.z)
+    };
+}
+
+bool IsShadowTransparentMaterial(const RenderMaterial& material) {
+    return material.type == MaterialKind::Dielectric;
+}
+
+Color3f ThinGlassShadowTransmittance(const RenderMaterial& material) {
+    return ClampTransmittance(material.albedo);
+}
+
+void ToggleShadowMedium(PathMediumState& medium, const RenderMaterial& material) {
+    if (medium.active) {
+        medium = PathMediumState{};
+        return;
+    }
+    medium.active = true;
+    medium.absorption_color = material.absorption_color;
+    medium.absorption_distance = material.absorption_distance;
+}
+
 bool IsThickDielectricTransmission(const RenderMaterial& material, Vec3f normal, Vec3f wi) {
     return material.type == MaterialKind::Dielectric && !material.thin && Dot(wi, normal) < 0.0f;
 }
@@ -175,8 +216,85 @@ bool IsValidMaterialIndex(const RenderScene& scene, int material_index) {
     return material_index >= 0 && static_cast<std::size_t>(material_index) < scene.materials.size();
 }
 
+void AccumulateTraceStats(CpuPathTraceStats& stats, const BvhTraceStats& trace_stats);
+
 int DirectLightSampleCount(const RenderScene& scene) {
     return std::max(1, scene.light_samples);
+}
+
+ShadowVisibility TraceShadowVisibility(
+    const RenderScene& scene,
+    Ray3f ray,
+    float max_distance,
+    CpuPathTraceStats& stats
+) {
+    ShadowVisibility visibility;
+    PathMediumState medium;
+    float remaining_distance = max_distance;
+
+    for (int transparent_hit_count = 0; transparent_hit_count < MaxTransparentShadowHits; ++transparent_hit_count) {
+        BvhTraceStats shadow_trace;
+        const BvhHit hit = IntersectBvh(scene, ray, shadow_trace);
+        AccumulateTraceStats(stats, shadow_trace);
+
+        const bool finite_segment = std::isfinite(remaining_distance);
+        if (!hit.hit || hit.triangle == nullptr || (finite_segment && hit.t >= remaining_distance)) {
+            if (medium.active) {
+                if (!finite_segment) {
+                    return ShadowVisibility{false, Color3f{}};
+                }
+                visibility.transmittance = Multiply(
+                    visibility.transmittance,
+                    BeerLambertTransmittance(medium.absorption_color, medium.absorption_distance, remaining_distance)
+                );
+            }
+            visibility.visible = !IsShadowTransmittanceBlack(visibility.transmittance);
+            return visibility;
+        }
+
+        if (medium.active) {
+            visibility.transmittance = Multiply(
+                visibility.transmittance,
+                BeerLambertTransmittance(medium.absorption_color, medium.absorption_distance, hit.t)
+            );
+            if (IsShadowTransmittanceBlack(visibility.transmittance)) {
+                return ShadowVisibility{false, Color3f{}};
+            }
+        }
+
+        if (!IsValidMaterialIndex(scene, hit.triangle->material_index)) {
+            return ShadowVisibility{false, Color3f{}};
+        }
+
+        const RenderTriangle& triangle = *hit.triangle;
+        const RenderMaterial& base_material = scene.materials[static_cast<std::size_t>(triangle.material_index)];
+        const Point3f hit_point = ray.At(hit.t);
+        const RenderMaterial material = ResolveHitMaterial(scene, triangle, base_material, hit_point);
+        if (!IsShadowTransparentMaterial(material)) {
+            return ShadowVisibility{false, Color3f{}};
+        }
+
+        if (material.thin) {
+            visibility.transmittance = Multiply(visibility.transmittance, ThinGlassShadowTransmittance(material));
+            if (IsShadowTransmittanceBlack(visibility.transmittance)) {
+                return ShadowVisibility{false, Color3f{}};
+            }
+        } else {
+            ToggleShadowMedium(medium, material);
+        }
+
+        const float bias = SurfaceBias(hit_point);
+        if (finite_segment) {
+            remaining_distance -= hit.t + bias;
+            if (remaining_distance <= 0.0f) {
+                visibility.visible = !IsShadowTransmittanceBlack(visibility.transmittance);
+                return visibility;
+            }
+        }
+        ray = Ray3f{hit_point + ray.direction * bias, ray.direction};
+    }
+
+    return ShadowVisibility{false, Color3f{}};
 }
 
 bool SurviveRussianRoulette(int depth, Color3f& throughput, CpuSampler& sampler) {
@@ -331,11 +449,10 @@ Color3f EstimateDirectLight(
             }
 
             ++stats.shadow_rays;
-            BvhTraceStats shadow_trace;
             const Ray3f shadow_ray{shadow_origin, wi};
-            const BvhHit shadow_hit = IntersectBvh(scene, shadow_ray, shadow_trace);
-            AccumulateTraceStats(stats, shadow_trace);
-            if (shadow_hit.hit && shadow_hit.t < shadow_distance - shadow_bias) {
+            const ShadowVisibility visibility =
+                TraceShadowVisibility(scene, shadow_ray, shadow_distance - shadow_bias, stats);
+            if (!visibility.visible) {
                 ++stats.occluded_shadow_rays;
                 continue;
             }
@@ -347,7 +464,8 @@ Color3f EstimateDirectLight(
 
             const float pdf_bsdf = PdfBsdf(material, wo, wi, normal);
             const float mis_weight = PowerHeuristic(light_sample_count, pdf_light, 1, pdf_bsdf);
-            light_radiance = light_radiance + Multiply(bsdf, sample->radiance) * (cos_surface * mis_weight / pdf_light);
+            const Color3f visible_radiance = Multiply(visibility.transmittance, sample->radiance);
+            light_radiance = light_radiance + Multiply(bsdf, visible_radiance) * (cos_surface * mis_weight / pdf_light);
         }
 
         radiance = radiance + light_radiance * inverse_light_sample_count;
