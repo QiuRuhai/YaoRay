@@ -253,3 +253,22 @@ CLI/showcase tests:
 - Caustic-specific algorithms.
 - Spectral absorption.
 - CUDA path tracer parity for dielectric absorption.
+
+## Implementation Status
+
+Implemented in Glass Quality Pack v1:
+
+- Scene parser support for `materials.absorption_color`, `materials.absorption_distance`, and `render.radiance_clamp`.
+- Semantic and render data fields for dielectric absorption and radiance clamp.
+- Scene compiler copying for authored absorption and clamp settings.
+- CPU path tracer Beer-Lambert attenuation for a single active thick dielectric medium.
+- CPU path tracer sample radiance clamp, disabled by default.
+- Updated glass showcase scene and visual sanity smoke test.
+
+Remaining limitations:
+
+- No nested medium stack or overlapping medium correctness.
+- No transparent shadow rays or caustic-specific transport.
+- No denoiser or advanced sampler variance reduction.
+- No glTF volume/transmission import.
+- No CUDA parity.
