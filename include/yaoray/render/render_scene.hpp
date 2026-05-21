@@ -47,6 +47,8 @@ struct RenderMaterial {
     float roughness = 0.0f;
     float specular = 0.04f;
     int albedo_texture = -1;
+    float ior = 1.5f;
+    bool thin = false;
 };
 
 struct RenderTriangle {

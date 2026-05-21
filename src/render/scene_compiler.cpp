@@ -201,13 +201,15 @@ std::unordered_map<std::string, int> BuildMaterialMap(const SceneDescription& sc
     std::unordered_map<std::string, int> materials;
     for (const MaterialDescription& material : scene.materials) {
         const int material_index = static_cast<int>(compiled.materials.size());
-        compiled.materials.push_back(RenderMaterial{
-            material.type,
-            material.albedo,
-            material.emission,
-            material.roughness,
-            material.specular
-        });
+        RenderMaterial render_material;
+        render_material.type = material.type;
+        render_material.albedo = material.albedo;
+        render_material.emission = material.emission;
+        render_material.roughness = material.roughness;
+        render_material.specular = material.specular;
+        render_material.ior = material.ior;
+        render_material.thin = material.thin;
+        compiled.materials.push_back(render_material);
         materials.emplace(material.name, material_index);
     }
     return materials;

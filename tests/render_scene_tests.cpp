@@ -33,6 +33,17 @@ yr::SceneDescription MakeBaseScene() {
     return scene;
 }
 
+yr::SceneDescription MakeSceneWithBuiltinTriangle(const yr::MaterialDescription& material) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"triangle", "builtin:triangle"});
+    scene.materials.push_back(material);
+    yr::InstanceDescription instance;
+    instance.asset = "triangle";
+    instance.material = material.name;
+    scene.instances.push_back(instance);
+    return scene;
+}
+
 bool DiagnosticsContain(
     const std::vector<yr::SceneDiagnostic>& diagnostics,
     std::string_view field,
@@ -76,6 +87,8 @@ YR_TEST(render_scene_defaults_are_backend_friendly) {
     YR_EXPECT_EQ(material.type, yr::MaterialKind::Diffuse);
     YR_EXPECT_NEAR(material.roughness, 0.0, 1e-6);
     YR_EXPECT_NEAR(material.specular, 0.04, 1e-6);
+    YR_EXPECT_NEAR(material.ior, 1.5, 1e-6);
+    YR_EXPECT_TRUE(!material.thin);
 }
 
 YR_TEST(scene_compiler_copies_render_settings) {
@@ -237,6 +250,49 @@ YR_TEST(scene_compiler_copies_material_scalars) {
     YR_EXPECT_EQ(compiled.materials[0].type, yr::MaterialKind::Plastic);
     YR_EXPECT_NEAR(compiled.materials[0].roughness, 0.25, 1e-6);
     YR_EXPECT_NEAR(compiled.materials[0].specular, 0.08, 1e-6);
+}
+
+YR_TEST(scene_compiler_copies_dielectric_material_fields) {
+    yr::SceneDescription scene = MakeSceneWithBuiltinTriangle(yr::MaterialDescription{
+        "clear_glass",
+        yr::MaterialKind::Dielectric,
+        yr::Color3f{0.95f, 0.98f, 1.0f},
+        yr::Color3f{},
+        0.15f,
+        0.04f,
+        1.45f,
+        true
+    });
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderMaterial& material = result.scene.value().materials[0];
+    YR_EXPECT_EQ(material.type, yr::MaterialKind::Dielectric);
+    YR_EXPECT_NEAR(material.albedo.x, 0.95, 1e-6);
+    YR_EXPECT_NEAR(material.albedo.y, 0.98, 1e-6);
+    YR_EXPECT_NEAR(material.albedo.z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.roughness, 0.15, 1e-6);
+    YR_EXPECT_NEAR(material.specular, 0.04, 1e-6);
+    YR_EXPECT_NEAR(material.ior, 1.45, 1e-6);
+    YR_EXPECT_TRUE(material.thin);
+}
+
+YR_TEST(scene_compiler_preserves_default_dielectric_fields) {
+    yr::SceneDescription scene = MakeSceneWithBuiltinTriangle(yr::MaterialDescription{
+        "glass",
+        yr::MaterialKind::Dielectric
+    });
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderMaterial& material = result.scene.value().materials[0];
+    YR_EXPECT_EQ(material.type, yr::MaterialKind::Dielectric);
+    YR_EXPECT_NEAR(material.ior, 1.5, 1e-6);
+    YR_EXPECT_TRUE(!material.thin);
 }
 
 YR_TEST(scene_compiler_binds_builtin_instance_to_named_material) {
