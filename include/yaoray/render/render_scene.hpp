@@ -49,6 +49,8 @@ struct RenderMaterial {
     int albedo_texture = -1;
     float ior = 1.5f;
     bool thin = false;
+    Color3f absorption_color{1.0f, 1.0f, 1.0f};
+    float absorption_distance = 1.0f;
 };
 
 struct RenderTriangle {
@@ -85,6 +87,7 @@ struct RenderScene {
     std::uint64_t seed = 0;
     int threads = 0;
     int light_samples = 1;
+    float radiance_clamp = 0.0f;
     RenderCamera camera;
     RenderEnvironment environment;
     std::vector<RenderMaterial> materials;

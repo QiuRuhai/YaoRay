@@ -76,6 +76,7 @@ YR_TEST(render_scene_defaults_are_backend_friendly) {
     YR_EXPECT_EQ(scene.seed, std::uint64_t{0});
     YR_EXPECT_EQ(scene.threads, 0);
     YR_EXPECT_EQ(scene.light_samples, 1);
+    YR_EXPECT_NEAR(scene.radiance_clamp, 0.0, 1e-6);
     YR_EXPECT_TRUE(scene.triangles.empty());
     YR_EXPECT_TRUE(scene.materials.empty());
     YR_EXPECT_TRUE(scene.area_lights.empty());
@@ -89,6 +90,10 @@ YR_TEST(render_scene_defaults_are_backend_friendly) {
     YR_EXPECT_NEAR(material.specular, 0.04, 1e-6);
     YR_EXPECT_NEAR(material.ior, 1.5, 1e-6);
     YR_EXPECT_TRUE(!material.thin);
+    YR_EXPECT_NEAR(material.absorption_color.x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_color.y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_color.z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_distance, 1.0, 1e-6);
 }
 
 YR_TEST(scene_compiler_copies_render_settings) {

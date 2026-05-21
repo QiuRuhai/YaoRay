@@ -103,6 +103,7 @@ YR_TEST(scene_defaults_match_schema) {
     YR_EXPECT_EQ(scene.render.seed, std::uint64_t{0});
     YR_EXPECT_EQ(scene.render.threads, 0);
     YR_EXPECT_EQ(scene.render.light_samples, 1);
+    YR_EXPECT_NEAR(scene.render.radiance_clamp, 0.0, 1e-6);
     YR_EXPECT_EQ(scene.film.tone_mapper, yr::ToneMapperKind::Aces);
     YR_EXPECT_NEAR(scene.film.exposure, 0.0, 1e-6);
     YR_EXPECT_EQ(scene.environment.type, yr::EnvironmentKind::None);
@@ -122,6 +123,10 @@ YR_TEST(scene_defaults_include_dielectric_material_fields) {
 
     YR_EXPECT_NEAR(material.ior, 1.5, 1e-6);
     YR_EXPECT_TRUE(!material.thin);
+    YR_EXPECT_NEAR(material.absorption_color.x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_color.y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_color.z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.absorption_distance, 1.0, 1e-6);
 }
 
 YR_TEST(scene_enum_names_are_stable) {
