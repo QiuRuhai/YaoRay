@@ -18,6 +18,73 @@ Vec3f Reflect(Vec3f direction, Vec3f normal) {
     return Normalize(direction - normal * (2.0f * Dot(direction, normal)));
 }
 
+float AbsDot(Vec3f a, Vec3f b) {
+    return std::fabs(Dot(a, b));
+}
+
+float Clamp(float value, float low, float high) {
+    return std::clamp(value, low, high);
+}
+
+float FresnelDielectric(float cos_theta_i, float eta_i, float eta_t) {
+    cos_theta_i = Clamp(cos_theta_i, -1.0f, 1.0f);
+    bool entering = cos_theta_i > 0.0f;
+    if (!entering) {
+        std::swap(eta_i, eta_t);
+        cos_theta_i = std::fabs(cos_theta_i);
+    }
+
+    const float sin_theta_i = std::sqrt(std::max(0.0f, 1.0f - cos_theta_i * cos_theta_i));
+    const float sin_theta_t = eta_i / eta_t * sin_theta_i;
+    if (sin_theta_t >= 1.0f) {
+        return 1.0f;
+    }
+
+    const float cos_theta_t = std::sqrt(std::max(0.0f, 1.0f - sin_theta_t * sin_theta_t));
+    const float r_parallel =
+        ((eta_t * cos_theta_i) - (eta_i * cos_theta_t)) /
+        ((eta_t * cos_theta_i) + (eta_i * cos_theta_t));
+    const float r_perpendicular =
+        ((eta_i * cos_theta_i) - (eta_t * cos_theta_t)) /
+        ((eta_i * cos_theta_i) + (eta_t * cos_theta_t));
+    return 0.5f * (r_parallel * r_parallel + r_perpendicular * r_perpendicular);
+}
+
+struct DielectricFrame {
+    Vec3f normal;
+    float eta_i = 1.0f;
+    float eta_t = 1.0f;
+    float eta = 1.0f;
+    float cos_o = 0.0f;
+};
+
+DielectricFrame MakeDielectricFrame(Vec3f wo, Vec3f normal, float ior) {
+    const bool entering = Dot(normal, wo) >= 0.0f;
+    const Vec3f oriented_normal = entering ? normal : -normal;
+    const float eta_i = entering ? 1.0f : std::max(1.0f, ior);
+    const float eta_t = entering ? std::max(1.0f, ior) : 1.0f;
+    return DielectricFrame{
+        oriented_normal,
+        eta_i,
+        eta_t,
+        eta_i / eta_t,
+        std::max(0.0f, Dot(oriented_normal, wo))
+    };
+}
+
+bool Refract(Vec3f wo, Vec3f normal, float eta, Vec3f& wi) {
+    const float cos_theta_i = Dot(normal, wo);
+    const float sin2_theta_i = std::max(0.0f, 1.0f - cos_theta_i * cos_theta_i);
+    const float sin2_theta_t = eta * eta * sin2_theta_i;
+    if (sin2_theta_t >= 1.0f) {
+        return false;
+    }
+
+    const float cos_theta_t = std::sqrt(std::max(0.0f, 1.0f - sin2_theta_t));
+    wi = Normalize(-wo * eta + normal * (eta * cos_theta_i - cos_theta_t));
+    return true;
+}
+
 Vec3f SampleCosineHemisphere(Vec3f normal, Vec2f sample) {
     const float u1 = std::clamp(sample.x, 0.0f, 1.0f);
     const float u2 = std::clamp(sample.y, 0.0f, 1.0f);
@@ -192,6 +259,8 @@ Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f n
             const Color3f glossy = GgxSpecularBrdf(f0, std::max(material.roughness, PlasticMinRoughness), wo, wi, normal);
             return diffuse + glossy;
         }
+        case MaterialKind::Dielectric:
+            return Color3f{};
     }
     return Color3f{};
 }
@@ -222,6 +291,8 @@ float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal) 
             const float glossy_pdf = GgxReflectionPdf(std::max(material.roughness, PlasticMinRoughness), wo, wi, normal);
             return 0.5f * diffuse_pdf + 0.5f * glossy_pdf;
         }
+        case MaterialKind::Dielectric:
+            return 0.0f;
     }
     return 0.0f;
 }
@@ -306,6 +377,35 @@ BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Ve
             result.specular = false;
             return result;
         }
+        case MaterialKind::Dielectric: {
+            if (IsBlack(material.albedo)) {
+                return BsdfSample{};
+            }
+            if (material.thin) {
+                const float fresnel = FresnelDielectric(std::fabs(Dot(normal, wo)), 1.0f, std::max(1.0f, material.ior));
+                if (sample.x < fresnel) {
+                    return BsdfSample{
+                        Reflect(-wo, Dot(normal, wo) >= 0.0f ? normal : -normal),
+                        material.albedo,
+                        1.0f,
+                        true,
+                        true
+                    };
+                }
+                return BsdfSample{Normalize(-wo), material.albedo, 1.0f, true, true};
+            }
+            if (material.roughness <= DeltaRoughness) {
+                const DielectricFrame frame = MakeDielectricFrame(wo, normal, material.ior);
+                Vec3f refracted;
+                const bool can_refract = Refract(wo, frame.normal, frame.eta, refracted);
+                const float fresnel = can_refract ? FresnelDielectric(frame.cos_o, frame.eta_i, frame.eta_t) : 1.0f;
+                if (!can_refract || sample.x < fresnel) {
+                    return BsdfSample{Reflect(-wo, frame.normal), material.albedo, 1.0f, true, true};
+                }
+                return BsdfSample{refracted, material.albedo, 1.0f, true, true};
+            }
+            return BsdfSample{};
+        }
     }
     return BsdfSample{};
 }
@@ -320,6 +420,8 @@ bool IsDeltaBsdf(const RenderMaterial& material) {
             return material.roughness <= DeltaRoughness;
         case MaterialKind::Plastic:
             return false;
+        case MaterialKind::Dielectric:
+            return material.roughness <= DeltaRoughness;
     }
     return false;
 }
