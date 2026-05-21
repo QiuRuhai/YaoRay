@@ -354,3 +354,17 @@ CLI test:
 - glTF material extension import for transmission, IOR, volume, and specular.
 - CUDA dielectric material parity.
 - Analytic primitives such as spheres and cylinders.
+
+## Implementation Status
+
+Implemented in Dielectric Material Pack v3:
+
+- Scene parser support for `dielectric`, `glass`, `rough_glass`, and
+  `thin_glass`.
+- Material `ior` and `thin` fields in semantic and render material data.
+- Smooth dielectric Fresnel reflection, Snell refraction, and total internal
+  reflection.
+- Classic GGX rough dielectric reflection and transmission.
+- Thin glass pane behavior for smooth and rough materials.
+- CPU path tracer transmitted-ray biasing.
+- Parser, compiler, BSDF, path tracer, and CLI showcase tests.
