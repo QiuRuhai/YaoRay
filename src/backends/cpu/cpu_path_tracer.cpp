@@ -380,17 +380,17 @@ Color3f EstimateDirectEnvironmentLight(
 
         const Point3f shadow_origin = hit_point + normal * SurfaceBias(hit_point);
         ++stats.shadow_rays;
-        BvhTraceStats shadow_trace;
-        const BvhHit shadow_hit = IntersectBvh(scene, Ray3f{shadow_origin, wi}, shadow_trace);
-        AccumulateTraceStats(stats, shadow_trace);
-        if (shadow_hit.hit) {
+        const ShadowVisibility visibility =
+            TraceShadowVisibility(scene, Ray3f{shadow_origin, wi}, std::numeric_limits<float>::infinity(), stats);
+        if (!visibility.visible) {
             ++stats.occluded_shadow_rays;
             continue;
         }
 
         const float pdf_bsdf = PdfBsdf(material, wo, wi, normal);
         const float mis_weight = PowerHeuristic(light_sample_count, sample.pdf_solid_angle, 1, pdf_bsdf);
-        radiance = radiance + Multiply(bsdf, sample.radiance) * (cos_surface * mis_weight / sample.pdf_solid_angle);
+        const Color3f visible_radiance = Multiply(visibility.transmittance, sample.radiance);
+        radiance = radiance + Multiply(bsdf, visible_radiance) * (cos_surface * mis_weight / sample.pdf_solid_angle);
     }
 
     return radiance * inverse_light_sample_count;

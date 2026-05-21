@@ -204,6 +204,40 @@ yr::RenderScene MakeHdriMissScene(yr::Color3f env_color) {
     return scene;
 }
 
+void AddHorizontalQuadOccluder(yr::RenderScene& scene, float y, int material_index) {
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-20.0f, y, -20.0f},
+        yr::Point3f{20.0f, y, -20.0f},
+        yr::Point3f{20.0f, y, 20.0f},
+        yr::Vec3f{0.0f, -1.0f, 0.0f},
+        material_index
+    });
+    scene.triangles.push_back(yr::RenderTriangle{
+        yr::Point3f{-20.0f, y, -20.0f},
+        yr::Point3f{20.0f, y, 20.0f},
+        yr::Point3f{-20.0f, y, 20.0f},
+        yr::Vec3f{0.0f, -1.0f, 0.0f},
+        material_index
+    });
+}
+
+yr::RenderMaterial MakeShadowGlassMaterial(
+    bool thin,
+    yr::Color3f albedo = yr::Color3f{1.0f, 1.0f, 1.0f},
+    yr::Color3f absorption_color = yr::Color3f{1.0f, 1.0f, 1.0f},
+    float absorption_distance = 1.0f
+) {
+    yr::RenderMaterial material;
+    material.type = yr::MaterialKind::Dielectric;
+    material.albedo = albedo;
+    material.ior = 1.5f;
+    material.roughness = 0.0f;
+    material.thin = thin;
+    material.absorption_color = absorption_color;
+    material.absorption_distance = absorption_distance;
+    return material;
+}
+
 yr::RenderScene MakeDiffusePlaneUnderHdriScene(bool with_occluder) {
     yr::RenderScene scene = MakeHdriMissScene(yr::Color3f{2.0f, 2.0f, 2.0f});
     scene.spp = 4;
@@ -252,6 +286,41 @@ yr::RenderScene MakeDiffusePlaneUnderHdriScene(bool with_occluder) {
             yr::Point3f{-0.2f, 0.5f, 5.0f}
         );
     }
+    RebuildBvh(scene);
+    return scene;
+}
+
+yr::RenderScene MakeDiffusePlaneUnderHdriWithGlassOccluder(bool thin) {
+    yr::RenderScene scene = MakeDiffusePlaneUnderHdriScene(false);
+    scene.materials.push_back(MakeShadowGlassMaterial(thin));
+    const auto add_ceiling_quad = [&](yr::Point3f p0, yr::Point3f p1, yr::Point3f p2, yr::Point3f p3) {
+        scene.triangles.push_back(yr::RenderTriangle{p0, p1, p2, yr::Vec3f{0.0f, -1.0f, 0.0f}, 1});
+        scene.triangles.push_back(yr::RenderTriangle{p0, p2, p3, yr::Vec3f{0.0f, -1.0f, 0.0f}, 1});
+    };
+    add_ceiling_quad(
+        yr::Point3f{-5.0f, 0.5f, -5.0f},
+        yr::Point3f{-0.2f, 0.5f, -5.0f},
+        yr::Point3f{-0.2f, 0.5f, 5.0f},
+        yr::Point3f{-5.0f, 0.5f, 5.0f}
+    );
+    add_ceiling_quad(
+        yr::Point3f{0.2f, 0.5f, -5.0f},
+        yr::Point3f{5.0f, 0.5f, -5.0f},
+        yr::Point3f{5.0f, 0.5f, 5.0f},
+        yr::Point3f{0.2f, 0.5f, 5.0f}
+    );
+    add_ceiling_quad(
+        yr::Point3f{-0.2f, 0.5f, -5.0f},
+        yr::Point3f{0.2f, 0.5f, -5.0f},
+        yr::Point3f{0.2f, 0.5f, 0.7f},
+        yr::Point3f{-0.2f, 0.5f, 0.7f}
+    );
+    add_ceiling_quad(
+        yr::Point3f{-0.2f, 0.5f, 1.1f},
+        yr::Point3f{0.2f, 0.5f, 1.1f},
+        yr::Point3f{0.2f, 0.5f, 5.0f},
+        yr::Point3f{-0.2f, 0.5f, 5.0f}
+    );
     RebuildBvh(scene);
     return scene;
 }
@@ -413,40 +482,6 @@ yr::RenderScene MakeBlockedDiffuseFloorScene() {
     });
     RebuildBvh(scene);
     return scene;
-}
-
-void AddHorizontalQuadOccluder(yr::RenderScene& scene, float y, int material_index) {
-    scene.triangles.push_back(yr::RenderTriangle{
-        yr::Point3f{-20.0f, y, -20.0f},
-        yr::Point3f{20.0f, y, -20.0f},
-        yr::Point3f{20.0f, y, 20.0f},
-        yr::Vec3f{0.0f, -1.0f, 0.0f},
-        material_index
-    });
-    scene.triangles.push_back(yr::RenderTriangle{
-        yr::Point3f{-20.0f, y, -20.0f},
-        yr::Point3f{20.0f, y, 20.0f},
-        yr::Point3f{-20.0f, y, 20.0f},
-        yr::Vec3f{0.0f, -1.0f, 0.0f},
-        material_index
-    });
-}
-
-yr::RenderMaterial MakeShadowGlassMaterial(
-    bool thin,
-    yr::Color3f albedo = yr::Color3f{1.0f, 1.0f, 1.0f},
-    yr::Color3f absorption_color = yr::Color3f{1.0f, 1.0f, 1.0f},
-    float absorption_distance = 1.0f
-) {
-    yr::RenderMaterial material;
-    material.type = yr::MaterialKind::Dielectric;
-    material.albedo = albedo;
-    material.ior = 1.5f;
-    material.roughness = 0.0f;
-    material.thin = thin;
-    material.absorption_color = absorption_color;
-    material.absorption_distance = absorption_distance;
-    return material;
 }
 
 yr::RenderScene MakeAreaShadowSceneWithPane(const yr::RenderMaterial& pane_material) {
@@ -860,6 +895,19 @@ YR_TEST(cpu_path_tracer_occluder_blocks_direct_hdri_light) {
 
     YR_EXPECT_TRUE(open_luminance > occluded_luminance);
     YR_EXPECT_TRUE(occluded_result.stats.occluded_shadow_rays > 0);
+}
+
+YR_TEST(cpu_path_tracer_clear_glass_pane_transmits_hdri_direct_light_shadow) {
+    const yr::CpuPathTraceResult open_result = yr::RenderCpuPathTrace(MakeDiffusePlaneUnderHdriScene(false));
+    const yr::CpuPathTraceResult glass_result =
+        yr::RenderCpuPathTrace(MakeDiffusePlaneUnderHdriWithGlassOccluder(true));
+
+    const float open_luminance = Luminance(open_result.film.LinearPixel(0, 0));
+    const float glass_luminance = Luminance(glass_result.film.LinearPixel(0, 0));
+
+    YR_EXPECT_TRUE(open_luminance > 0.0f);
+    YR_EXPECT_TRUE(glass_luminance > open_luminance * 0.8f);
+    YR_EXPECT_EQ(glass_result.stats.occluded_shadow_rays, std::uint64_t{0});
 }
 
 YR_TEST(cpu_path_tracer_mirror_reflects_environment) {
