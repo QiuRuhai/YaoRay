@@ -106,11 +106,11 @@ yr::RenderSceneIR MakeTexturedTriangleScene(std::uint64_t seed = 7, int threads 
     scene.textures.push_back(yr::RenderTexture{
         2,
         2,
-        std::vector<yr::Color3f>{
-            yr::Color3f{1.0f, 0.0f, 0.0f},
-            yr::Color3f{0.0f, 1.0f, 0.0f},
-            yr::Color3f{0.0f, 0.0f, 1.0f},
-            yr::Color3f{1.0f, 1.0f, 1.0f}
+        std::vector<yr::Color4f>{
+            yr::Color4f{1.0f, 0.0f, 0.0f, 1.0f},
+            yr::Color4f{0.0f, 1.0f, 0.0f, 1.0f},
+            yr::Color4f{0.0f, 0.0f, 1.0f, 1.0f},
+            yr::Color4f{1.0f, 1.0f, 1.0f, 1.0f}
         }
     });
     scene.triangles.push_back(yr::RenderTriangle{

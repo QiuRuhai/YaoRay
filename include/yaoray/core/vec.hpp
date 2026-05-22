@@ -30,6 +30,23 @@ struct Vec3f {
 using Point3f = Vec3f;
 using Color3f = Vec3f;
 
+struct Color4f {
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float w = 1.0f;
+
+    constexpr Color4f() = default;
+    constexpr Color4f(float x_value, float y_value, float z_value, float w_value = 1.0f)
+        : x(x_value), y(y_value), z(z_value), w(w_value) {}
+    constexpr Color4f(Color3f rgb, float alpha = 1.0f)
+        : x(rgb.x), y(rgb.y), z(rgb.z), w(alpha) {}
+
+    constexpr Color3f rgb() const {
+        return Color3f{x, y, z};
+    }
+};
+
 constexpr Vec3f operator+(Vec3f a, Vec3f b) {
     return Vec3f{a.x + b.x, a.y + b.y, a.z + b.z};
 }
