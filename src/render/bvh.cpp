@@ -246,9 +246,14 @@ BvhBuildResult BuildBvh(const std::vector<RenderTriangle>& triangles, const BvhB
     return result;
 }
 
-BvhHit IntersectBvh(const RenderScene& scene, const Ray3f& ray, BvhTraceStats& stats) {
+BvhHit IntersectBvh(
+    const RenderSceneIR& scene,
+    const RenderBvh& bvh,
+    const Ray3f& ray,
+    BvhTraceStats& stats
+) {
     BvhHit nearest;
-    if (scene.bvh.nodes.empty()) {
+    if (bvh.nodes.empty()) {
         return nearest;
     }
 
@@ -257,11 +262,11 @@ BvhHit IntersectBvh(const RenderScene& scene, const Ray3f& ray, BvhTraceStats& s
     while (!stack.empty()) {
         const int node_index = stack.back();
         stack.pop_back();
-        if (node_index < 0 || static_cast<std::size_t>(node_index) >= scene.bvh.nodes.size()) {
+        if (node_index < 0 || static_cast<std::size_t>(node_index) >= bvh.nodes.size()) {
             continue;
         }
 
-        const RenderBvhNode& node = scene.bvh.nodes[static_cast<std::size_t>(node_index)];
+        const RenderBvhNode& node = bvh.nodes[static_cast<std::size_t>(node_index)];
         ++stats.node_tests;
         if (!node.bounds.Intersects(ray, MinHitT, nearest.t)) {
             continue;
@@ -271,11 +276,11 @@ BvhHit IntersectBvh(const RenderScene& scene, const Ray3f& ray, BvhTraceStats& s
             for (int i = 0; i < node.triangle_count; ++i) {
                 const int index_position = node.first_triangle + i;
                 if (index_position < 0 ||
-                    static_cast<std::size_t>(index_position) >= scene.bvh.triangle_indices.size()) {
+                    static_cast<std::size_t>(index_position) >= bvh.triangle_indices.size()) {
                     continue;
                 }
 
-                const int triangle_index = scene.bvh.triangle_indices[static_cast<std::size_t>(index_position)];
+                const int triangle_index = bvh.triangle_indices[static_cast<std::size_t>(index_position)];
                 if (triangle_index < 0 ||
                     static_cast<std::size_t>(triangle_index) >= scene.triangles.size()) {
                     continue;

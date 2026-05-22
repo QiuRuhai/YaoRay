@@ -366,3 +366,5 @@ Phase 3 tests:
 ## Implementation Status
 
 Design approved for phased planning.
+
+Phase 1 implementation status: `RenderSceneIR` and `CpuPreparedScene` have been implemented. The render compiler now outputs backend-neutral render input, and the CPU backend builds its own BVH during scene preparation.

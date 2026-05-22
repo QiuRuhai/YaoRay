@@ -2,6 +2,7 @@
 
 #include <yaoray/backends/cpu/cpu_debug_renderer.hpp>
 #include <yaoray/backends/cpu/cpu_path_tracer.hpp>
+#include <yaoray/backends/cpu/cpu_prepared_scene.hpp>
 
 #include <utility>
 
@@ -46,20 +47,27 @@ RenderBackendKind CpuDebugBackend::Kind() const {
     return RenderBackendKind::Cpu;
 }
 
-RenderResult CpuDebugBackend::Render(const RenderScene& scene, const RenderRequest& request) {
+RenderResult CpuDebugBackend::Render(const RenderSceneIR& scene, const RenderRequest& request) {
     (void)request;
 
     RenderResult result;
-    result.ok = true;
 
+    CpuPrepareResult prepared = PrepareCpuScene(scene);
+    if (!prepared.ok || !prepared.scene.has_value()) {
+        result.ok = false;
+        result.error = prepared.error.empty() ? "failed to prepare CPU scene" : prepared.error;
+        return result;
+    }
+
+    result.ok = true;
     if (scene.integrator == RenderIntegratorKind::Path) {
-        CpuPathTraceResult path_result = RenderCpuPathTrace(scene);
+        CpuPathTraceResult path_result = RenderCpuPathTrace(prepared.scene.value());
         result.film.emplace(std::move(path_result.film));
         result.stats = ToRenderStats(path_result.stats);
         return result;
     }
 
-    CpuDebugRenderResult debug_result = RenderCpuDebug(scene);
+    CpuDebugRenderResult debug_result = RenderCpuDebug(prepared.scene.value());
     result.film.emplace(std::move(debug_result.film));
     result.stats = ToRenderStats(debug_result.stats);
     return result;

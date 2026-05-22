@@ -73,6 +73,7 @@ add_library(yaoray_backends STATIC
     src/backends/backend.cpp
     src/backends/cpu/cpu_debug_backend.cpp
     src/backends/cpu/cpu_debug_renderer.cpp
+    src/backends/cpu/cpu_prepared_scene.cpp
     src/backends/cpu/cpu_tile_scheduler.cpp
     src/backends/cpu/cpu_sampler.cpp
     src/backends/cpu/cpu_path_tracer.cpp

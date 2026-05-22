@@ -113,18 +113,16 @@ int RunRender(int argc, char** argv) {
         return 1;
     }
 
-    const yr::RenderScene& render_scene = compile_result.scene.value();
+    const yr::RenderSceneIR& render_scene = compile_result.scene.value();
     std::cout << "Scene parsed successfully: " << scene.source_path.generic_string() << '\n';
     std::cout << "Scene compiled successfully.\n";
-    std::cout << "Requested backend: " << yr::RenderBackendName(render_scene.backend) << '\n';
+    std::cout << "Requested backend: " << yr::RenderBackendName(render_scene.requested_backend) << '\n';
     std::cout << "Integrator: " << yr::RenderIntegratorName(render_scene.integrator) << '\n';
     std::cout << "Compiled triangles: " << render_scene.triangles.size() << '\n';
-    std::cout << "BVH nodes: " << render_scene.bvh.nodes.size() << '\n';
-    std::cout << "BVH max depth: " << render_scene.bvh.max_depth << '\n';
 
-    const auto backend = yr::CreateRenderBackend(render_scene.backend);
+    const auto backend = yr::CreateRenderBackend(render_scene.requested_backend);
     if (!backend) {
-        std::cerr << "Render backend not available: " << yr::RenderBackendName(render_scene.backend) << '\n';
+        std::cerr << "Render backend not available: " << yr::RenderBackendName(render_scene.requested_backend) << '\n';
         return 1;
     }
 
@@ -154,6 +152,8 @@ int RunRender(int argc, char** argv) {
     std::cout << "Rays traced: " << render_result.stats.rays_traced << '\n';
     std::cout << "Samples/sec: " << SafeRate(static_cast<double>(total_samples), render_result.stats.elapsed_seconds) << '\n';
     std::cout << "Rays/sec: " << SafeRate(static_cast<double>(render_result.stats.rays_traced), render_result.stats.elapsed_seconds) << '\n';
+    std::cout << "BVH nodes: " << render_result.stats.bvh_nodes << '\n';
+    std::cout << "BVH max depth: " << render_result.stats.bvh_max_depth << '\n';
     std::cout << "Shadow rays: " << render_result.stats.shadow_rays << '\n';
     std::cout << "Occluded shadow rays: " << render_result.stats.occluded_shadow_rays << '\n';
     std::cout << "BVH node tests: " << render_result.stats.bvh_node_tests << '\n';

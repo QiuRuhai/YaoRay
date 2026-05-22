@@ -39,7 +39,7 @@ public:
     virtual ~RenderBackend() = default;
 
     virtual RenderBackendKind Kind() const = 0;
-    virtual RenderResult Render(const RenderScene& scene, const RenderRequest& request) = 0;
+    virtual RenderResult Render(const RenderSceneIR& scene, const RenderRequest& request) = 0;
 };
 
 std::unique_ptr<RenderBackend> CreateRenderBackend(RenderBackendKind kind);

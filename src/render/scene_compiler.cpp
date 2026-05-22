@@ -2,7 +2,6 @@
 
 #include <yaoray/assets/gltf_loader.hpp>
 #include <yaoray/assets/obj_loader.hpp>
-#include <yaoray/render/bvh.hpp>
 #include <yaoray/render/environment.hpp>
 #include <yaoray/render/texture.hpp>
 
@@ -58,7 +57,7 @@ RenderCamera CompileCamera(const CameraDescription& camera) {
     return compiled;
 }
 
-void CopyAreaLights(const SceneDescription& scene, RenderScene& compiled) {
+void CopyAreaLights(const SceneDescription& scene, RenderSceneIR& compiled) {
     for (const LightDescription& light : scene.lights) {
         if (light.type != LightKind::Area) {
             continue;
@@ -74,7 +73,7 @@ void CopyAreaLights(const SceneDescription& scene, RenderScene& compiled) {
 
 void CompileEnvironment(
     const SceneDescription& scene,
-    RenderScene& compiled,
+    RenderSceneIR& compiled,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
     if (scene.environment.type == EnvironmentKind::None || scene.environment.type == EnvironmentKind::Constant) {
@@ -166,7 +165,7 @@ struct TextureCache {
 
 bool AppendTriangle(
     const SceneDescription& scene,
-    RenderScene& compiled,
+    RenderSceneIR& compiled,
     Point3f p0,
     Point3f p1,
     Point3f p2,
@@ -197,7 +196,7 @@ std::unordered_map<std::string, const AssetDescription*> BuildAssetMap(const Sce
     return assets;
 }
 
-std::unordered_map<std::string, int> BuildMaterialMap(const SceneDescription& scene, RenderScene& compiled) {
+std::unordered_map<std::string, int> BuildMaterialMap(const SceneDescription& scene, RenderSceneIR& compiled) {
     std::unordered_map<std::string, int> materials;
     for (const MaterialDescription& material : scene.materials) {
         const int material_index = static_cast<int>(compiled.materials.size());
@@ -217,7 +216,7 @@ std::unordered_map<std::string, int> BuildMaterialMap(const SceneDescription& sc
     return materials;
 }
 
-int AddDefaultMaterial(RenderScene& compiled) {
+int AddDefaultMaterial(RenderSceneIR& compiled) {
     const int material_index = static_cast<int>(compiled.materials.size());
     compiled.materials.push_back(RenderMaterial{});
     return material_index;
@@ -244,7 +243,7 @@ std::string CanonicalTextureKey(const std::filesystem::path& path, TextureWrap w
 
 std::optional<int> LoadTextureIndex(
     const SceneDescription& scene,
-    RenderScene& compiled,
+    RenderSceneIR& compiled,
     const std::filesystem::path& path,
     TextureWrap wrap_s,
     TextureWrap wrap_t,
@@ -274,7 +273,7 @@ std::optional<int> LoadTextureIndex(
 
 std::vector<int> CompileImportedMaterials(
     const SceneDescription& scene,
-    RenderScene& compiled,
+    RenderSceneIR& compiled,
     const ImportedMesh& mesh,
     TextureCache& texture_cache,
     std::vector<SceneDiagnostic>& diagnostics
@@ -318,7 +317,7 @@ std::optional<int> ResolveMaterialIndex(
     const SceneDescription& scene,
     const InstanceDescription& instance,
     const std::unordered_map<std::string, int>& materials,
-    RenderScene& compiled,
+    RenderSceneIR& compiled,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
     if (instance.material.empty()) {
@@ -333,7 +332,7 @@ std::optional<int> ResolveMaterialIndex(
     return material->second;
 }
 
-void AppendBuiltinTriangle(RenderScene& compiled, const TransformDescription& transform, int material_index) {
+void AppendBuiltinTriangle(RenderSceneIR& compiled, const TransformDescription& transform, int material_index) {
     constexpr Point3f p0{-0.5f, 0.0f, 0.0f};
     constexpr Point3f p1{0.5f, 0.0f, 0.0f};
     constexpr Point3f p2{0.0f, 1.0f, 0.0f};
@@ -352,7 +351,7 @@ void AppendBuiltinTriangle(RenderScene& compiled, const TransformDescription& tr
 }
 
 void AppendImportedMesh(
-    RenderScene& compiled,
+    RenderSceneIR& compiled,
     const ImportedMesh& mesh,
     const TransformDescription& transform,
     std::optional<int> override_material_index,
@@ -404,7 +403,7 @@ void AppendImportedMesh(
 
 void AppendInlineQuadAsset(
     const SceneDescription& scene,
-    RenderScene& compiled,
+    RenderSceneIR& compiled,
     const AssetDescription& asset,
     const TransformDescription& transform,
     int material_index,
@@ -423,7 +422,7 @@ void AppendInlineQuadAsset(
 
 void AppendObjAsset(
     const SceneDescription& scene,
-    RenderScene& compiled,
+    RenderSceneIR& compiled,
     const std::filesystem::path& asset_path,
     const TransformDescription& transform,
     std::optional<int> override_material_index,
@@ -464,7 +463,7 @@ void AppendObjAsset(
 
 void AppendGltfAsset(
     const SceneDescription& scene,
-    RenderScene& compiled,
+    RenderSceneIR& compiled,
     const std::filesystem::path& asset_path,
     const TransformDescription& transform,
     std::optional<int> override_material_index,
@@ -507,8 +506,8 @@ void AppendGltfAsset(
 
 SceneCompileResult CompileScene(const SceneDescription& scene) {
     SceneCompileResult result;
-    RenderScene compiled;
-    compiled.backend = scene.render.backend;
+    RenderSceneIR compiled;
+    compiled.requested_backend = scene.render.backend;
     compiled.integrator = scene.render.integrator;
     compiled.sampler = scene.render.sampler;
     compiled.width = scene.render.width;
@@ -599,15 +598,6 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
         return result;
     }
 
-    BvhBuildResult bvh_result = BuildBvh(compiled.triangles);
-    for (const std::string& error : bvh_result.errors) {
-        result.diagnostics.push_back(Error(scene, "render.bvh", error));
-    }
-    if (HasSceneErrors(result.diagnostics)) {
-        return result;
-    }
-
-    compiled.bvh = std::move(bvh_result.bvh);
     result.scene = std::move(compiled);
     return result;
 }

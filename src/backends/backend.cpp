@@ -13,7 +13,7 @@ public:
         return RenderBackendKind::Cuda;
     }
 
-    RenderResult Render(const RenderScene& scene, const RenderRequest& request) override {
+    RenderResult Render(const RenderSceneIR& scene, const RenderRequest& request) override {
         (void)scene;
         (void)request;
 

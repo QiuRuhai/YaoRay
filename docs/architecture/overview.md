@@ -1,22 +1,24 @@
 # YaoRay Architecture Overview
 
-YaoRay uses a two-layer renderer architecture.
+YaoRay uses a layered renderer architecture. The current implementation has semantic scene data, backend-neutral render IR, and backend-prepared runtime data; the asset resource layer is planned as the next refactor step.
 
 The semantic layer describes the scene in terms people can author and debug: cameras, lights, assets, instances, material overrides, render settings, and Film settings. The current implementation parses this semantic layer from TOML scene files into `SceneDescription`.
 
-The render layer compiles that semantic scene into backend-friendly data. The current `yaoray_render` slice provides a minimal `RenderScene` with render settings, camera data, environment data, area lights, materials, flat world-space triangles, and a BVH over those triangles. Rendering is dispatched through a common backend interface so CPU, CUDA, and future OptiX backends can consume this compiled representation without app-layer special cases.
+The render layer compiles that semantic scene into backend-neutral input. The current `yaoray_render` slice provides a minimal `RenderSceneIR` with render settings, camera data, environment data, area lights, materials, textures, and flat world-space triangles. Rendering is dispatched through a common backend interface so CPU, CUDA, and future OptiX backends can prepare and consume their own runtime representations without app-layer special cases.
+
+The CPU backend prepares `CpuPreparedScene` from `RenderSceneIR` by building the CPU `RenderBvh`. The BVH is no longer part of shared compiler output, which keeps later CUDA or OptiX acceleration structures out of the render IR.
 
 Current implemented slices:
 
 - project structure, tests, core math primitives, Film accumulation, and CLI shell
 - TOML scene parsing, validation diagnostics, and `yaoray render` command shell
-- initial `RenderScene` compilation with temporary `builtin:triangle` asset support
+- initial backend-neutral `RenderSceneIR` compilation with temporary `builtin:triangle` asset support
 - CPU rendering with deterministic area-light direct lighting and BVH shadow rays
 - PNG output for renderable scenes, with PPM still available for debug/test output
 - common render backend interface with CPU debug and CUDA not-implemented backends
 - textured OBJ asset import through the `yaoray_assets` module
 - static glTF/GLB asset import through the `yaoray_assets` module and tinygltf
-- BVH acceleration over compiled render triangles
+- CPU backend BVH preparation over compiled render triangles
 - TOML named diffuse, emissive, mirror, metal, plastic, and dielectric/glass materials with instance-level material binding
 - scene-authored inline quad assets and a Cornell Box example based on Cornell measured geometry
 - render integrator selection with a deterministic CPU path tracer v0
@@ -37,6 +39,6 @@ Inline quad assets let TOML scenes define small measured or hand-authored quad m
 
 The path-traced Cornell example is separate from the debug Cornell scene. The debug scene remains a fast geometry and pipeline smoke test; the path scene is for manual visual review of indirect diffuse lighting.
 
-The material showcase scenes are Cornell-style manual previews for material behavior. `textured_quad.toml` verifies that OBJ UVs, MTL `map_Kd`, PNG loading, and CPU diffuse texture sampling work end to end. `gltf_textured_asset.toml` verifies that a real glTF asset can travel through scene parsing, glTF loading, texture loading, scene compilation, BVH build, and CPU path rendering. `material_showcase.toml` uses inline quads and the CPU path tracer to show diffuse surfaces, emissive light panels, and a perfect mirror block. `material_v2_showcase.toml` adds polished metal, rough metal, and plastic preview objects. `hdri_lighting_showcase.toml` verifies that an HDRI environment can illuminate diffuse geometry and appear through mirror paths. `glass_showcase.toml` uses mesh spheres, a thin pane, and high-contrast backdrop cards to verify absorbing blue glass, rough amber glass, and thin glass through the CPU path tracer. Texture Quality v1 still has no mipmaps, anisotropic filtering, normal maps, alpha handling, imported roughness/metallic textures, or CUDA texture sampling parity. HDRI environment lighting does not yet include mipmapped rough-specular lookup, portal lights, sun/sky, LDR environment color-space controls, EXR I/O, or CUDA parity. Dielectric rendering remains a surface model with only a single active absorbing medium: nested medium stacks, caustic-specific algorithms, glTF glass extension import, and CUDA parity remain future work. Advanced texture maps and full imported material files also remain future work.
+The material showcase scenes are Cornell-style manual previews for material behavior. `textured_quad.toml` verifies that OBJ UVs, MTL `map_Kd`, PNG loading, and CPU diffuse texture sampling work end to end. `gltf_textured_asset.toml` verifies that a real glTF asset can travel through scene parsing, glTF loading, texture loading, scene compilation, CPU BVH preparation, and CPU path rendering. `material_showcase.toml` uses inline quads and the CPU path tracer to show diffuse surfaces, emissive light panels, and a perfect mirror block. `material_v2_showcase.toml` adds polished metal, rough metal, and plastic preview objects. `hdri_lighting_showcase.toml` verifies that an HDRI environment can illuminate diffuse geometry and appear through mirror paths. `glass_showcase.toml` uses mesh spheres, a thin pane, and high-contrast backdrop cards to verify absorbing blue glass, rough amber glass, and thin glass through the CPU path tracer. Texture Quality v1 still has no mipmaps, anisotropic filtering, normal maps, alpha handling, imported roughness/metallic textures, or CUDA texture sampling parity. HDRI environment lighting does not yet include mipmapped rough-specular lookup, portal lights, sun/sky, LDR environment color-space controls, EXR I/O, or CUDA parity. Dielectric rendering remains a surface model with only a single active absorbing medium: nested medium stacks, caustic-specific algorithms, glTF glass extension import, and CUDA parity remain future work. Advanced texture maps and full imported material files also remain future work.
 
 Spectral rendering, advanced texture import, full imported material files, advanced BVH split methods, HDR output, more complete CPU path tracing, real CUDA rendering, and final-quality image output will be added in focused implementation plans. The full Integrator API refactor should wait until configurable integrator settings, a unified light interface, or CUDA path tracing make the current path loop too crowded.

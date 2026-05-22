@@ -4,7 +4,6 @@
 #include <vector>
 
 #include <yaoray/core/vec.hpp>
-#include <yaoray/render/bvh.hpp>
 #include <yaoray/render/texture.hpp>
 #include <yaoray/scene/scene.hpp>
 
@@ -76,8 +75,8 @@ struct RenderAreaLight {
     Color3f radiance{1.0f, 1.0f, 1.0f};
 };
 
-struct RenderScene {
-    RenderBackendKind backend = RenderBackendKind::Cpu;
+struct RenderSceneIR {
+    RenderBackendKind requested_backend = RenderBackendKind::Cpu;
     RenderIntegratorKind integrator = RenderIntegratorKind::DebugDirect;
     RenderSamplerKind sampler = RenderSamplerKind::Independent;
     int width = 0;
@@ -95,7 +94,6 @@ struct RenderScene {
     std::vector<RenderEnvironmentDistribution> environment_distributions;
     std::vector<RenderTriangle> triangles;
     std::vector<RenderAreaLight> area_lights;
-    RenderBvh bvh;
 };
 
 } // namespace yr

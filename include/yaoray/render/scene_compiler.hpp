@@ -10,7 +10,7 @@
 namespace yr {
 
 struct SceneCompileResult {
-    std::optional<RenderScene> scene;
+    std::optional<RenderSceneIR> scene;
     std::vector<SceneDiagnostic> diagnostics;
 };
 

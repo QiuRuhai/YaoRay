@@ -17,9 +17,9 @@ Vec3f EnvironmentUvToDirection(Vec2f uv, float rotation_radians);
 
 RenderEnvironmentDistribution BuildEnvironmentDistribution(const RenderTexture& texture);
 
-Color3f EvaluateEnvironment(const RenderScene& scene, Vec3f direction);
-EnvironmentSample SampleEnvironment(const RenderScene& scene, Vec2f sample);
-float PdfEnvironment(const RenderScene& scene, Vec3f direction);
-bool HasSampleableEnvironment(const RenderScene& scene);
+Color3f EvaluateEnvironment(const RenderSceneIR& scene, Vec3f direction);
+EnvironmentSample SampleEnvironment(const RenderSceneIR& scene, Vec2f sample);
+float PdfEnvironment(const RenderSceneIR& scene, Vec3f direction);
+bool HasSampleableEnvironment(const RenderSceneIR& scene);
 
 } // namespace yr

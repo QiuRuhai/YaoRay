@@ -1,8 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <yaoray/backends/cpu/cpu_prepared_scene.hpp>
 #include <yaoray/film/film.hpp>
-#include <yaoray/render/render_scene.hpp>
 
 namespace yr {
 
@@ -25,6 +25,6 @@ struct CpuPathTraceResult {
     CpuPathTraceStats stats;
 };
 
-CpuPathTraceResult RenderCpuPathTrace(const RenderScene& scene);
+CpuPathTraceResult RenderCpuPathTrace(const CpuPreparedScene& prepared_scene);
 
 } // namespace yr

@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
+#include <yaoray/backends/cpu/cpu_prepared_scene.hpp>
 #include <yaoray/film/film.hpp>
-#include <yaoray/render/render_scene.hpp>
 
 namespace yr {
 
@@ -25,6 +25,6 @@ struct CpuDebugRenderResult {
     CpuDebugRenderStats stats;
 };
 
-CpuDebugRenderResult RenderCpuDebug(const RenderScene& scene);
+CpuDebugRenderResult RenderCpuDebug(const CpuPreparedScene& prepared_scene);
 
 } // namespace yr

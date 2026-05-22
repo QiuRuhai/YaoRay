@@ -144,23 +144,28 @@ YR_TEST(bvh_builder_leaf_indices_are_valid_triangle_indices) {
     }
 }
 
-yr::RenderScene MakeBvhScene(std::vector<yr::RenderTriangle> triangles) {
-    yr::RenderScene scene;
-    scene.triangles = std::move(triangles);
-    const yr::BvhBuildResult build = yr::BuildBvh(scene.triangles);
+struct TestBvhScene {
+    yr::RenderSceneIR scene;
+    yr::RenderBvh bvh;
+};
+
+TestBvhScene MakeBvhScene(std::vector<yr::RenderTriangle> triangles) {
+    TestBvhScene test_scene;
+    test_scene.scene.triangles = std::move(triangles);
+    const yr::BvhBuildResult build = yr::BuildBvh(test_scene.scene.triangles);
     if (!build.errors.empty()) {
         throw std::runtime_error(build.errors[0]);
     }
-    scene.bvh = build.bvh;
-    return scene;
+    test_scene.bvh = build.bvh;
+    return test_scene;
 }
 
 YR_TEST(bvh_traversal_returns_miss_for_empty_bvh) {
-    const yr::RenderScene scene = MakeBvhScene({});
+    const TestBvhScene scene = MakeBvhScene({});
     const yr::Ray3f ray{yr::Point3f{0.0f, 0.0f, 1.0f}, yr::Vec3f{0.0f, 0.0f, -1.0f}};
     yr::BvhTraceStats stats;
 
-    const yr::BvhHit hit = yr::IntersectBvh(scene, ray, stats);
+    const yr::BvhHit hit = yr::IntersectBvh(scene.scene, scene.bvh, ray, stats);
 
     YR_EXPECT_TRUE(!hit.hit);
     YR_EXPECT_TRUE(hit.triangle == nullptr);
@@ -170,11 +175,11 @@ YR_TEST(bvh_traversal_returns_miss_for_empty_bvh) {
 }
 
 YR_TEST(bvh_traversal_hits_single_triangle) {
-    const yr::RenderScene scene = MakeBvhScene({MakeTriangle(0.0f)});
+    const TestBvhScene scene = MakeBvhScene({MakeTriangle(0.0f)});
     const yr::Ray3f ray{yr::Point3f{0.0f, 0.0f, 1.0f}, yr::Vec3f{0.0f, 0.0f, -1.0f}};
     yr::BvhTraceStats stats;
 
-    const yr::BvhHit hit = yr::IntersectBvh(scene, ray, stats);
+    const yr::BvhHit hit = yr::IntersectBvh(scene.scene, scene.bvh, ray, stats);
 
     YR_EXPECT_TRUE(hit.hit);
     YR_EXPECT_TRUE(hit.triangle != nullptr);
@@ -194,11 +199,11 @@ YR_TEST(bvh_traversal_returns_nearest_hit) {
         0
     });
     triangles.push_back(MakeTriangle(0.0f));
-    const yr::RenderScene scene = MakeBvhScene(std::move(triangles));
+    const TestBvhScene scene = MakeBvhScene(std::move(triangles));
     const yr::Ray3f ray{yr::Point3f{0.0f, 0.0f, 1.0f}, yr::Vec3f{0.0f, 0.0f, -1.0f}};
     yr::BvhTraceStats stats;
 
-    const yr::BvhHit hit = yr::IntersectBvh(scene, ray, stats);
+    const yr::BvhHit hit = yr::IntersectBvh(scene.scene, scene.bvh, ray, stats);
 
     YR_EXPECT_TRUE(hit.hit);
     YR_EXPECT_EQ(hit.triangle_index, 1);
@@ -206,7 +211,7 @@ YR_TEST(bvh_traversal_returns_nearest_hit) {
 }
 
 YR_TEST(bvh_traversal_culls_sparse_triangles) {
-    const yr::RenderScene scene = MakeBvhScene({
+    const TestBvhScene scene = MakeBvhScene({
         MakeTriangle(0.0f),
         MakeTriangle(10.0f),
         MakeTriangle(20.0f),
@@ -216,7 +221,7 @@ YR_TEST(bvh_traversal_culls_sparse_triangles) {
     const yr::Ray3f ray{yr::Point3f{0.0f, 0.0f, 1.0f}, yr::Vec3f{0.0f, 0.0f, -1.0f}};
     yr::BvhTraceStats stats;
 
-    const yr::BvhHit hit = yr::IntersectBvh(scene, ray, stats);
+    const yr::BvhHit hit = yr::IntersectBvh(scene.scene, scene.bvh, ray, stats);
 
     YR_EXPECT_TRUE(hit.hit);
     YR_EXPECT_TRUE(stats.triangle_tests < std::uint64_t{5});

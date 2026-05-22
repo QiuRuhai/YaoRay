@@ -6,14 +6,14 @@
 #include <string>
 
 #include <yaoray/backends/backend.hpp>
-#include <yaoray/render/bvh.hpp>
+#include <yaoray/backends/cpu/cpu_prepared_scene.hpp>
 #include <yaoray/render/render_scene.hpp>
 
 namespace {
 
-yr::RenderScene MakeBackendTriangleScene(int width = 4, int height = 3) {
-    yr::RenderScene scene;
-    scene.backend = yr::RenderBackendKind::Cpu;
+yr::RenderSceneIR MakeBackendTriangleScene(int width = 4, int height = 3) {
+    yr::RenderSceneIR scene;
+    scene.requested_backend = yr::RenderBackendKind::Cpu;
     scene.width = width;
     scene.height = height;
     scene.spp = 1;
@@ -37,11 +37,6 @@ yr::RenderScene MakeBackendTriangleScene(int width = 4, int height = 3) {
         yr::Vec3f{0.0f, 0.0f, 1.0f},
         0
     });
-    const yr::BvhBuildResult build = yr::BuildBvh(scene.triangles);
-    if (!build.errors.empty()) {
-        throw std::runtime_error(build.errors[0]);
-    }
-    scene.bvh = build.bvh;
     return scene;
 }
 
@@ -54,9 +49,23 @@ YR_TEST(create_render_backend_returns_cpu_backend) {
     YR_EXPECT_EQ(backend->Kind(), yr::RenderBackendKind::Cpu);
 }
 
+YR_TEST(cpu_prepare_scene_builds_bvh_from_render_scene_ir) {
+    const yr::RenderSceneIR scene = MakeBackendTriangleScene(4, 3);
+
+    const yr::CpuPrepareResult prepared = yr::PrepareCpuScene(scene);
+
+    YR_EXPECT_TRUE(prepared.ok);
+    YR_EXPECT_TRUE(prepared.error.empty());
+    YR_EXPECT_TRUE(prepared.scene.has_value());
+    YR_EXPECT_TRUE(prepared.scene->render_scene == &scene);
+    YR_EXPECT_EQ(prepared.scene->bvh.nodes.size(), std::size_t{1});
+    YR_EXPECT_EQ(prepared.scene->bvh.triangle_indices.size(), std::size_t{1});
+    YR_EXPECT_EQ(prepared.scene->bvh.max_depth, 1);
+}
+
 YR_TEST(cpu_backend_renders_film_and_stats) {
     const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cpu);
-    const yr::RenderScene scene = MakeBackendTriangleScene(4, 3);
+    const yr::RenderSceneIR scene = MakeBackendTriangleScene(4, 3);
 
     const yr::RenderResult result = backend->Render(scene, yr::RenderRequest{});
 
@@ -78,7 +87,7 @@ YR_TEST(cpu_backend_renders_film_and_stats) {
 
 YR_TEST(cpu_backend_dispatches_path_integrator) {
     const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cpu);
-    yr::RenderScene scene = MakeBackendTriangleScene(20, 17);
+    yr::RenderSceneIR scene = MakeBackendTriangleScene(20, 17);
     scene.integrator = yr::RenderIntegratorKind::Path;
     scene.spp = 4;
     scene.threads = 2;
@@ -95,7 +104,7 @@ YR_TEST(cpu_backend_dispatches_path_integrator) {
 
 YR_TEST(cpu_backend_keeps_debug_direct_as_default_integrator) {
     const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cpu);
-    yr::RenderScene scene = MakeBackendTriangleScene(4, 3);
+    yr::RenderSceneIR scene = MakeBackendTriangleScene(4, 3);
     scene.integrator = yr::RenderIntegratorKind::DebugDirect;
     scene.spp = 4;
     scene.threads = 4;
@@ -118,8 +127,8 @@ YR_TEST(create_render_backend_returns_cuda_stub_backend) {
 
 YR_TEST(cuda_backend_returns_not_implemented_failure) {
     const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cuda);
-    yr::RenderScene scene = MakeBackendTriangleScene(1, 1);
-    scene.backend = yr::RenderBackendKind::Cuda;
+    yr::RenderSceneIR scene = MakeBackendTriangleScene(1, 1);
+    scene.requested_backend = yr::RenderBackendKind::Cuda;
 
     const yr::RenderResult result = backend->Render(scene, yr::RenderRequest{});
 

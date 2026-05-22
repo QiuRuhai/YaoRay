@@ -75,7 +75,7 @@ float PdfAreaLightSampleSolidAngle(
 }
 
 float PdfAreaLightsForPointSolidAngle(
-    const RenderScene& scene,
+    const RenderSceneIR& scene,
     Point3f shading_point,
     Point3f light_point
 ) {

@@ -10,7 +10,7 @@
 namespace yr {
 namespace {
 
-Ray3f MakeCameraRay(const RenderScene& scene, int x, int y) {
+Ray3f MakeCameraRay(const RenderSceneIR& scene, int x, int y) {
     const float width = static_cast<float>(scene.width);
     const float height = static_cast<float>(scene.height);
     const float aspect = width / height;
@@ -25,7 +25,7 @@ Ray3f MakeCameraRay(const RenderScene& scene, int x, int y) {
     return Ray3f{scene.camera.origin, direction};
 }
 
-Color3f EnvironmentColor(const RenderScene& scene) {
+Color3f EnvironmentColor(const RenderSceneIR& scene) {
     if (scene.environment.type == EnvironmentKind::Constant) {
         return scene.environment.radiance * scene.environment.strength;
     }
@@ -55,7 +55,7 @@ Vec3f FaceForward(Vec3f normal, Vec3f reference) {
     return Dot(normal, reference) < 0.0f ? -normal : normal;
 }
 
-bool IsValidMaterialIndex(const RenderScene& scene, int material_index) {
+bool IsValidMaterialIndex(const RenderSceneIR& scene, int material_index) {
     return material_index >= 0 && static_cast<std::size_t>(material_index) < scene.materials.size();
 }
 
@@ -65,11 +65,12 @@ void AccumulateTraceStats(CpuDebugRenderStats& stats, const BvhTraceStats& trace
 }
 
 Color3f ShadeHit(
-    const RenderScene& scene,
+    const CpuPreparedScene& prepared_scene,
     const Ray3f& ray,
     const BvhHit& hit,
     CpuDebugRenderStats& stats
 ) {
+    const RenderSceneIR& scene = prepared_scene.Scene();
     if (hit.triangle == nullptr || !IsValidMaterialIndex(scene, hit.triangle->material_index)) {
         return Color3f{1.0f, 0.0f, 1.0f};
     }
@@ -115,7 +116,7 @@ Color3f ShadeHit(
         ++stats.shadow_rays;
         BvhTraceStats shadow_trace;
         const Ray3f shadow_ray{shadow_origin, wi};
-        const BvhHit shadow_hit = IntersectBvh(scene, shadow_ray, shadow_trace);
+        const BvhHit shadow_hit = IntersectBvh(scene, prepared_scene.bvh, shadow_ray, shadow_trace);
         AccumulateTraceStats(stats, shadow_trace);
         if (shadow_hit.hit && shadow_hit.t < shadow_distance - shadow_bias) {
             ++stats.occluded_shadow_rays;
@@ -131,10 +132,11 @@ Color3f ShadeHit(
 
 } // namespace
 
-CpuDebugRenderResult RenderCpuDebug(const RenderScene& scene) {
+CpuDebugRenderResult RenderCpuDebug(const CpuPreparedScene& prepared_scene) {
+    const RenderSceneIR& scene = prepared_scene.Scene();
     CpuDebugRenderResult result{Film{scene.width, scene.height}, {}};
-    result.stats.bvh_nodes = static_cast<int>(scene.bvh.nodes.size());
-    result.stats.bvh_max_depth = scene.bvh.max_depth;
+    result.stats.bvh_nodes = static_cast<int>(prepared_scene.bvh.nodes.size());
+    result.stats.bvh_max_depth = prepared_scene.bvh.max_depth;
     const auto start = std::chrono::steady_clock::now();
 
     for (int y = 0; y < scene.height; ++y) {
@@ -143,11 +145,11 @@ CpuDebugRenderResult RenderCpuDebug(const RenderScene& scene) {
             ++result.stats.rays_traced;
 
             BvhTraceStats trace_stats;
-            const BvhHit hit = IntersectBvh(scene, ray, trace_stats);
+            const BvhHit hit = IntersectBvh(scene, prepared_scene.bvh, ray, trace_stats);
             AccumulateTraceStats(result.stats, trace_stats);
             if (hit.hit && hit.triangle != nullptr) {
                 ++result.stats.hits;
-                result.film.AddSample(x, y, ShadeHit(scene, ray, hit, result.stats));
+                result.film.AddSample(x, y, ShadeHit(prepared_scene, ray, hit, result.stats));
             } else {
                 ++result.stats.misses;
                 result.film.AddSample(x, y, EnvironmentColor(scene));

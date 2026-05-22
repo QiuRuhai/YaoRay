@@ -10,7 +10,7 @@
 
 namespace yr {
 
-struct RenderScene;
+struct RenderSceneIR;
 struct RenderTriangle;
 
 enum class BvhSplitMethod {
@@ -59,7 +59,8 @@ BvhBuildResult BuildBvh(
 );
 
 BvhHit IntersectBvh(
-    const RenderScene& scene,
+    const RenderSceneIR& scene,
+    const RenderBvh& bvh,
     const Ray3f& ray,
     BvhTraceStats& stats
 );

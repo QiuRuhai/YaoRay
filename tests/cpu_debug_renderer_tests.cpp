@@ -2,23 +2,23 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <utility>
 
 #include <yaoray/backends/cpu/cpu_debug_renderer.hpp>
-#include <yaoray/render/bvh.hpp>
 #include <yaoray/render/render_scene.hpp>
 
 namespace {
 
-void RebuildBvh(yr::RenderScene& scene) {
-    const yr::BvhBuildResult build = yr::BuildBvh(scene.triangles);
-    if (!build.errors.empty()) {
-        throw std::runtime_error(build.errors[0]);
+yr::CpuPreparedScene PrepareDebugScene(const yr::RenderSceneIR& scene) {
+    yr::CpuPrepareResult prepared = yr::PrepareCpuScene(scene);
+    if (!prepared.ok || !prepared.scene.has_value()) {
+        throw std::runtime_error(prepared.error.empty() ? "failed to prepare CPU scene" : prepared.error);
     }
-    scene.bvh = build.bvh;
+    return std::move(prepared.scene.value());
 }
 
-yr::RenderScene MakeDebugTriangleScene(int width = 5, int height = 5) {
-    yr::RenderScene scene;
+yr::RenderSceneIR MakeDebugTriangleScene(int width = 5, int height = 5) {
+    yr::RenderSceneIR scene;
     scene.width = width;
     scene.height = height;
     scene.spp = 1;
@@ -38,11 +38,10 @@ yr::RenderScene MakeDebugTriangleScene(int width = 5, int height = 5) {
         yr::Vec3f{0.0f, 0.0f, 1.0f},
         0
     });
-    RebuildBvh(scene);
     return scene;
 }
 
-void AddCenterLight(yr::RenderScene& scene, yr::Point3f position, yr::Color3f radiance) {
+void AddCenterLight(yr::RenderSceneIR& scene, yr::Point3f position, yr::Color3f radiance) {
     scene.area_lights.push_back(yr::RenderAreaLight{
         position,
         1.0f,
@@ -54,9 +53,9 @@ void AddCenterLight(yr::RenderScene& scene, yr::Point3f position, yr::Color3f ra
 } // namespace
 
 YR_TEST(cpu_debug_renderer_traces_one_ray_per_pixel) {
-    const yr::RenderScene scene = MakeDebugTriangleScene(4, 3);
+    const yr::RenderSceneIR scene = MakeDebugTriangleScene(4, 3);
 
-    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(scene);
+    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(PrepareDebugScene(scene));
 
     YR_EXPECT_EQ(result.stats.rays_traced, std::uint64_t{12});
     YR_EXPECT_EQ(result.stats.shadow_rays, std::uint64_t{0});
@@ -72,9 +71,9 @@ YR_TEST(cpu_debug_renderer_traces_one_ray_per_pixel) {
 }
 
 YR_TEST(cpu_debug_renderer_records_hits_and_misses) {
-    const yr::RenderScene scene = MakeDebugTriangleScene(5, 5);
+    const yr::RenderSceneIR scene = MakeDebugTriangleScene(5, 5);
 
-    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(scene);
+    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(PrepareDebugScene(scene));
 
     YR_EXPECT_TRUE(result.stats.hits > 0);
     YR_EXPECT_TRUE(result.stats.misses > 0);
@@ -82,14 +81,13 @@ YR_TEST(cpu_debug_renderer_records_hits_and_misses) {
 }
 
 YR_TEST(cpu_debug_renderer_shades_environment_misses) {
-    yr::RenderScene scene = MakeDebugTriangleScene(2, 2);
+    yr::RenderSceneIR scene = MakeDebugTriangleScene(2, 2);
     scene.triangles.clear();
-    scene.bvh = yr::RenderBvh{};
     scene.materials.clear();
     scene.environment.radiance = yr::Color3f{0.2f, 0.3f, 0.4f};
     scene.environment.strength = 2.0f;
 
-    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(scene);
+    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(PrepareDebugScene(scene));
     const yr::Color3f pixel = result.film.LinearPixel(0, 0);
 
     YR_EXPECT_EQ(result.stats.hits, std::uint64_t{0});
@@ -100,11 +98,11 @@ YR_TEST(cpu_debug_renderer_shades_environment_misses) {
 }
 
 YR_TEST(cpu_debug_renderer_uses_fallback_color_for_invalid_material_indices) {
-    yr::RenderScene scene = MakeDebugTriangleScene(3, 3);
+    yr::RenderSceneIR scene = MakeDebugTriangleScene(3, 3);
     scene.triangles[0].material_index = 99;
     scene.materials.clear();
 
-    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(scene);
+    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(PrepareDebugScene(scene));
     const yr::Color3f center = result.film.LinearPixel(1, 1);
 
     YR_EXPECT_TRUE(result.stats.hits > 0);
@@ -114,7 +112,7 @@ YR_TEST(cpu_debug_renderer_uses_fallback_color_for_invalid_material_indices) {
 }
 
 YR_TEST(cpu_debug_renderer_uses_bvh_to_reduce_triangle_tests) {
-    yr::RenderScene scene = MakeDebugTriangleScene(5, 5);
+    yr::RenderSceneIR scene = MakeDebugTriangleScene(5, 5);
     scene.triangles.clear();
     for (int i = 0; i < 5; ++i) {
         const float x = static_cast<float>(i) * 10.0f;
@@ -126,24 +124,18 @@ YR_TEST(cpu_debug_renderer_uses_bvh_to_reduce_triangle_tests) {
             0
         });
     }
-    const yr::BvhBuildResult build = yr::BuildBvh(scene.triangles);
-    if (!build.errors.empty()) {
-        throw std::runtime_error(build.errors[0]);
-    }
-    scene.bvh = build.bvh;
-
-    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(scene);
+    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(PrepareDebugScene(scene));
 
     YR_EXPECT_TRUE(result.stats.bvh_node_tests > 0);
     YR_EXPECT_TRUE(result.stats.triangle_tests < result.stats.rays_traced * std::uint64_t{scene.triangles.size()});
 }
 
 YR_TEST(cpu_debug_renderer_adds_material_emission_on_hits) {
-    yr::RenderScene scene = MakeDebugTriangleScene(3, 3);
+    yr::RenderSceneIR scene = MakeDebugTriangleScene(3, 3);
     scene.materials[0].albedo = yr::Color3f{};
     scene.materials[0].emission = yr::Color3f{0.25f, 0.5f, 0.75f};
 
-    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(scene);
+    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(PrepareDebugScene(scene));
     const yr::Color3f center = result.film.LinearPixel(1, 1);
 
     YR_EXPECT_NEAR(center.x, 0.25, 1e-6);
@@ -154,10 +146,10 @@ YR_TEST(cpu_debug_renderer_adds_material_emission_on_hits) {
 }
 
 YR_TEST(cpu_debug_renderer_lights_front_facing_diffuse_hits) {
-    yr::RenderScene scene = MakeDebugTriangleScene(3, 3);
+    yr::RenderSceneIR scene = MakeDebugTriangleScene(3, 3);
     AddCenterLight(scene, yr::Point3f{0.0f, 0.0f, 2.0f}, yr::Color3f{4.0f, 4.0f, 4.0f});
 
-    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(scene);
+    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(PrepareDebugScene(scene));
     const yr::Color3f center = result.film.LinearPixel(1, 1);
 
     YR_EXPECT_NEAR(center.x, 1.0, 1e-5);
@@ -168,10 +160,10 @@ YR_TEST(cpu_debug_renderer_lights_front_facing_diffuse_hits) {
 }
 
 YR_TEST(cpu_debug_renderer_ignores_lights_behind_surface) {
-    yr::RenderScene scene = MakeDebugTriangleScene(3, 3);
+    yr::RenderSceneIR scene = MakeDebugTriangleScene(3, 3);
     AddCenterLight(scene, yr::Point3f{0.0f, 0.0f, -2.0f}, yr::Color3f{10.0f, 10.0f, 10.0f});
 
-    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(scene);
+    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(PrepareDebugScene(scene));
     const yr::Color3f center = result.film.LinearPixel(1, 1);
 
     YR_EXPECT_NEAR(center.x, 0.0, 1e-6);
@@ -182,10 +174,10 @@ YR_TEST(cpu_debug_renderer_ignores_lights_behind_surface) {
 }
 
 YR_TEST(cpu_debug_renderer_shadow_ray_blocks_direct_light) {
-    yr::RenderScene unblocked = MakeDebugTriangleScene(3, 3);
+    yr::RenderSceneIR unblocked = MakeDebugTriangleScene(3, 3);
     AddCenterLight(unblocked, yr::Point3f{0.0f, 2.0f, 2.0f}, yr::Color3f{8.0f, 8.0f, 8.0f});
 
-    yr::RenderScene blocked = unblocked;
+    yr::RenderSceneIR blocked = unblocked;
     blocked.triangles.push_back(yr::RenderTriangle{
         yr::Point3f{-0.75f, 1.0f, 0.25f},
         yr::Point3f{0.75f, 1.0f, 0.25f},
@@ -193,10 +185,8 @@ YR_TEST(cpu_debug_renderer_shadow_ray_blocks_direct_light) {
         yr::Vec3f{0.0f, -1.0f, 0.0f},
         0
     });
-    RebuildBvh(blocked);
-
-    const yr::CpuDebugRenderResult unblocked_result = yr::RenderCpuDebug(unblocked);
-    const yr::CpuDebugRenderResult blocked_result = yr::RenderCpuDebug(blocked);
+    const yr::CpuDebugRenderResult unblocked_result = yr::RenderCpuDebug(PrepareDebugScene(unblocked));
+    const yr::CpuDebugRenderResult blocked_result = yr::RenderCpuDebug(PrepareDebugScene(blocked));
     const yr::Color3f unblocked_center = unblocked_result.film.LinearPixel(1, 1);
     const yr::Color3f blocked_center = blocked_result.film.LinearPixel(1, 1);
 
@@ -207,7 +197,7 @@ YR_TEST(cpu_debug_renderer_shadow_ray_blocks_direct_light) {
 }
 
 YR_TEST(cpu_debug_renderer_does_not_treat_visible_light_panel_as_shadow_occluder_at_large_scale) {
-    yr::RenderScene scene;
+    yr::RenderSceneIR scene;
     scene.width = 9;
     scene.height = 9;
     scene.spp = 1;
@@ -254,9 +244,7 @@ YR_TEST(cpu_debug_renderer_does_not_treat_visible_light_panel_as_shadow_occluder
         105.0f,
         yr::Color3f{10.0f, 10.0f, 10.0f}
     });
-    RebuildBvh(scene);
-
-    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(scene);
+    const yr::CpuDebugRenderResult result = yr::RenderCpuDebug(PrepareDebugScene(scene));
     const yr::Color3f center = result.film.LinearPixel(4, 4);
 
     YR_EXPECT_TRUE(result.stats.shadow_rays > 0);

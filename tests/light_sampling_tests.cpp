@@ -77,7 +77,7 @@ YR_TEST(light_sampling_returns_zero_pdf_for_invalid_solid_angle_cases) {
 }
 
 YR_TEST(light_sampling_sums_scene_light_pdf_for_points_on_area_lights) {
-    yr::RenderScene scene;
+    yr::RenderSceneIR scene;
     scene.area_lights.push_back(MakeAreaLight());
 
     const float on_light_pdf = yr::PdfAreaLightsForPointSolidAngle(

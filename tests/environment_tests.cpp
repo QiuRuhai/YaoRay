@@ -23,8 +23,8 @@ yr::RenderTexture MakeEnvironmentTexture() {
     return texture;
 }
 
-yr::RenderScene MakeHdriScene() {
-    yr::RenderScene scene;
+yr::RenderSceneIR MakeHdriScene() {
+    yr::RenderSceneIR scene;
     scene.environment.type = yr::EnvironmentKind::Hdri;
     scene.environment.strength = 2.0f;
     scene.environment.texture_index = 0;
@@ -64,7 +64,7 @@ YR_TEST(environment_rotation_changes_horizontal_lookup) {
 }
 
 YR_TEST(environment_evaluates_hdri_with_strength) {
-    const yr::RenderScene scene = MakeHdriScene();
+    const yr::RenderSceneIR scene = MakeHdriScene();
 
     const yr::Color3f color = yr::EvaluateEnvironment(
         scene,
@@ -87,7 +87,7 @@ YR_TEST(environment_distribution_prefers_bright_texel) {
 }
 
 YR_TEST(environment_sampling_returns_positive_pdf) {
-    const yr::RenderScene scene = MakeHdriScene();
+    const yr::RenderSceneIR scene = MakeHdriScene();
 
     const yr::EnvironmentSample sample = yr::SampleEnvironment(scene, yr::Vec2f{0.1f, 0.1f});
 

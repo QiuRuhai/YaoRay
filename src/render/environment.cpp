@@ -41,11 +41,11 @@ int FindCdfIndex(const std::vector<float>& cdf, float target) {
     return static_cast<int>(found - cdf.begin());
 }
 
-bool ValidTextureIndex(const RenderScene& scene, int index) {
+bool ValidTextureIndex(const RenderSceneIR& scene, int index) {
     return index >= 0 && static_cast<std::size_t>(index) < scene.textures.size();
 }
 
-bool ValidDistributionIndex(const RenderScene& scene, int index) {
+bool ValidDistributionIndex(const RenderSceneIR& scene, int index) {
     return index >= 0 && static_cast<std::size_t>(index) < scene.environment_distributions.size();
 }
 
@@ -122,7 +122,7 @@ RenderEnvironmentDistribution BuildEnvironmentDistribution(const RenderTexture& 
     return distribution;
 }
 
-Color3f EvaluateEnvironment(const RenderScene& scene, Vec3f direction) {
+Color3f EvaluateEnvironment(const RenderSceneIR& scene, Vec3f direction) {
     if (scene.environment.type == EnvironmentKind::Constant) {
         return scene.environment.radiance * scene.environment.strength;
     }
@@ -137,14 +137,14 @@ Color3f EvaluateEnvironment(const RenderScene& scene, Vec3f direction) {
     return SampleTexture(texture, uv) * scene.environment.strength;
 }
 
-bool HasSampleableEnvironment(const RenderScene& scene) {
+bool HasSampleableEnvironment(const RenderSceneIR& scene) {
     return scene.environment.type == EnvironmentKind::Hdri &&
            scene.environment.strength > 0.0f &&
            ValidTextureIndex(scene, scene.environment.texture_index) &&
            ValidDistributionIndex(scene, scene.environment.distribution_index);
 }
 
-EnvironmentSample SampleEnvironment(const RenderScene& scene, Vec2f sample) {
+EnvironmentSample SampleEnvironment(const RenderSceneIR& scene, Vec2f sample) {
     if (!HasSampleableEnvironment(scene)) {
         return EnvironmentSample{};
     }
@@ -186,7 +186,7 @@ EnvironmentSample SampleEnvironment(const RenderScene& scene, Vec2f sample) {
     return EnvironmentSample{sampled_direction, EvaluateEnvironment(scene, sampled_direction), pdf, true};
 }
 
-float PdfEnvironment(const RenderScene& scene, Vec3f direction) {
+float PdfEnvironment(const RenderSceneIR& scene, Vec3f direction) {
     if (!HasSampleableEnvironment(scene)) {
         return 0.0f;
     }

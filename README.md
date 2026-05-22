@@ -14,7 +14,7 @@ The foundation slices provide:
 - Film accumulation and tone mapping basics
 - CLI help/version shell
 - TOML scene parsing and validation through `yaoray render`
-- initial `RenderScene` compilation through the `yaoray_render` module
+- initial backend-neutral `RenderSceneIR` compilation through the `yaoray_render` module
 - temporary `builtin:triangle` scenes for compiler and CLI verification
 - CPU rendering with deterministic area-light direct lighting and BVH shadow rays
 - PNG output for renderable scenes, with PPM still available for debug/test output
@@ -22,7 +22,7 @@ The foundation slices provide:
 - basic textured OBJ import through vertex normals, `vt`, `mtllib`, `usemtl`, `Kd`, and PNG `map_Kd`
 - static glTF/GLB mesh import through tinygltf, including node transforms, positions, normals, UVs, indices, base-color factors, and external PNG base-color textures
 - PNG albedo/base-color texture loading with sRGB-to-linear conversion, bilinear filtering, and repeat/clamp/mirrored wrap support
-- BVH acceleration over compiled render triangles for the CPU debug renderer
+- CPU backend BVH preparation over compiled render triangles
 - TOML named diffuse, emissive, mirror, metal, plastic, and dielectric/glass materials with instance material binding
 - scene-authored inline quad assets and a Cornell Box geometry smoke scene
 - selectable render integrators with a first deterministic CPU path tracer
@@ -57,7 +57,7 @@ build\Debug\yaoray.exe render scenes\examples\glass_showcase.toml --backend cpu
 .\build-release\Release\yaoray.exe render .\scenes\examples\hdri_lighting_showcase.toml --backend cpu
 ```
 
-The `render` command currently parses, compiles, builds a BVH, and renders deterministic CPU images to PNG or ASCII PPM based on `film.output`. `render.integrator = "debug_direct"` is the default direct-lighting debug renderer for fast smoke tests.
+The `render` command currently parses, compiles backend-neutral render input, lets the selected backend prepare runtime data, and renders deterministic CPU images to PNG or ASCII PPM based on `film.output`. `render.integrator = "debug_direct"` is the default direct-lighting debug renderer for fast smoke tests.
 
 `render.integrator = "path"` selects the CPU path tracer with diffuse bounce, perfect mirror reflection, smooth/rough/thin dielectric glass, Beer-Lambert absorption for thick dielectric paths, transparent colored direct shadows through dielectric glass, deterministic sampling, random or stratified XZ-rectangle area-light surface sampling, area-light MIS, MIS-weighted BSDF-sampled emissive hits, HDRI environment lookup, HDRI direct environment sampling through a luminance-weighted equirectangular distribution, BSDF-to-environment MIS, fixed-policy Russian roulette path termination with `render.max_depth` as a hard limit, diffuse texture sampling, optional sample radiance clamping through `render.radiance_clamp`, and tile-threaded CPU execution controlled by `render.threads` (`0` auto, `1` single-thread reference, `N` fixed worker count). `render.sampler` controls path sample placement: `"independent"` is the default baseline, while `"stratified"` stratifies pixel jitter and direct-light UV samples. `render.light_samples` controls how many direct area-light or environment samples the path integrator averages per hit; the default is `1`, and higher values trade more shadow rays for lower soft-shadow and direct-light noise. The CLI reports actual threads plus samples/sec and rays/sec.
 

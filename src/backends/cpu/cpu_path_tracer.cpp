@@ -56,7 +56,7 @@ Color3f Multiply(Color3f a, Color3f b) {
 }
 
 RenderMaterial ResolveHitMaterial(
-    const RenderScene& scene,
+    const RenderSceneIR& scene,
     const RenderTriangle& triangle,
     const RenderMaterial& material,
     Point3f hit_point
@@ -190,11 +190,11 @@ Vec3f FaceForward(Vec3f normal, Vec3f reference) {
     return Dot(normal, reference) < 0.0f ? -normal : normal;
 }
 
-Color3f EnvironmentColor(const RenderScene& scene, Vec3f direction) {
+Color3f EnvironmentColor(const RenderSceneIR& scene, Vec3f direction) {
     return EvaluateEnvironment(scene, direction);
 }
 
-float EmissiveHitMisWeight(const RenderScene& scene, const PreviousBounce& previous, Point3f hit_point) {
+float EmissiveHitMisWeight(const RenderSceneIR& scene, const PreviousBounce& previous, Point3f hit_point) {
     if (!previous.valid || previous.delta) {
         return 1.0f;
     }
@@ -203,7 +203,7 @@ float EmissiveHitMisWeight(const RenderScene& scene, const PreviousBounce& previ
     return PowerHeuristic(1, previous.bsdf_pdf, previous.light_sample_count, pdf_light);
 }
 
-float EnvironmentHitMisWeight(const RenderScene& scene, const PreviousBounce& previous, Vec3f direction) {
+float EnvironmentHitMisWeight(const RenderSceneIR& scene, const PreviousBounce& previous, Vec3f direction) {
     if (!previous.valid || previous.delta) {
         return 1.0f;
     }
@@ -212,29 +212,30 @@ float EnvironmentHitMisWeight(const RenderScene& scene, const PreviousBounce& pr
     return PowerHeuristic(1, previous.bsdf_pdf, previous.light_sample_count, pdf_light);
 }
 
-bool IsValidMaterialIndex(const RenderScene& scene, int material_index) {
+bool IsValidMaterialIndex(const RenderSceneIR& scene, int material_index) {
     return material_index >= 0 && static_cast<std::size_t>(material_index) < scene.materials.size();
 }
 
 void AccumulateTraceStats(CpuPathTraceStats& stats, const BvhTraceStats& trace_stats);
 
-int DirectLightSampleCount(const RenderScene& scene) {
+int DirectLightSampleCount(const RenderSceneIR& scene) {
     return std::max(1, scene.light_samples);
 }
 
 ShadowVisibility TraceShadowVisibility(
-    const RenderScene& scene,
+    const CpuPreparedScene& prepared_scene,
     Ray3f ray,
     float max_distance,
     CpuPathTraceStats& stats
 ) {
+    const RenderSceneIR& scene = prepared_scene.Scene();
     ShadowVisibility visibility;
     PathMediumState medium;
     float remaining_distance = max_distance;
 
     for (int transparent_hit_count = 0; transparent_hit_count < MaxTransparentShadowHits; ++transparent_hit_count) {
         BvhTraceStats shadow_trace;
-        const BvhHit hit = IntersectBvh(scene, ray, shadow_trace);
+        const BvhHit hit = IntersectBvh(scene, prepared_scene.bvh, ray, shadow_trace);
         AccumulateTraceStats(stats, shadow_trace);
 
         const bool finite_segment = std::isfinite(remaining_distance);
@@ -330,7 +331,7 @@ void MergeTraceStats(CpuPathTraceStats& target, const CpuPathTraceStats& source)
     target.misses += source.misses;
 }
 
-Ray3f MakeCameraRay(const RenderScene& scene, int x, int y, float pixel_u, float pixel_v) {
+Ray3f MakeCameraRay(const RenderSceneIR& scene, int x, int y, float pixel_u, float pixel_v) {
     const float width = static_cast<float>(scene.width);
     const float height = static_cast<float>(scene.height);
     const float aspect = width / height;
@@ -346,7 +347,7 @@ Ray3f MakeCameraRay(const RenderScene& scene, int x, int y, float pixel_u, float
 }
 
 Color3f EstimateDirectEnvironmentLight(
-    const RenderScene& scene,
+    const CpuPreparedScene& prepared_scene,
     const RenderMaterial& material,
     Point3f hit_point,
     Vec3f normal,
@@ -354,6 +355,7 @@ Color3f EstimateDirectEnvironmentLight(
     CpuSampler& sampler,
     CpuPathTraceStats& stats
 ) {
+    const RenderSceneIR& scene = prepared_scene.Scene();
     if (!HasSampleableEnvironment(scene)) {
         return Color3f{};
     }
@@ -381,7 +383,7 @@ Color3f EstimateDirectEnvironmentLight(
         const Point3f shadow_origin = hit_point + normal * SurfaceBias(hit_point);
         ++stats.shadow_rays;
         const ShadowVisibility visibility =
-            TraceShadowVisibility(scene, Ray3f{shadow_origin, wi}, std::numeric_limits<float>::infinity(), stats);
+            TraceShadowVisibility(prepared_scene, Ray3f{shadow_origin, wi}, std::numeric_limits<float>::infinity(), stats);
         if (!visibility.visible) {
             ++stats.occluded_shadow_rays;
             continue;
@@ -397,7 +399,7 @@ Color3f EstimateDirectEnvironmentLight(
 }
 
 Color3f EstimateDirectLight(
-    const RenderScene& scene,
+    const CpuPreparedScene& prepared_scene,
     const RenderMaterial& material,
     Point3f hit_point,
     Vec3f normal,
@@ -405,6 +407,7 @@ Color3f EstimateDirectLight(
     CpuSampler& sampler,
     CpuPathTraceStats& stats
 ) {
+    const RenderSceneIR& scene = prepared_scene.Scene();
     Color3f radiance;
     const int light_sample_count = DirectLightSampleCount(scene);
     const float inverse_light_sample_count = 1.0f / static_cast<float>(light_sample_count);
@@ -451,7 +454,7 @@ Color3f EstimateDirectLight(
             ++stats.shadow_rays;
             const Ray3f shadow_ray{shadow_origin, wi};
             const ShadowVisibility visibility =
-                TraceShadowVisibility(scene, shadow_ray, shadow_distance - shadow_bias, stats);
+                TraceShadowVisibility(prepared_scene, shadow_ray, shadow_distance - shadow_bias, stats);
             if (!visibility.visible) {
                 ++stats.occluded_shadow_rays;
                 continue;
@@ -470,11 +473,12 @@ Color3f EstimateDirectLight(
 
         radiance = radiance + light_radiance * inverse_light_sample_count;
     }
-    radiance = radiance + EstimateDirectEnvironmentLight(scene, material, hit_point, normal, wo, sampler, stats);
+    radiance = radiance + EstimateDirectEnvironmentLight(prepared_scene, material, hit_point, normal, wo, sampler, stats);
     return radiance;
 }
 
-Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuPathTraceStats& stats) {
+Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler& sampler, CpuPathTraceStats& stats) {
+    const RenderSceneIR& scene = prepared_scene.Scene();
     Color3f radiance;
     Color3f throughput{1.0f, 1.0f, 1.0f};
     PreviousBounce previous_bounce;
@@ -485,7 +489,7 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
         ++stats.rays_traced;
 
         BvhTraceStats trace_stats;
-        const BvhHit hit = IntersectBvh(scene, ray, trace_stats);
+        const BvhHit hit = IntersectBvh(scene, prepared_scene.bvh, ray, trace_stats);
         AccumulateTraceStats(stats, trace_stats);
         if (!hit.hit || hit.triangle == nullptr) {
             ++stats.misses;
@@ -521,7 +525,7 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
         }
 
         if (!IsDeltaBsdf(material)) {
-            radiance = radiance + Multiply(throughput, EstimateDirectLight(scene, material, hit_point, normal, wo, sampler, stats));
+            radiance = radiance + Multiply(throughput, EstimateDirectLight(prepared_scene, material, hit_point, normal, wo, sampler, stats));
         }
 
         if (depth + 1 >= max_depth) {
@@ -555,11 +559,12 @@ Color3f TracePath(const RenderScene& scene, Ray3f ray, CpuSampler& sampler, CpuP
 
 } // namespace
 
-CpuPathTraceResult RenderCpuPathTrace(const RenderScene& scene) {
+CpuPathTraceResult RenderCpuPathTrace(const CpuPreparedScene& prepared_scene) {
+    const RenderSceneIR& scene = prepared_scene.Scene();
     CpuPathTraceResult result{Film{scene.width, scene.height}, {}};
     const CpuTileSchedule schedule = BuildCpuTileSchedule(scene.width, scene.height, scene.threads);
-    result.stats.bvh_nodes = static_cast<int>(scene.bvh.nodes.size());
-    result.stats.bvh_max_depth = scene.bvh.max_depth;
+    result.stats.bvh_nodes = static_cast<int>(prepared_scene.bvh.nodes.size());
+    result.stats.bvh_max_depth = prepared_scene.bvh.max_depth;
     result.stats.threads = schedule.worker_count;
 
     const auto start = std::chrono::steady_clock::now();
@@ -579,7 +584,7 @@ CpuPathTraceResult RenderCpuPathTrace(const RenderScene& scene) {
                     };
                     const Vec2f pixel_sample = sampler.NextPixel2D();
                     const Ray3f ray = MakeCameraRay(scene, x, y, pixel_sample.x, pixel_sample.y);
-                    Color3f sample_radiance = TracePath(scene, ray, sampler, stats);
+                    Color3f sample_radiance = TracePath(prepared_scene, ray, sampler, stats);
                     sample_radiance = ClampMaxComponent(sample_radiance, scene.radiance_clamp);
                     result.film.AddSample(x, y, sample_radiance);
                 }

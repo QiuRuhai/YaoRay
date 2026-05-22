@@ -64,10 +64,10 @@ std::filesystem::path FixturePath(std::string_view relative) {
 
 } // namespace
 
-YR_TEST(render_scene_defaults_are_backend_friendly) {
-    const yr::RenderScene scene;
+YR_TEST(render_scene_ir_defaults_are_backend_friendly) {
+    const yr::RenderSceneIR scene;
 
-    YR_EXPECT_EQ(scene.backend, yr::RenderBackendKind::Cpu);
+    YR_EXPECT_EQ(scene.requested_backend, yr::RenderBackendKind::Cpu);
     YR_EXPECT_EQ(scene.integrator, yr::RenderIntegratorKind::DebugDirect);
     YR_EXPECT_EQ(scene.sampler, yr::RenderSamplerKind::Independent);
     YR_EXPECT_EQ(scene.width, 0);
@@ -81,9 +81,6 @@ YR_TEST(render_scene_defaults_are_backend_friendly) {
     YR_EXPECT_TRUE(scene.triangles.empty());
     YR_EXPECT_TRUE(scene.materials.empty());
     YR_EXPECT_TRUE(scene.area_lights.empty());
-    YR_EXPECT_TRUE(scene.bvh.nodes.empty());
-    YR_EXPECT_TRUE(scene.bvh.triangle_indices.empty());
-    YR_EXPECT_EQ(scene.bvh.max_depth, 0);
 
     const yr::RenderMaterial material;
     YR_EXPECT_EQ(material.type, yr::MaterialKind::Diffuse);
@@ -103,8 +100,8 @@ YR_TEST(scene_compiler_copies_render_settings) {
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
 
-    const yr::RenderScene& compiled = result.scene.value();
-    YR_EXPECT_EQ(compiled.backend, yr::RenderBackendKind::Cuda);
+    const yr::RenderSceneIR& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.requested_backend, yr::RenderBackendKind::Cuda);
     YR_EXPECT_EQ(compiled.integrator, yr::RenderIntegratorKind::Path);
     YR_EXPECT_EQ(compiled.sampler, yr::RenderSamplerKind::Stratified);
     YR_EXPECT_EQ(compiled.width, 320);
@@ -210,7 +207,7 @@ YR_TEST(scene_compiler_compiles_named_materials) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
     YR_EXPECT_NEAR(compiled.materials[0].albedo.x, 0.9, 1e-6);
     YR_EXPECT_NEAR(compiled.materials[0].albedo.y, 0.1, 1e-6);
@@ -231,7 +228,7 @@ YR_TEST(scene_compiler_copies_material_type) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
     YR_EXPECT_EQ(compiled.materials[0].type, yr::MaterialKind::Mirror);
     YR_EXPECT_NEAR(compiled.materials[0].albedo.x, 0.95, 1e-6);
@@ -252,7 +249,7 @@ YR_TEST(scene_compiler_copies_material_scalars) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
     YR_EXPECT_EQ(compiled.materials[0].type, yr::MaterialKind::Plastic);
     YR_EXPECT_NEAR(compiled.materials[0].roughness, 0.25, 1e-6);
@@ -330,7 +327,7 @@ YR_TEST(scene_compiler_binds_builtin_instance_to_named_material) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
     YR_EXPECT_EQ(compiled.triangles.size(), std::size_t{1});
     YR_EXPECT_EQ(compiled.triangles[0].material_index, 0);
@@ -361,7 +358,7 @@ YR_TEST(scene_compiler_shares_named_material_between_instances) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
     YR_EXPECT_EQ(compiled.triangles.size(), std::size_t{2});
     YR_EXPECT_EQ(compiled.triangles[0].material_index, 0);
@@ -383,7 +380,7 @@ YR_TEST(scene_compiler_preserves_default_material_for_unbound_instances) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.materials.size(), std::size_t{2});
     YR_EXPECT_EQ(compiled.triangles.size(), std::size_t{1});
     YR_EXPECT_EQ(compiled.triangles[0].material_index, 1);
@@ -464,7 +461,7 @@ YR_TEST(scene_compiler_compiles_hdri_environment) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.environment.type, yr::EnvironmentKind::Hdri);
     YR_EXPECT_NEAR(compiled.environment.strength, 1.5, 1e-6);
     YR_EXPECT_NEAR(compiled.environment.rotation_radians, 1.57079637, 1e-5);
@@ -540,7 +537,7 @@ YR_TEST(scene_compiler_imports_gltf_texture_and_uvs) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_TRUE(!compiled.triangles.empty());
     YR_EXPECT_TRUE(compiled.triangles[0].has_uv);
     YR_EXPECT_EQ(compiled.textures.size(), std::size_t{1});
@@ -559,7 +556,7 @@ YR_TEST(scene_compiler_propagates_gltf_texture_wrap_modes) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.textures.size(), std::size_t{1});
     YR_EXPECT_EQ(compiled.textures[0].filter, yr::TextureFilter::Bilinear);
     YR_EXPECT_EQ(compiled.textures[0].wrap_s, yr::TextureWrap::MirroredRepeat);
@@ -586,7 +583,7 @@ YR_TEST(scene_compiler_texture_cache_keeps_distinct_sampler_state) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.textures.size(), std::size_t{2});
     YR_EXPECT_EQ(compiled.textures[0].wrap_s, yr::TextureWrap::MirroredRepeat);
     YR_EXPECT_EQ(compiled.textures[1].wrap_s, yr::TextureWrap::ClampToEdge);
@@ -613,7 +610,7 @@ YR_TEST(scene_compiler_scene_material_overrides_imported_gltf_material) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
     YR_EXPECT_TRUE(compiled.textures.empty());
     YR_EXPECT_EQ(compiled.triangles[0].material_index, 0);
@@ -662,7 +659,7 @@ YR_TEST(scene_compiler_imports_obj_material_texture_and_uvs) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
     YR_EXPECT_EQ(compiled.textures.size(), std::size_t{1});
     YR_EXPECT_EQ(compiled.triangles.size(), std::size_t{2});
@@ -690,7 +687,7 @@ YR_TEST(scene_compiler_caches_duplicate_obj_textures) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.textures.size(), std::size_t{1});
     YR_EXPECT_EQ(compiled.materials.size(), std::size_t{2});
     YR_EXPECT_EQ(compiled.materials[0].albedo_texture, 0);
@@ -715,7 +712,7 @@ YR_TEST(scene_compiler_scene_material_overrides_imported_obj_material) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
     YR_EXPECT_TRUE(compiled.textures.empty());
     YR_EXPECT_EQ(compiled.triangles[0].material_index, 0);
@@ -763,7 +760,7 @@ YR_TEST(scene_compiler_expands_inline_quad_asset) {
 
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
-    const yr::RenderScene& compiled = result.scene.value();
+    const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
     YR_EXPECT_EQ(compiled.triangles.size(), std::size_t{2});
     YR_EXPECT_EQ(compiled.triangles[0].material_index, 0);
@@ -915,18 +912,7 @@ YR_TEST(scene_compiler_expands_two_obj_instances) {
     YR_EXPECT_NEAR(result.scene.value().triangles[2].p0.x, 1.5, 1e-6);
 }
 
-YR_TEST(scene_compiler_builds_empty_bvh_for_empty_scene) {
-    const yr::SceneCompileResult result = yr::CompileScene(MakeBaseScene());
-
-    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
-    YR_EXPECT_TRUE(result.scene.has_value());
-    YR_EXPECT_TRUE(result.scene.value().triangles.empty());
-    YR_EXPECT_TRUE(result.scene.value().bvh.nodes.empty());
-    YR_EXPECT_TRUE(result.scene.value().bvh.triangle_indices.empty());
-    YR_EXPECT_EQ(result.scene.value().bvh.max_depth, 0);
-}
-
-YR_TEST(scene_compiler_builds_bvh_for_builtin_triangle) {
+YR_TEST(scene_compiler_outputs_backend_neutral_triangles_for_builtin_triangle) {
     yr::SceneDescription scene = MakeBaseScene();
     scene.assets.push_back(yr::AssetDescription{"triangle", "builtin:triangle"});
     scene.instances.push_back(yr::InstanceDescription{"triangle", {}});
@@ -936,12 +922,9 @@ YR_TEST(scene_compiler_builds_bvh_for_builtin_triangle) {
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
     YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{1});
-    YR_EXPECT_EQ(result.scene.value().bvh.nodes.size(), std::size_t{1});
-    YR_EXPECT_EQ(result.scene.value().bvh.triangle_indices.size(), std::size_t{1});
-    YR_EXPECT_EQ(result.scene.value().bvh.triangle_indices[0], 0);
 }
 
-YR_TEST(scene_compiler_builds_bvh_for_obj_quad) {
+YR_TEST(scene_compiler_outputs_backend_neutral_triangles_for_obj_quad) {
     yr::SceneDescription scene = MakeBaseScene();
     scene.assets.push_back(yr::AssetDescription{"quad", FixturePath("assets/quad.obj")});
     scene.instances.push_back(yr::InstanceDescription{"quad", {}});
@@ -951,6 +934,4 @@ YR_TEST(scene_compiler_builds_bvh_for_obj_quad) {
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
     YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{2});
-    YR_EXPECT_EQ(result.scene.value().bvh.nodes.size(), std::size_t{1});
-    YR_EXPECT_EQ(result.scene.value().bvh.triangle_indices.size(), std::size_t{2});
 }
