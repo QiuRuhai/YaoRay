@@ -5,7 +5,9 @@
 #include <yaoray/render/environment.hpp>
 #include <yaoray/render/texture.hpp>
 
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -36,6 +38,145 @@ bool HasObjExtension(const std::filesystem::path& path) {
 
 bool HasGltfExtension(const std::filesystem::path& path) {
     return path.extension() == ".gltf" || path.extension() == ".glb";
+}
+
+struct Mat4 {
+    std::array<float, 16> m{
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f
+    };
+};
+
+Mat4 Multiply(Mat4 a, Mat4 b) {
+    Mat4 result;
+    result.m.fill(0.0f);
+    for (int column = 0; column < 4; ++column) {
+        for (int row = 0; row < 4; ++row) {
+            for (int k = 0; k < 4; ++k) {
+                result.m[static_cast<std::size_t>(column * 4 + row)] +=
+                    a.m[static_cast<std::size_t>(k * 4 + row)] *
+                    b.m[static_cast<std::size_t>(column * 4 + k)];
+            }
+        }
+    }
+    return result;
+}
+
+Point3f TransformPoint(Mat4 transform, Point3f point) {
+    return Point3f{
+        transform.m[0] * point.x + transform.m[4] * point.y + transform.m[8] * point.z + transform.m[12],
+        transform.m[1] * point.x + transform.m[5] * point.y + transform.m[9] * point.z + transform.m[13],
+        transform.m[2] * point.x + transform.m[6] * point.y + transform.m[10] * point.z + transform.m[14]
+    };
+}
+
+Vec3f TransformVector(Mat4 transform, Vec3f value) {
+    return Vec3f{
+        transform.m[0] * value.x + transform.m[4] * value.y + transform.m[8] * value.z,
+        transform.m[1] * value.x + transform.m[5] * value.y + transform.m[9] * value.z,
+        transform.m[2] * value.x + transform.m[6] * value.y + transform.m[10] * value.z
+    };
+}
+
+Vec3f TransformNormal(Mat4 transform, Vec3f normal) {
+    const float a = transform.m[0];
+    const float b = transform.m[4];
+    const float c = transform.m[8];
+    const float d = transform.m[1];
+    const float e = transform.m[5];
+    const float f = transform.m[9];
+    const float g = transform.m[2];
+    const float h = transform.m[6];
+    const float i = transform.m[10];
+
+    const float determinant =
+        a * (e * i - f * h) -
+        b * (d * i - f * g) +
+        c * (d * h - e * g);
+    if (std::fabs(determinant) <= 1.0e-12f) {
+        const Vec3f fallback = Normalize(TransformVector(transform, normal));
+        return LengthSquared(fallback) > 0.0f ? fallback : Normalize(normal);
+    }
+
+    const float inv_det = 1.0f / determinant;
+    return Normalize(Vec3f{
+        ((e * i - f * h) * normal.x + (f * g - d * i) * normal.y + (d * h - e * g) * normal.z) * inv_det,
+        ((c * h - b * i) * normal.x + (a * i - c * g) * normal.y + (b * g - a * h) * normal.z) * inv_det,
+        ((b * f - c * e) * normal.x + (c * d - a * f) * normal.y + (a * e - b * d) * normal.z) * inv_det
+    });
+}
+
+Mat4 FromAssetTransform(const AssetTransform& transform) {
+    Mat4 result;
+    result.m = transform.local_to_parent;
+    return result;
+}
+
+Mat4 TranslationMatrix(Vec3f translation) {
+    Mat4 result;
+    result.m[12] = translation.x;
+    result.m[13] = translation.y;
+    result.m[14] = translation.z;
+    return result;
+}
+
+Mat4 ScaleMatrix(Vec3f scale) {
+    Mat4 result;
+    result.m[0] = scale.x;
+    result.m[5] = scale.y;
+    result.m[10] = scale.z;
+    return result;
+}
+
+Mat4 RotationXMatrix(float radians) {
+    Mat4 result;
+    const float c = std::cos(radians);
+    const float s = std::sin(radians);
+    result.m[5] = c;
+    result.m[6] = s;
+    result.m[9] = -s;
+    result.m[10] = c;
+    return result;
+}
+
+Mat4 RotationYMatrix(float radians) {
+    Mat4 result;
+    const float c = std::cos(radians);
+    const float s = std::sin(radians);
+    result.m[0] = c;
+    result.m[2] = -s;
+    result.m[8] = s;
+    result.m[10] = c;
+    return result;
+}
+
+Mat4 RotationZMatrix(float radians) {
+    Mat4 result;
+    const float c = std::cos(radians);
+    const float s = std::sin(radians);
+    result.m[0] = c;
+    result.m[1] = s;
+    result.m[4] = -s;
+    result.m[5] = c;
+    return result;
+}
+
+Mat4 InstanceTransformMatrix(const TransformDescription& transform) {
+    return Multiply(
+        Multiply(
+            Multiply(
+                Multiply(
+                    TranslationMatrix(transform.translate),
+                    RotationZMatrix(DegreesToRadians(transform.rotate_degrees.z))
+                ),
+                RotationYMatrix(DegreesToRadians(transform.rotate_degrees.y))
+            ),
+            RotationXMatrix(DegreesToRadians(transform.rotate_degrees.x))
+        ),
+        ScaleMatrix(transform.scale)
+    );
 }
 
 RenderCamera CompileCamera(const CameraDescription& camera) {
@@ -271,30 +412,62 @@ std::optional<int> LoadTextureIndex(
     return texture_index;
 }
 
-std::vector<int> CompileImportedMaterials(
+std::vector<int> CompileAssetMaterials(
     const SceneDescription& scene,
     RenderSceneIR& compiled,
-    const ImportedMesh& mesh,
+    const AssetResource& resource,
     TextureCache& texture_cache,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
     std::vector<int> material_indices;
-    material_indices.reserve(mesh.materials.size());
+    material_indices.reserve(resource.materials.size());
 
-    for (const ImportedMaterial& material : mesh.materials) {
+    for (const AssetMaterial& material : resource.materials) {
         RenderMaterial render_material;
-        render_material.type = material.type;
-        render_material.albedo = material.diffuse;
+        render_material.type = material.approximate_type;
+        render_material.albedo = material.base_color;
         render_material.emission = material.emission;
         render_material.roughness = material.roughness;
         render_material.specular = material.specular;
-        if (material.has_diffuse_texture) {
+        if (material.base_color_texture < -1) {
+            diagnostics.push_back(Error(scene, "assets.path", "asset material references an invalid base color texture"));
+            material_indices.push_back(-1);
+            continue;
+        }
+        if (material.base_color_texture >= 0) {
+            if (static_cast<std::size_t>(material.base_color_texture) >= resource.textures.size()) {
+                diagnostics.push_back(Error(scene, "assets.path", "asset material references an invalid base color texture"));
+                material_indices.push_back(-1);
+                continue;
+            }
+
+            const AssetTexture& texture = resource.textures[static_cast<std::size_t>(material.base_color_texture)];
+            if (texture.image < 0 || static_cast<std::size_t>(texture.image) >= resource.images.size()) {
+                diagnostics.push_back(Error(scene, "assets.path", "asset texture references an invalid image"));
+                material_indices.push_back(-1);
+                continue;
+            }
+            if (texture.sampler < -1 ||
+                (texture.sampler >= 0 && static_cast<std::size_t>(texture.sampler) >= resource.samplers.size())) {
+                diagnostics.push_back(Error(scene, "assets.path", "asset texture references an invalid sampler"));
+                material_indices.push_back(-1);
+                continue;
+            }
+
+            TextureWrap wrap_s = TextureWrap::Repeat;
+            TextureWrap wrap_t = TextureWrap::Repeat;
+            if (texture.sampler >= 0) {
+                const AssetSampler& sampler = resource.samplers[static_cast<std::size_t>(texture.sampler)];
+                wrap_s = sampler.wrap_s;
+                wrap_t = sampler.wrap_t;
+            }
+
             const std::optional<int> texture_index = LoadTextureIndex(
                 scene,
                 compiled,
-                material.diffuse_texture_path,
-                material.diffuse_texture_wrap_s,
-                material.diffuse_texture_wrap_t,
+                resource.images[static_cast<std::size_t>(texture.image)].path,
+                wrap_s,
+                wrap_t,
                 texture_cache,
                 diagnostics
             );
@@ -350,31 +523,66 @@ void AppendBuiltinTriangle(RenderSceneIR& compiled, const TransformDescription& 
     });
 }
 
-void AppendImportedMesh(
+bool AppendAssetPrimitive(
+    const SceneDescription& scene,
     RenderSceneIR& compiled,
-    const ImportedMesh& mesh,
-    const TransformDescription& transform,
+    const AssetPrimitive& primitive,
+    Mat4 transform,
     std::optional<int> override_material_index,
-    const std::vector<int>& imported_material_indices
+    const std::vector<int>& asset_material_indices,
+    int& fallback_material_index,
+    std::vector<SceneDiagnostic>& diagnostics
 ) {
-    int fallback_material_index = -1;
-    for (const ImportedTriangle& triangle : mesh.triangles) {
-        const Point3f world_p0 = ApplyTransform(triangle.p0, transform);
-        const Point3f world_p1 = ApplyTransform(triangle.p1, transform);
-        const Point3f world_p2 = ApplyTransform(triangle.p2, transform);
-        const Vec3f n0 = ApplyNormalTransform(triangle.n0, transform);
-        const Vec3f n1 = ApplyNormalTransform(triangle.n1, transform);
-        const Vec3f n2 = ApplyNormalTransform(triangle.n2, transform);
-        const bool has_vertex_normals =
-            triangle.has_vertex_normals &&
-            LengthSquared(n0) > 0.0f &&
-            LengthSquared(n1) > 0.0f &&
-            LengthSquared(n2) > 0.0f;
+    if (primitive.topology != AssetPrimitiveTopology::Triangles) {
+        diagnostics.push_back(Error(scene, "assets.path", "asset primitive topology is not supported"));
+        return false;
+    }
+    if (primitive.indices.size() % 3 != 0) {
+        diagnostics.push_back(Error(scene, "assets.path", "asset triangle primitive index count is not divisible by three"));
+        return false;
+    }
+    if (!primitive.texcoords0.empty() && primitive.texcoords0.size() != primitive.positions.size()) {
+        diagnostics.push_back(Error(scene, "assets.path", "asset primitive texcoord count does not match positions"));
+        return false;
+    }
+    if (!primitive.normals.empty() && primitive.normals.size() != primitive.positions.size()) {
+        diagnostics.push_back(Error(scene, "assets.path", "asset primitive normal count does not match positions"));
+        return false;
+    }
+
+    const bool has_uv = primitive.texcoords0.size() == primitive.positions.size();
+    const bool has_normals = primitive.normals.size() == primitive.positions.size();
+    for (std::size_t index_offset = 0; index_offset < primitive.indices.size(); index_offset += 3) {
+        const std::uint32_t i0 = primitive.indices[index_offset + 0];
+        const std::uint32_t i1 = primitive.indices[index_offset + 1];
+        const std::uint32_t i2 = primitive.indices[index_offset + 2];
+        if (i0 >= primitive.positions.size() || i1 >= primitive.positions.size() || i2 >= primitive.positions.size()) {
+            diagnostics.push_back(Error(scene, "assets.path", "asset triangle index references an invalid position"));
+            return false;
+        }
+
+        const Point3f world_p0 = TransformPoint(transform, primitive.positions[i0]);
+        const Point3f world_p1 = TransformPoint(transform, primitive.positions[i1]);
+        const Point3f world_p2 = TransformPoint(transform, primitive.positions[i2]);
+        const Vec3f face_normal = Cross(world_p1 - world_p0, world_p2 - world_p0);
+        if (LengthSquared(face_normal) <= DegenerateTriangleEpsilon) {
+            diagnostics.push_back(Error(scene, "assets.path", "asset primitive produces degenerate triangle"));
+            return false;
+        }
+
         int material_index = override_material_index.value_or(-1);
-        if (!override_material_index.has_value() &&
-            triangle.material_index >= 0 &&
-            static_cast<std::size_t>(triangle.material_index) < imported_material_indices.size()) {
-            material_index = imported_material_indices[static_cast<std::size_t>(triangle.material_index)];
+        if (!override_material_index.has_value()) {
+            if (primitive.material < -1) {
+                diagnostics.push_back(Error(scene, "assets.path", "asset primitive references an invalid material"));
+                return false;
+            }
+            if (primitive.material >= 0) {
+                if (static_cast<std::size_t>(primitive.material) >= asset_material_indices.size()) {
+                    diagnostics.push_back(Error(scene, "assets.path", "asset primitive references an invalid material"));
+                    return false;
+                }
+                material_index = asset_material_indices[static_cast<std::size_t>(primitive.material)];
+            }
         }
         if (material_index < 0) {
             if (fallback_material_index < 0) {
@@ -387,18 +595,111 @@ void AppendImportedMesh(
         render_triangle.p0 = world_p0;
         render_triangle.p1 = world_p1;
         render_triangle.p2 = world_p2;
-        render_triangle.normal = Normalize(Cross(world_p1 - world_p0, world_p2 - world_p0));
+        render_triangle.normal = Normalize(face_normal);
         render_triangle.material_index = material_index;
-        render_triangle.uv0 = triangle.uv0;
-        render_triangle.uv1 = triangle.uv1;
-        render_triangle.uv2 = triangle.uv2;
-        render_triangle.has_uv = triangle.has_uv;
-        render_triangle.n0 = n0;
-        render_triangle.n1 = n1;
-        render_triangle.n2 = n2;
-        render_triangle.has_vertex_normals = has_vertex_normals;
+        if (has_uv) {
+            render_triangle.uv0 = primitive.texcoords0[i0];
+            render_triangle.uv1 = primitive.texcoords0[i1];
+            render_triangle.uv2 = primitive.texcoords0[i2];
+            render_triangle.has_uv = true;
+        }
+        if (has_normals) {
+            const Vec3f n0 = TransformNormal(transform, primitive.normals[i0]);
+            const Vec3f n1 = TransformNormal(transform, primitive.normals[i1]);
+            const Vec3f n2 = TransformNormal(transform, primitive.normals[i2]);
+            render_triangle.n0 = n0;
+            render_triangle.n1 = n1;
+            render_triangle.n2 = n2;
+            render_triangle.has_vertex_normals =
+                LengthSquared(n0) > 0.0f &&
+                LengthSquared(n1) > 0.0f &&
+                LengthSquared(n2) > 0.0f;
+        }
         compiled.triangles.push_back(render_triangle);
     }
+    return true;
+}
+
+bool AppendAssetNode(
+    const SceneDescription& scene,
+    RenderSceneIR& compiled,
+    const AssetResource& resource,
+    int node_index,
+    Mat4 parent_transform,
+    std::optional<int> override_material_index,
+    const std::vector<int>& asset_material_indices,
+    int& fallback_material_index,
+    std::vector<int>& node_stack,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    if (node_index < 0 || static_cast<std::size_t>(node_index) >= resource.nodes.size()) {
+        diagnostics.push_back(Error(scene, "assets.path", "asset scene references an invalid node"));
+        return false;
+    }
+    for (int active_node : node_stack) {
+        if (active_node == node_index) {
+            diagnostics.push_back(Error(scene, "assets.path", "asset node hierarchy contains a cycle"));
+            return false;
+        }
+    }
+    node_stack.push_back(node_index);
+    struct StackPop {
+        std::vector<int>& values;
+        ~StackPop() {
+            values.pop_back();
+        }
+    } stack_pop{node_stack};
+
+    const AssetNode& node = resource.nodes[static_cast<std::size_t>(node_index)];
+    const Mat4 transform = Multiply(parent_transform, FromAssetTransform(node.transform));
+    if (node.mesh < -1) {
+        diagnostics.push_back(Error(scene, "assets.path", "asset node references an invalid mesh"));
+        return false;
+    }
+    if (node.mesh >= 0) {
+        if (static_cast<std::size_t>(node.mesh) >= resource.meshes.size()) {
+            diagnostics.push_back(Error(scene, "assets.path", "asset node references an invalid mesh"));
+            return false;
+        }
+        const AssetMesh& mesh = resource.meshes[static_cast<std::size_t>(node.mesh)];
+        for (const AssetPrimitive& primitive : mesh.primitives) {
+            if (!AppendAssetPrimitive(
+                    scene,
+                    compiled,
+                    primitive,
+                    transform,
+                    override_material_index,
+                    asset_material_indices,
+                    fallback_material_index,
+                    diagnostics
+                )) {
+                return false;
+            }
+        }
+    }
+
+    for (int child_index : node.children) {
+        if (child_index < 0 || static_cast<std::size_t>(child_index) >= resource.nodes.size()) {
+            diagnostics.push_back(Error(scene, "assets.path", "asset node references an invalid child"));
+            return false;
+        }
+        if (!AppendAssetNode(
+                scene,
+                compiled,
+                resource,
+                child_index,
+                transform,
+                override_material_index,
+                asset_material_indices,
+                fallback_material_index,
+                node_stack,
+                diagnostics
+            )) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 void AppendInlineQuadAsset(
@@ -420,20 +721,28 @@ void AppendInlineQuadAsset(
     }
 }
 
-void AppendObjAsset(
+enum class AssetFileKind {
+    Obj,
+    Gltf,
+};
+
+void AppendImportedAssetResource(
     const SceneDescription& scene,
     RenderSceneIR& compiled,
     const std::filesystem::path& asset_path,
-    const TransformDescription& transform,
+    AssetFileKind kind,
+    const InstanceDescription& instance,
     std::optional<int> override_material_index,
-    std::unordered_map<std::string, ImportedMesh>& mesh_cache,
+    std::unordered_map<std::string, AssetResource>& asset_cache,
     TextureCache& texture_cache,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
     const std::string cache_key = asset_path.generic_string();
-    auto cached = mesh_cache.find(cache_key);
-    if (cached == mesh_cache.end()) {
-        AssetLoadResult load_result = LoadObjMesh(asset_path);
+    auto cached = asset_cache.find(cache_key);
+    if (cached == asset_cache.end()) {
+        AssetLoadResult load_result = kind == AssetFileKind::Obj
+            ? LoadObjResource(asset_path)
+            : LoadGltfResource(asset_path);
         for (const std::string& warning : load_result.warnings) {
             diagnostics.push_back(Warning(scene, "assets.path", warning));
         }
@@ -443,63 +752,47 @@ void AppendObjAsset(
         if (!load_result.errors.empty()) {
             return;
         }
-        if (!load_result.mesh.has_value()) {
-            diagnostics.push_back(Error(scene, "assets.path", "OBJ loader returned no mesh: " + cache_key));
+        if (!load_result.resource.has_value()) {
+            diagnostics.push_back(Error(scene, "assets.path", "asset loader returned no resource: " + cache_key));
             return;
         }
-        cached = mesh_cache.emplace(cache_key, std::move(load_result.mesh.value())).first;
+        cached = asset_cache.emplace(cache_key, std::move(load_result.resource.value())).first;
     }
 
-    std::vector<int> imported_material_indices;
+    const AssetResource& resource = cached->second;
+    if (resource.default_scene < 0 || static_cast<std::size_t>(resource.default_scene) >= resource.scenes.size()) {
+        diagnostics.push_back(Error(scene, "assets.path", "asset resource default scene index is invalid"));
+        return;
+    }
+
+    std::vector<int> asset_material_indices;
     if (!override_material_index.has_value()) {
-        imported_material_indices = CompileImportedMaterials(scene, compiled, cached->second, texture_cache, diagnostics);
+        asset_material_indices = CompileAssetMaterials(scene, compiled, resource, texture_cache, diagnostics);
         if (HasSceneErrors(diagnostics)) {
             return;
         }
     }
 
-    AppendImportedMesh(compiled, cached->second, transform, override_material_index, imported_material_indices);
-}
-
-void AppendGltfAsset(
-    const SceneDescription& scene,
-    RenderSceneIR& compiled,
-    const std::filesystem::path& asset_path,
-    const TransformDescription& transform,
-    std::optional<int> override_material_index,
-    std::unordered_map<std::string, ImportedMesh>& mesh_cache,
-    TextureCache& texture_cache,
-    std::vector<SceneDiagnostic>& diagnostics
-) {
-    const std::string cache_key = asset_path.generic_string();
-    auto cached = mesh_cache.find(cache_key);
-    if (cached == mesh_cache.end()) {
-        AssetLoadResult load_result = LoadGltfMesh(asset_path);
-        for (const std::string& warning : load_result.warnings) {
-            diagnostics.push_back(Warning(scene, "assets.path", warning));
-        }
-        for (const std::string& error : load_result.errors) {
-            diagnostics.push_back(Error(scene, "assets.path", error));
-        }
-        if (!load_result.errors.empty()) {
-            return;
-        }
-        if (!load_result.mesh.has_value()) {
-            diagnostics.push_back(Error(scene, "assets.path", "glTF loader returned no mesh: " + cache_key));
-            return;
-        }
-        cached = mesh_cache.emplace(cache_key, std::move(load_result.mesh.value())).first;
-    }
-
-    std::vector<int> imported_material_indices;
-    if (!override_material_index.has_value()) {
-        imported_material_indices = CompileImportedMaterials(scene, compiled, cached->second, texture_cache, diagnostics);
-        if (HasSceneErrors(diagnostics)) {
+    const AssetScene& asset_scene = resource.scenes[static_cast<std::size_t>(resource.default_scene)];
+    const Mat4 instance_transform = InstanceTransformMatrix(instance.transform);
+    int fallback_material_index = -1;
+    std::vector<int> node_stack;
+    for (int root_node : asset_scene.root_nodes) {
+        if (!AppendAssetNode(
+                scene,
+                compiled,
+                resource,
+                root_node,
+                instance_transform,
+                override_material_index,
+                asset_material_indices,
+                fallback_material_index,
+                node_stack,
+                diagnostics
+            )) {
             return;
         }
     }
-
-    AppendImportedMesh(compiled, cached->second, transform, override_material_index, imported_material_indices);
 }
 
 } // namespace
@@ -531,7 +824,7 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
 
     const std::unordered_map<std::string, const AssetDescription*> assets = BuildAssetMap(scene);
     const std::unordered_map<std::string, int> materials = BuildMaterialMap(scene, compiled);
-    std::unordered_map<std::string, ImportedMesh> mesh_cache;
+    std::unordered_map<std::string, AssetResource> asset_cache;
     TextureCache texture_cache;
     for (const InstanceDescription& instance : scene.instances) {
         const auto asset = assets.find(instance.asset);
@@ -568,24 +861,26 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
             }
             AppendBuiltinTriangle(compiled, instance.transform, *material_index);
         } else if (HasObjExtension(asset_path)) {
-            AppendObjAsset(
+            AppendImportedAssetResource(
                 scene,
                 compiled,
                 asset_path,
-                instance.transform,
+                AssetFileKind::Obj,
+                instance,
                 material_index,
-                mesh_cache,
+                asset_cache,
                 texture_cache,
                 result.diagnostics
             );
         } else if (HasGltfExtension(asset_path)) {
-            AppendGltfAsset(
+            AppendImportedAssetResource(
                 scene,
                 compiled,
                 asset_path,
-                instance.transform,
+                AssetFileKind::Gltf,
+                instance,
                 material_index,
-                mesh_cache,
+                asset_cache,
                 texture_cache,
                 result.diagnostics
             );

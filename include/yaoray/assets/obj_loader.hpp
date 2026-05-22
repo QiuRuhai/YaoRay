@@ -2,10 +2,10 @@
 
 #include <filesystem>
 
-#include <yaoray/assets/imported_asset.hpp>
+#include <yaoray/assets/asset_resource.hpp>
 
 namespace yr {
 
-AssetLoadResult LoadObjMesh(const std::filesystem::path& path);
+AssetLoadResult LoadObjResource(const std::filesystem::path& path);
 
 } // namespace yr

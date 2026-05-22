@@ -1,6 +1,6 @@
 # YaoRay Architecture Overview
 
-YaoRay uses a layered renderer architecture. The current implementation has semantic scene data, backend-neutral render IR, and backend-prepared runtime data; the asset resource layer is planned as the next refactor step.
+YaoRay uses a layered renderer architecture. The current implementation has semantic scene data, a shared asset resource layer, backend-neutral render IR, and backend-prepared runtime data.
 
 The semantic layer describes the scene in terms people can author and debug: cameras, lights, assets, instances, material overrides, render settings, and Film settings. The current implementation parses this semantic layer from TOML scene files into `SceneDescription`.
 
@@ -16,8 +16,7 @@ Current implemented slices:
 - CPU rendering with deterministic area-light direct lighting and BVH shadow rays
 - PNG output for renderable scenes, with PPM still available for debug/test output
 - common render backend interface with CPU debug and CUDA not-implemented backends
-- textured OBJ asset import through the `yaoray_assets` module
-- static glTF/GLB asset import through the `yaoray_assets` module and tinygltf
+- shared `AssetResource` import for OBJ and static glTF/GLB assets through the `yaoray_assets` module
 - CPU backend BVH preparation over compiled render triangles
 - TOML named diffuse, emissive, mirror, metal, plastic, and dielectric/glass materials with instance-level material binding
 - scene-authored inline quad assets and a Cornell Box example based on Cornell measured geometry
@@ -31,9 +30,11 @@ Material scattering for `path` is routed through a small render-level BSDF API t
 
 Direct-light MIS is split into render-level helpers and CPU path tracer orchestration. `yaoray_render` owns `PowerHeuristic()`, current XZ-rectangle area-light sampling and solid-angle PDF math, plus HDRI environment evaluation, equirectangular mapping, importance distribution, sampling, and PDF helpers. The CPU path tracer owns random sample generation, shadow visibility, previous-bounce state, and path throughput. Shadow visibility is a straight-line transmittance query: opaque materials block, while dielectric glass can transmit and tint direct area-light or environment-light samples without producing true refractive caustics.
 
-The OBJ importer converts small Wavefront OBJ meshes into flat world-space triangles during scene compilation. It preserves OBJ vertex normals and UV coordinates, then imports basic MTL diffuse data (`Kd` and PNG `map_Kd`) into render materials and render-owned textures. It still ignores smoothing groups, normal maps, alpha masks, mipmaps, roughness/metallic maps, and full material-library semantics; scene-authored named materials can still bind to a whole imported instance as an override.
+The asset layer imports OBJ and static glTF/GLB files into `AssetResource`. OBJ import preserves vertex normals, UV coordinates, and basic MTL diffuse data (`Kd` and PNG `map_Kd`). glTF/GLB import preserves default or first scenes, node hierarchy transforms, `TRIANGLES` primitives, positions, optional normals, optional UVs, indexed and non-indexed geometry, base-color factors, external PNG base-color textures, base-color sampler wrap modes, emissive factors, and conservative metallic/roughness mapping onto current diffuse/metal/plastic material kinds. PNG albedo/base-color textures are converted from sRGB to linear RGB on load, bilinear-filtered by default, and can repeat, clamp to edge, or mirror repeat according to imported sampler state.
 
-The glTF importer converts static `.gltf` and `.glb` assets into the same shared imported-mesh representation used by OBJ. It supports default or first scenes, node hierarchy transforms, `TRIANGLES` primitives, positions, optional normals, optional UVs, indexed and non-indexed geometry, base-color factors, external PNG base-color textures, base-color sampler wrap modes, emissive factors, and conservative metallic/roughness mapping onto current diffuse/metal/plastic material kinds. PNG albedo/base-color textures are converted from sRGB to linear RGB on load, bilinear-filtered by default, and can repeat, clamp to edge, or mirror repeat according to imported sampler state. It intentionally does not import animation, skinning, morph targets, glTF cameras or lights, sparse accessors, mesh compression, alpha modes, normal maps, texture transform extensions, material extensions, or exact glTF PBR shading. `docs/assets/khronos-sample-assets.md` records the small Khronos compatibility fixtures and their license notes.
+The render compiler consumes `AssetResource` from the default asset scene. It recursively traverses from the default asset scene's root nodes, composes node and instance transforms, maps asset materials and textures to render materials and render-owned textures, and expands mesh primitives into flat world-space triangles in `RenderSceneIR`. `instance.material` remains a whole-instance override for imported assets.
+
+Imported asset limitations remain intentional: smoothing groups, glTF animation, skinning, morph targets, cameras, lights, sparse accessors, mesh compression, alpha modes, normal maps, texture transform extensions, material extensions, exact glTF PBR shading, mipmaps, roughness/metallic texture maps, and full material-library semantics remain future work. `docs/assets/khronos-sample-assets.md` records the small Khronos compatibility fixtures and their license notes.
 
 Inline quad assets let TOML scenes define small measured or hand-authored quad meshes directly. The Cornell Box example uses this path so the official measured vertices stay visible in the scene file. Its materials are current RGB diffuse/emissive approximations; spectral matching remains future work.
 

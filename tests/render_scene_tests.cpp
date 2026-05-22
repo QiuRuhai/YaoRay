@@ -525,6 +525,87 @@ YR_TEST(scene_compiler_expands_gltf_asset) {
     YR_EXPECT_EQ(result.scene.value().materials.size(), std::size_t{1});
 }
 
+YR_TEST(scene_compiler_rejects_recursive_gltf_nodes) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "recursive",
+        FixturePath("assets/gltf/RecursiveNodes/glTF/RecursiveNodes.gltf")
+    });
+    scene.instances.push_back(yr::InstanceDescription{"recursive", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "assets.path", "cycle"));
+}
+
+YR_TEST(scene_compiler_rejects_gltf_texcoord_count_mismatch) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "bad_uvs",
+        FixturePath("assets/gltf/TriangleBadTexcoordCount/glTF/TriangleBadTexcoordCount.gltf")
+    });
+    scene.instances.push_back(yr::InstanceDescription{"bad_uvs", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(!result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "assets.path", "TEXCOORD_0 accessor count"));
+}
+
+YR_TEST(scene_compiler_composes_asset_resource_instance_transform) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"tri", FixturePath("assets/gltf/Triangle/glTF/Triangle.gltf")});
+    yr::InstanceDescription instance{"tri", {}};
+    instance.transform.translate = yr::Vec3f{1.0f, 2.0f, 3.0f};
+    instance.transform.rotate_degrees.z = 90.0f;
+    instance.transform.scale = yr::Vec3f{2.0f, 1.0f, 1.0f};
+    scene.instances.push_back(instance);
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene->triangles.size(), std::size_t{1});
+    const yr::RenderTriangle& triangle = result.scene->triangles[0];
+    YR_EXPECT_NEAR(triangle.p0.x, 1.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p0.y, 2.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p0.z, 3.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p1.x, 1.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p1.y, 4.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p1.z, 3.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p2.x, 0.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p2.y, 2.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p2.z, 3.0, 1e-5);
+}
+
+YR_TEST(scene_compiler_composes_gltf_parent_child_node_transforms) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "tri",
+        FixturePath("assets/gltf/ParentChildTransform/glTF/ParentChildTransform.gltf")
+    });
+    scene.instances.push_back(yr::InstanceDescription{"tri", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene->triangles.size(), std::size_t{1});
+    const yr::RenderTriangle& triangle = result.scene->triangles[0];
+    YR_EXPECT_NEAR(triangle.p0.x, 1.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p0.y, 2.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p0.z, 3.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p1.x, 3.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p1.y, 2.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p1.z, 3.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p2.x, 1.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p2.y, 3.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.p2.z, 3.0, 1e-5);
+}
+
 YR_TEST(scene_compiler_imports_gltf_texture_and_uvs) {
     yr::SceneDescription scene = MakeBaseScene();
     scene.assets.push_back(yr::AssetDescription{
@@ -638,6 +719,7 @@ YR_TEST(scene_compiler_transforms_obj_vertex_normals) {
     yr::InstanceDescription instance;
     instance.asset = "triangle";
     instance.transform.rotate_degrees = yr::Vec3f{0.0f, 90.0f, 0.0f};
+    instance.transform.scale = yr::Vec3f{2.0f, 1.0f, 1.0f};
     scene.instances.push_back(instance);
 
     const yr::SceneCompileResult result = yr::CompileScene(scene);
@@ -648,6 +730,8 @@ YR_TEST(scene_compiler_transforms_obj_vertex_normals) {
     YR_EXPECT_TRUE(triangle.has_vertex_normals);
     YR_EXPECT_TRUE(triangle.n0.x > 0.99f);
     YR_EXPECT_NEAR(triangle.n0.z, 0.0, 1e-5);
+    YR_EXPECT_NEAR(triangle.n2.x, 0.89442718, 1e-5);
+    YR_EXPECT_NEAR(triangle.n2.z, -0.44721359, 1e-5);
 }
 
 YR_TEST(scene_compiler_imports_obj_material_texture_and_uvs) {

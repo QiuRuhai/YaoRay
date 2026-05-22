@@ -9,15 +9,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <functional>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace yr {
 namespace {
-
-constexpr float DegenerateTriangleEpsilon = 1.0e-12f;
 
 struct Mat4 {
     std::array<float, 16> m{
@@ -52,22 +51,6 @@ Mat4 Multiply(Mat4 a, Mat4 b) {
         }
     }
     return result;
-}
-
-Point3f TransformPoint(Mat4 transform, Point3f point) {
-    return Point3f{
-        transform.m[0] * point.x + transform.m[4] * point.y + transform.m[8] * point.z + transform.m[12],
-        transform.m[1] * point.x + transform.m[5] * point.y + transform.m[9] * point.z + transform.m[13],
-        transform.m[2] * point.x + transform.m[6] * point.y + transform.m[10] * point.z + transform.m[14]
-    };
-}
-
-Vec3f TransformVector(Mat4 transform, Vec3f value) {
-    return Vec3f{
-        transform.m[0] * value.x + transform.m[4] * value.y + transform.m[8] * value.z,
-        transform.m[1] * value.x + transform.m[5] * value.y + transform.m[9] * value.z,
-        transform.m[2] * value.x + transform.m[6] * value.y + transform.m[10] * value.z
-    };
 }
 
 Mat4 TranslationMatrix(const std::vector<double>& translation) {
@@ -138,6 +121,12 @@ std::optional<Mat4> NodeLocalTransform(const tinygltf::Node& node) {
     return Multiply(Multiply(TranslationMatrix(node.translation), RotationMatrix(node.rotation)), ScaleMatrix(node.scale));
 }
 
+AssetTransform ToAssetTransform(Mat4 value) {
+    AssetTransform transform;
+    transform.local_to_parent = value.m;
+    return transform;
+}
+
 bool AccessorIndexValid(const tinygltf::Model& model, int index) {
     return index >= 0 && static_cast<std::size_t>(index) < model.accessors.size();
 }
@@ -161,6 +150,55 @@ bool AccessorHasBufferView(const tinygltf::Accessor& accessor) {
     return accessor.bufferView >= 0 && !accessor.sparse.isSparse;
 }
 
+std::optional<std::size_t> ComponentByteSize(int component_type) {
+    switch (component_type) {
+    case TINYGLTF_COMPONENT_TYPE_BYTE:
+    case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+        return 1;
+    case TINYGLTF_COMPONENT_TYPE_SHORT:
+    case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+        return 2;
+    case TINYGLTF_COMPONENT_TYPE_INT:
+    case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+    case TINYGLTF_COMPONENT_TYPE_FLOAT:
+        return 4;
+    default:
+        return std::nullopt;
+    }
+}
+
+std::optional<std::size_t> ComponentCount(int type) {
+    switch (type) {
+    case TINYGLTF_TYPE_SCALAR:
+        return 1;
+    case TINYGLTF_TYPE_VEC2:
+        return 2;
+    case TINYGLTF_TYPE_VEC3:
+        return 3;
+    case TINYGLTF_TYPE_VEC4:
+    case TINYGLTF_TYPE_MAT2:
+        return 4;
+    case TINYGLTF_TYPE_MAT3:
+        return 9;
+    case TINYGLTF_TYPE_MAT4:
+        return 16;
+    default:
+        return std::nullopt;
+    }
+}
+
+std::optional<std::size_t> ElementByteSize(const tinygltf::Accessor& accessor) {
+    const std::optional<std::size_t> component_byte_size = ComponentByteSize(accessor.componentType);
+    const std::optional<std::size_t> component_count = ComponentCount(accessor.type);
+    if (!component_byte_size.has_value() || !component_count.has_value()) {
+        return std::nullopt;
+    }
+    if (*component_count > std::numeric_limits<std::size_t>::max() / *component_byte_size) {
+        return std::nullopt;
+    }
+    return *component_byte_size * *component_count;
+}
+
 const std::byte* AccessorData(
     const tinygltf::Model& model,
     const tinygltf::Accessor& accessor,
@@ -172,15 +210,34 @@ const std::byte* AccessorData(
     }
 
     const tinygltf::Buffer& buffer = model.buffers[static_cast<std::size_t>(view.buffer)];
-    const int byte_stride = accessor.ByteStride(view);
-    if (byte_stride <= 0) {
+    if (view.byteOffset > buffer.data.size() ||
+        view.byteLength > buffer.data.size() - view.byteOffset ||
+        accessor.byteOffset > view.byteLength) {
         return nullptr;
     }
 
-    const std::size_t offset = view.byteOffset + accessor.byteOffset + index * static_cast<std::size_t>(byte_stride);
-    if (offset >= buffer.data.size()) {
+    const std::optional<std::size_t> element_byte_size = ElementByteSize(accessor);
+    if (!element_byte_size.has_value()) {
         return nullptr;
     }
+
+    const int byte_stride = accessor.ByteStride(view);
+    if (byte_stride <= 0 || static_cast<std::size_t>(byte_stride) < *element_byte_size) {
+        return nullptr;
+    }
+    const std::size_t stride = static_cast<std::size_t>(byte_stride);
+
+    if (index > std::numeric_limits<std::size_t>::max() / stride) {
+        return nullptr;
+    }
+
+    const std::size_t relative_offset = index * stride;
+    const std::size_t view_remaining = view.byteLength - accessor.byteOffset;
+    if (relative_offset > view_remaining || *element_byte_size > view_remaining - relative_offset) {
+        return nullptr;
+    }
+
+    const std::size_t offset = view.byteOffset + accessor.byteOffset + relative_offset;
     return reinterpret_cast<const std::byte*>(buffer.data.data() + offset);
 }
 
@@ -274,16 +331,63 @@ TextureWrap ConvertTextureWrap(int value, std::string_view field, AssetLoadResul
     return TextureWrap::Repeat;
 }
 
-ImportedMaterial ConvertMaterial(
+int AddGltfSampler(const tinygltf::Sampler& sampler, AssetLoadResult& result, AssetResource& resource) {
+    AssetSampler imported;
+    imported.wrap_s = ConvertTextureWrap(sampler.wrapS, "wrapS", result);
+    imported.wrap_t = ConvertTextureWrap(sampler.wrapT, "wrapT", result);
+    const int index = static_cast<int>(resource.samplers.size());
+    resource.samplers.push_back(imported);
+    return index;
+}
+
+bool CopyGltfImagesAndSamplers(
+    const tinygltf::Model& model,
+    const std::filesystem::path& asset_dir,
+    AssetLoadResult& result,
+    AssetResource& resource
+) {
+    for (const tinygltf::Sampler& sampler : model.samplers) {
+        AddGltfSampler(sampler, result, resource);
+    }
+    for (const tinygltf::Image& image : model.images) {
+        AssetImage imported;
+        if (!image.uri.empty()) {
+            imported.path = (asset_dir / image.uri).lexically_normal();
+        }
+        resource.images.push_back(std::move(imported));
+    }
+    for (const tinygltf::Texture& texture : model.textures) {
+        if (texture.source < -1 ||
+            (texture.source >= 0 && static_cast<std::size_t>(texture.source) >= model.images.size())) {
+            result.errors.push_back("glTF texture references an invalid image");
+            return false;
+        }
+        if (texture.sampler < -1 ||
+            (texture.sampler >= 0 && static_cast<std::size_t>(texture.sampler) >= model.samplers.size())) {
+            result.errors.push_back("glTF texture references an invalid sampler");
+            return false;
+        }
+        AssetTexture imported;
+        imported.image = texture.source;
+        imported.sampler = texture.sampler;
+        resource.textures.push_back(imported);
+    }
+    return true;
+}
+
+bool StartsWith(std::string_view value, std::string_view prefix) {
+    return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
+}
+
+std::optional<AssetMaterial> ConvertMaterial(
     const tinygltf::Model& model,
     const tinygltf::Material& material,
-    const std::filesystem::path& asset_dir,
     AssetLoadResult& result
 ) {
-    ImportedMaterial imported;
+    AssetMaterial imported;
     imported.name = material.name;
     const tinygltf::PbrMetallicRoughness& pbr = material.pbrMetallicRoughness;
-    imported.diffuse = Color3f{
+    imported.base_color = Color3f{
         static_cast<float>(pbr.baseColorFactor[0]),
         static_cast<float>(pbr.baseColorFactor[1]),
         static_cast<float>(pbr.baseColorFactor[2])
@@ -294,56 +398,52 @@ ImportedMaterial ConvertMaterial(
         static_cast<float>(material.emissiveFactor[2])
     };
     imported.roughness = static_cast<float>(pbr.roughnessFactor);
-    const float metallic = static_cast<float>(pbr.metallicFactor);
-    if (metallic >= 0.5f) {
-        imported.type = MaterialKind::Metal;
+    imported.metallic = static_cast<float>(pbr.metallicFactor);
+    if (imported.metallic >= 0.5f) {
+        imported.approximate_type = MaterialKind::Metal;
     } else if (imported.roughness < 0.35f) {
-        imported.type = MaterialKind::Plastic;
+        imported.approximate_type = MaterialKind::Plastic;
         imported.specular = 0.04f;
     } else {
-        imported.type = MaterialKind::Diffuse;
+        imported.approximate_type = MaterialKind::Diffuse;
     }
 
-    if (pbr.baseColorTexture.index >= 0 &&
-        static_cast<std::size_t>(pbr.baseColorTexture.index) < model.textures.size()) {
+    if (pbr.baseColorTexture.index >= 0) {
+        if (static_cast<std::size_t>(pbr.baseColorTexture.index) >= model.textures.size()) {
+            result.errors.push_back("invalid base color texture index");
+            return std::nullopt;
+        }
+
         const tinygltf::Texture& texture = model.textures[static_cast<std::size_t>(pbr.baseColorTexture.index)];
-        if (texture.sampler >= 0 && static_cast<std::size_t>(texture.sampler) < model.samplers.size()) {
-            const tinygltf::Sampler& sampler = model.samplers[static_cast<std::size_t>(texture.sampler)];
-            imported.diffuse_texture_wrap_s = ConvertTextureWrap(sampler.wrapS, "wrapS", result);
-            imported.diffuse_texture_wrap_t = ConvertTextureWrap(sampler.wrapT, "wrapT", result);
+        if (texture.source < 0 || static_cast<std::size_t>(texture.source) >= model.images.size()) {
+            result.errors.push_back("base color texture image source is invalid");
+            return std::nullopt;
         }
-        if (texture.source >= 0 && static_cast<std::size_t>(texture.source) < model.images.size()) {
-            const tinygltf::Image& image = model.images[static_cast<std::size_t>(texture.source)];
-            if (!image.uri.empty()) {
-                imported.diffuse_texture_path = (asset_dir / image.uri).lexically_normal();
-                imported.has_diffuse_texture = true;
-            }
+
+        const tinygltf::Image& image = model.images[static_cast<std::size_t>(texture.source)];
+        if (StartsWith(image.uri, "data:")) {
+            result.errors.push_back("base color texture image data URI is unsupported");
+            return std::nullopt;
         }
+        if (image.uri.empty()) {
+            result.errors.push_back(
+                "base color texture image requires an external image URI; embedded images and data URI textures are unsupported"
+            );
+            return std::nullopt;
+        }
+
+        imported.base_color_texture = pbr.baseColorTexture.index;
+    } else if (pbr.baseColorTexture.index < -1) {
+        result.errors.push_back("invalid base color texture index");
+        return std::nullopt;
     }
     return imported;
 }
 
-std::optional<std::uint32_t> VertexIndex(
+bool AppendPrimitiveResource(
     const tinygltf::Model& model,
     const tinygltf::Primitive& primitive,
-    std::size_t primitive_vertex
-) {
-    if (primitive.indices < 0) {
-        return static_cast<std::uint32_t>(primitive_vertex);
-    }
-
-    const std::optional<const tinygltf::Accessor*> index_accessor = GetAccessor(model, primitive.indices);
-    if (!index_accessor.has_value()) {
-        return std::nullopt;
-    }
-    return ReadIndexAccessorValue(model, **index_accessor, primitive_vertex);
-}
-
-bool AppendPrimitiveTriangles(
-    const tinygltf::Model& model,
-    const tinygltf::Primitive& primitive,
-    Mat4 transform,
-    ImportedMesh& mesh,
+    AssetMesh& mesh,
     AssetLoadResult& result
 ) {
     const int mode = primitive.mode < 0 ? TINYGLTF_MODE_TRIANGLES : primitive.mode;
@@ -367,102 +467,115 @@ bool AppendPrimitiveTriangles(
         return false;
     }
 
-    std::optional<const tinygltf::Accessor*> normal_accessor;
+    if (primitive.material < -1 ||
+        (primitive.material >= 0 && static_cast<std::size_t>(primitive.material) >= model.materials.size())) {
+        result.errors.push_back("glTF primitive references an invalid material");
+        return false;
+    }
+
+    AssetPrimitive imported;
+    imported.topology = AssetPrimitiveTopology::Triangles;
+    imported.material = primitive.material;
+
+    for (std::size_t vertex = 0; vertex < (**position_accessor).count; ++vertex) {
+        const std::optional<Point3f> position = ReadVec3AccessorValue(model, **position_accessor, vertex);
+        if (!position.has_value()) {
+            result.errors.push_back("glTF primitive has invalid POSITION data");
+            return false;
+        }
+        imported.positions.push_back(*position);
+    }
+
     if (const auto found = primitive.attributes.find("NORMAL"); found != primitive.attributes.end()) {
-        normal_accessor = GetAccessor(model, found->second);
+        const std::optional<const tinygltf::Accessor*> normal_accessor = GetAccessor(model, found->second);
+        if (!normal_accessor.has_value()) {
+            result.errors.push_back("glTF primitive references an invalid NORMAL accessor");
+            return false;
+        }
+        if ((**normal_accessor).count != (**position_accessor).count) {
+            result.errors.push_back("glTF NORMAL accessor count must match POSITION accessor count");
+            return false;
+        }
+        for (std::size_t vertex = 0; vertex < (**normal_accessor).count; ++vertex) {
+            const std::optional<Point3f> normal = ReadVec3AccessorValue(model, **normal_accessor, vertex);
+            if (!normal.has_value()) {
+                result.errors.push_back("glTF primitive has invalid NORMAL data");
+                return false;
+            }
+            imported.normals.push_back(Normalize(Vec3f{normal->x, normal->y, normal->z}));
+        }
     }
 
-    std::optional<const tinygltf::Accessor*> uv_accessor;
     if (const auto found = primitive.attributes.find("TEXCOORD_0"); found != primitive.attributes.end()) {
-        uv_accessor = GetAccessor(model, found->second);
+        const std::optional<const tinygltf::Accessor*> uv_accessor = GetAccessor(model, found->second);
+        if (!uv_accessor.has_value()) {
+            result.errors.push_back("glTF primitive references an invalid TEXCOORD_0 accessor");
+            return false;
+        }
+        if ((**uv_accessor).count != (**position_accessor).count) {
+            result.errors.push_back("glTF TEXCOORD_0 accessor count must match POSITION accessor count");
+            return false;
+        }
+        for (std::size_t vertex = 0; vertex < (**uv_accessor).count; ++vertex) {
+            const std::optional<Vec2f> uv = ReadVec2AccessorValue(model, **uv_accessor, vertex);
+            if (!uv.has_value()) {
+                result.errors.push_back("glTF primitive has invalid TEXCOORD_0 data");
+                return false;
+            }
+            imported.texcoords0.push_back(*uv);
+        }
     }
 
-    std::size_t vertex_count = (**position_accessor).count;
+    std::size_t index_count = imported.positions.size();
+    if (primitive.indices < -1) {
+        result.errors.push_back("glTF primitive references an invalid index accessor");
+        return false;
+    }
     if (primitive.indices >= 0) {
         const std::optional<const tinygltf::Accessor*> index_accessor = GetAccessor(model, primitive.indices);
         if (!index_accessor.has_value() || !AccessorHasBufferView(**index_accessor)) {
             result.errors.push_back("glTF index accessor must have a buffer view");
             return false;
         }
-        vertex_count = (**index_accessor).count;
+        index_count = (**index_accessor).count;
+        for (std::size_t index = 0; index < index_count; ++index) {
+            const std::optional<std::uint32_t> value = ReadIndexAccessorValue(model, **index_accessor, index);
+            if (!value.has_value()) {
+                result.errors.push_back("glTF primitive has invalid indices");
+                return false;
+            }
+            if (*value >= imported.positions.size()) {
+                result.errors.push_back("glTF primitive index references an invalid vertex");
+                return false;
+            }
+            imported.indices.push_back(*value);
+        }
+    } else {
+        if (index_count > std::numeric_limits<std::uint32_t>::max()) {
+            result.errors.push_back("glTF primitive has too many vertices for uint32 indices");
+            return false;
+        }
+        for (std::uint32_t index = 0; index < static_cast<std::uint32_t>(index_count); ++index) {
+            imported.indices.push_back(index);
+        }
     }
 
-    if (vertex_count % 3 != 0) {
+    if (imported.indices.empty()) {
+        result.errors.push_back("glTF triangle primitive contains no vertices");
+        return false;
+    }
+    if (imported.indices.size() % 3 != 0) {
         result.errors.push_back("glTF triangle primitive vertex count is not divisible by three");
         return false;
     }
 
-    for (std::size_t vertex = 0; vertex < vertex_count; vertex += 3) {
-        const std::optional<std::uint32_t> i0 = VertexIndex(model, primitive, vertex + 0);
-        const std::optional<std::uint32_t> i1 = VertexIndex(model, primitive, vertex + 1);
-        const std::optional<std::uint32_t> i2 = VertexIndex(model, primitive, vertex + 2);
-        if (!i0.has_value() || !i1.has_value() || !i2.has_value()) {
-            result.errors.push_back("glTF primitive has invalid indices");
-            return false;
-        }
-
-        const std::optional<Point3f> local_p0 = ReadVec3AccessorValue(model, **position_accessor, *i0);
-        const std::optional<Point3f> local_p1 = ReadVec3AccessorValue(model, **position_accessor, *i1);
-        const std::optional<Point3f> local_p2 = ReadVec3AccessorValue(model, **position_accessor, *i2);
-        if (!local_p0.has_value() || !local_p1.has_value() || !local_p2.has_value()) {
-            result.errors.push_back("glTF primitive has invalid POSITION data");
-            return false;
-        }
-
-        const Point3f p0 = TransformPoint(transform, *local_p0);
-        const Point3f p1 = TransformPoint(transform, *local_p1);
-        const Point3f p2 = TransformPoint(transform, *local_p2);
-        const Vec3f normal = Normalize(Cross(p1 - p0, p2 - p0));
-        if (LengthSquared(normal) <= DegenerateTriangleEpsilon) {
-            result.warnings.push_back("skipping degenerate glTF triangle");
-            continue;
-        }
-
-        std::optional<Vec3f> n0;
-        std::optional<Vec3f> n1;
-        std::optional<Vec3f> n2;
-        if (normal_accessor.has_value()) {
-            n0 = ReadVec3AccessorValue(model, **normal_accessor, *i0);
-            n1 = ReadVec3AccessorValue(model, **normal_accessor, *i1);
-            n2 = ReadVec3AccessorValue(model, **normal_accessor, *i2);
-        }
-
-        std::optional<Vec2f> uv0;
-        std::optional<Vec2f> uv1;
-        std::optional<Vec2f> uv2;
-        if (uv_accessor.has_value()) {
-            uv0 = ReadVec2AccessorValue(model, **uv_accessor, *i0);
-            uv1 = ReadVec2AccessorValue(model, **uv_accessor, *i1);
-            uv2 = ReadVec2AccessorValue(model, **uv_accessor, *i2);
-        }
-
-        ImportedTriangle triangle;
-        triangle.p0 = p0;
-        triangle.p1 = p1;
-        triangle.p2 = p2;
-        triangle.normal = normal;
-        triangle.uv0 = uv0.value_or(Vec2f{});
-        triangle.uv1 = uv1.value_or(Vec2f{});
-        triangle.uv2 = uv2.value_or(Vec2f{});
-        triangle.has_uv = uv0.has_value() && uv1.has_value() && uv2.has_value();
-        triangle.n0 = Normalize(TransformVector(transform, n0.value_or(Vec3f{})));
-        triangle.n1 = Normalize(TransformVector(transform, n1.value_or(Vec3f{})));
-        triangle.n2 = Normalize(TransformVector(transform, n2.value_or(Vec3f{})));
-        triangle.has_vertex_normals =
-            n0.has_value() && n1.has_value() && n2.has_value() &&
-            LengthSquared(triangle.n0) > 0.0f &&
-            LengthSquared(triangle.n1) > 0.0f &&
-            LengthSquared(triangle.n2) > 0.0f;
-        triangle.material_index = primitive.material;
-        mesh.triangles.push_back(triangle);
-    }
-
+    mesh.primitives.push_back(std::move(imported));
     return true;
 }
 
 } // namespace
 
-AssetLoadResult LoadGltfMesh(const std::filesystem::path& path) {
+AssetLoadResult LoadGltfResource(const std::filesystem::path& path) {
     AssetLoadResult result;
 
     if (!HasGltfExtension(path)) {
@@ -488,72 +601,86 @@ AssetLoadResult LoadGltfMesh(const std::filesystem::path& path) {
         return result;
     }
 
-    ImportedMesh mesh;
+    AssetResource resource;
     const std::filesystem::path asset_dir = path.parent_path();
-    mesh.materials.reserve(model.materials.size());
-    for (const tinygltf::Material& material : model.materials) {
-        mesh.materials.push_back(ConvertMaterial(model, material, asset_dir, result));
-    }
-
-    if (model.scenes.empty()) {
-        result.errors.push_back("glTF file contains no scenes: " + path.generic_string());
+    if (!CopyGltfImagesAndSamplers(model, asset_dir, result, resource)) {
         return result;
     }
 
-    const int scene_index = model.defaultScene >= 0 ? model.defaultScene : 0;
-    if (scene_index < 0 || static_cast<std::size_t>(scene_index) >= model.scenes.size()) {
+    resource.materials.reserve(model.materials.size());
+    for (const tinygltf::Material& material : model.materials) {
+        std::optional<AssetMaterial> imported = ConvertMaterial(model, material, result);
+        if (!imported.has_value()) {
+            return result;
+        }
+        resource.materials.push_back(std::move(*imported));
+    }
+
+    bool has_supported_primitives = false;
+    for (const tinygltf::Mesh& gltf_mesh : model.meshes) {
+        AssetMesh mesh;
+        mesh.name = gltf_mesh.name;
+        for (const tinygltf::Primitive& primitive : gltf_mesh.primitives) {
+            if (!AppendPrimitiveResource(model, primitive, mesh, result)) {
+                return result;
+            }
+        }
+        if (!mesh.primitives.empty()) {
+            has_supported_primitives = true;
+        }
+        resource.meshes.push_back(std::move(mesh));
+    }
+
+    for (const tinygltf::Node& gltf_node : model.nodes) {
+        const std::optional<Mat4> local_transform = NodeLocalTransform(gltf_node);
+        if (!local_transform.has_value()) {
+            result.errors.push_back("glTF node matrix must contain 16 values");
+            return result;
+        }
+        if (gltf_node.mesh < -1 ||
+            (gltf_node.mesh >= 0 && static_cast<std::size_t>(gltf_node.mesh) >= model.meshes.size())) {
+            result.errors.push_back("glTF node references an invalid mesh");
+            return result;
+        }
+        for (int child : gltf_node.children) {
+            if (child < 0 || static_cast<std::size_t>(child) >= model.nodes.size()) {
+                result.errors.push_back("glTF node references an invalid child node");
+                return result;
+            }
+        }
+        AssetNode node;
+        node.name = gltf_node.name;
+        node.transform = ToAssetTransform(*local_transform);
+        node.mesh = gltf_node.mesh;
+        node.children = gltf_node.children;
+        resource.nodes.push_back(std::move(node));
+    }
+
+    for (const tinygltf::Scene& gltf_scene : model.scenes) {
+        for (int node_index : gltf_scene.nodes) {
+            if (node_index < 0 || static_cast<std::size_t>(node_index) >= model.nodes.size()) {
+                result.errors.push_back("glTF scene references an invalid root node");
+                return result;
+            }
+        }
+        AssetScene scene;
+        scene.name = gltf_scene.name;
+        scene.root_nodes = gltf_scene.nodes;
+        resource.scenes.push_back(std::move(scene));
+    }
+
+    resource.default_scene = model.defaultScene >= 0 ? model.defaultScene : 0;
+    if (resource.default_scene < 0 || static_cast<std::size_t>(resource.default_scene) >= resource.scenes.size()) {
         result.errors.push_back("glTF default scene index is invalid: " + path.generic_string());
         return result;
     }
 
-    std::function<bool(int, Mat4)> visit_node = [&](int node_index, Mat4 parent_transform) {
-        if (node_index < 0 || static_cast<std::size_t>(node_index) >= model.nodes.size()) {
-            result.errors.push_back("glTF scene references an invalid node");
-            return false;
-        }
-
-        const tinygltf::Node& node = model.nodes[static_cast<std::size_t>(node_index)];
-        const std::optional<Mat4> local_transform = NodeLocalTransform(node);
-        if (!local_transform.has_value()) {
-            result.errors.push_back("glTF node matrix must contain 16 values");
-            return false;
-        }
-        const Mat4 world_transform = Multiply(parent_transform, *local_transform);
-
-        if (node.mesh >= 0) {
-            if (static_cast<std::size_t>(node.mesh) >= model.meshes.size()) {
-                result.errors.push_back("glTF node references an invalid mesh");
-                return false;
-            }
-            const tinygltf::Mesh& gltf_mesh = model.meshes[static_cast<std::size_t>(node.mesh)];
-            for (const tinygltf::Primitive& primitive : gltf_mesh.primitives) {
-                if (!AppendPrimitiveTriangles(model, primitive, world_transform, mesh, result)) {
-                    return false;
-                }
-            }
-        }
-
-        for (int child : node.children) {
-            if (!visit_node(child, world_transform)) {
-                return false;
-            }
-        }
-        return true;
-    };
-
-    const tinygltf::Scene& scene = model.scenes[static_cast<std::size_t>(scene_index)];
-    for (int node : scene.nodes) {
-        if (!visit_node(node, Mat4{})) {
-            return result;
-        }
-    }
-
-    if (mesh.triangles.empty()) {
+    if (!has_supported_primitives) {
         result.errors.push_back("glTF file contains no supported triangle meshes: " + path.generic_string());
         return result;
     }
 
-    result.mesh = std::move(mesh);
+    result.resource = std::move(resource);
     return result;
 }
 

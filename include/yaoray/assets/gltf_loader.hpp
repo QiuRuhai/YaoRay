@@ -2,10 +2,10 @@
 
 #include <filesystem>
 
-#include <yaoray/assets/imported_asset.hpp>
+#include <yaoray/assets/asset_resource.hpp>
 
 namespace yr {
 
-AssetLoadResult LoadGltfMesh(const std::filesystem::path& path);
+AssetLoadResult LoadGltfResource(const std::filesystem::path& path);
 
 } // namespace yr

@@ -19,11 +19,11 @@ The functional scope stays narrow. This phase does not add full glTF PBR,
 animation, skinning, morph targets, imported cameras, imported lights, or
 per-material-slot TOML overrides.
 
-## Current Problem
+## Previous Problem
 
-The current asset layer returns `ImportedMesh`, a renderer-shaped flat triangle
-package. It is workable for OBJ and simple glTF fixtures, but it loses important
-asset structure:
+Before Phase 2, the asset layer returned `ImportedMesh`, a renderer-shaped flat
+triangle package. It was workable for OBJ and simple glTF fixtures, but it lost
+important asset structure:
 
 - glTF scenes and default-scene selection are flattened in the loader.
 - glTF node hierarchy and local transforms are baked before the render compiler
@@ -333,3 +333,7 @@ End-to-end tests:
 - Current TOML scenes and examples render successfully.
 - Full CTest passes on macOS.
 - Architecture docs describe the asset resource layer as implemented.
+
+## Implementation Status
+
+Implemented in Phase 2. OBJ and glTF loaders now return AssetResource, the render compiler traverses asset resources directly, and the old ImportedMesh asset API has been removed.
