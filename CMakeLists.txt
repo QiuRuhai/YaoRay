@@ -77,6 +77,7 @@ add_library(yaoray_backends STATIC
     src/backends/cpu/cpu_prepared_scene.cpp
     src/backends/cpu/cpu_tile_scheduler.cpp
     src/backends/cpu/cpu_sampler.cpp
+    src/backends/cpu/cpu_surface.cpp
     src/backends/cpu/cpu_path_tracer.cpp
     src/backends/cuda/cuda_backend.cpp
     src/backends/cuda/cuda_prepared_scene.cpp
@@ -100,6 +101,7 @@ add_executable(yaoray_tests
     tests/texture_tests.cpp
     tests/backend_tests.cpp
     tests/cpu_material_tests.cpp
+    tests/cpu_surface_tests.cpp
     tests/cpu_debug_renderer_tests.cpp
     tests/cpu_tile_scheduler_tests.cpp
     tests/cpu_sampler_tests.cpp

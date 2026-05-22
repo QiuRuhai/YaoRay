@@ -12,7 +12,6 @@
 namespace yr {
 namespace {
 
-constexpr float MinHitT = 1.0e-5f;
 constexpr float ParallelEpsilon = 1.0e-8f;
 
 struct BvhPrimitive {
@@ -172,7 +171,7 @@ int BuildRecursive(
     return node_index;
 }
 
-bool IntersectTriangle(const Ray3f& ray, const RenderTriangle& triangle, float& t_out) {
+bool IntersectTriangle(const Ray3f& ray, const RenderTriangle& triangle, float t_min, float t_max, float& t_out) {
     const Vec3f edge1 = triangle.p1 - triangle.p0;
     const Vec3f edge2 = triangle.p2 - triangle.p0;
     const Vec3f pvec = Cross(ray.direction, edge2);
@@ -195,7 +194,7 @@ bool IntersectTriangle(const Ray3f& ray, const RenderTriangle& triangle, float& 
     }
 
     const float t = Dot(edge2, qvec) * inv_det;
-    if (t <= MinHitT) {
+    if (t <= t_min || t >= t_max) {
         return false;
     }
 
@@ -250,9 +249,12 @@ BvhHit IntersectBvh(
     const RenderSceneIR& scene,
     const RenderBvh& bvh,
     const Ray3f& ray,
-    BvhTraceStats& stats
+    BvhTraceStats& stats,
+    float t_min,
+    float t_max
 ) {
     BvhHit nearest;
+    nearest.t = t_max;
     if (bvh.nodes.empty()) {
         return nearest;
     }
@@ -268,7 +270,7 @@ BvhHit IntersectBvh(
 
         const RenderBvhNode& node = bvh.nodes[static_cast<std::size_t>(node_index)];
         ++stats.node_tests;
-        if (!node.bounds.Intersects(ray, MinHitT, nearest.t)) {
+        if (!node.bounds.Intersects(ray, t_min, nearest.t)) {
             continue;
         }
 
@@ -289,7 +291,7 @@ BvhHit IntersectBvh(
                 ++stats.triangle_tests;
                 float t = 0.0f;
                 const RenderTriangle& triangle = scene.triangles[static_cast<std::size_t>(triangle_index)];
-                if (IntersectTriangle(ray, triangle, t) && t < nearest.t) {
+                if (IntersectTriangle(ray, triangle, t_min, nearest.t, t) && t < nearest.t) {
                     nearest.hit = true;
                     nearest.t = t;
                     nearest.triangle = &triangle;
