@@ -6,6 +6,7 @@
 #include <yaoray/scene/diagnostic.hpp>
 #include <yaoray/scene/scene_parser.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
@@ -60,6 +61,18 @@ std::uint64_t TotalSamples(const yr::Film& film) {
         }
     }
     return total;
+}
+
+std::uint64_t EstimateTextureMemoryBytes(const yr::RenderSceneIR& scene) {
+    std::uint64_t total = 0;
+    for (const yr::RenderTexture& texture : scene.textures) {
+        total += static_cast<std::uint64_t>(texture.texels.size() * sizeof(yr::Color4f));
+    }
+    return total;
+}
+
+double BytesToMiB(std::uint64_t bytes) {
+    return static_cast<double>(bytes) / (1024.0 * 1024.0);
 }
 
 int RunRender(int argc, char** argv) {
@@ -119,6 +132,9 @@ int RunRender(int argc, char** argv) {
     std::cout << "Requested backend: " << yr::RenderBackendName(render_scene.requested_backend) << '\n';
     std::cout << "Integrator: " << yr::RenderIntegratorName(render_scene.integrator) << '\n';
     std::cout << "Compiled triangles: " << render_scene.triangles.size() << '\n';
+    std::cout << "Compiled materials: " << render_scene.materials.size() << '\n';
+    std::cout << "Compiled textures: " << render_scene.textures.size() << '\n';
+    std::cout << "Texture memory MiB: " << BytesToMiB(EstimateTextureMemoryBytes(render_scene)) << '\n';
 
     const auto backend = yr::CreateRenderBackend(render_scene.requested_backend);
     if (!backend) {
@@ -133,6 +149,7 @@ int RunRender(int argc, char** argv) {
                   << '\n';
         return 1;
     }
+    std::cout << "Prepare seconds: " << prepare_result.elapsed_seconds << '\n';
 
     const yr::RenderResult render_result = backend->Render(*prepare_result.scene, yr::RenderRequest{});
     if (!render_result.ok) {

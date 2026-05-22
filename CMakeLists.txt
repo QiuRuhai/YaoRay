@@ -205,6 +205,10 @@ if(BUILD_TESTING)
         EXPECT_REGEX
             "Integrator: path"
             "Compiled triangles: 2"
+            "Compiled materials:"
+            "Compiled textures:"
+            "Texture memory MiB:"
+            "Prepare seconds:"
             "Rendered image:"
     )
     add_yaoray_cli_render_test(yaoray_cli_render_gltf
@@ -233,6 +237,10 @@ if(BUILD_TESTING)
         BACKEND cpu
         EXPECT_REGEX
             "Integrator: path"
+            "Compiled materials:"
+            "Compiled textures:"
+            "Texture memory MiB:"
+            "Prepare seconds:"
             "Rendered image:"
             "Threads: 2"
             "Rays traced:"
