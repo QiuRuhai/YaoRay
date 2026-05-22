@@ -16,7 +16,7 @@ Run from the repository root:
 ```bash
 mkdir -p external/assets/large-gltf/sponza
 git clone --depth 1 --filter=blob:none --sparse https://github.com/KhronosGroup/glTF-Sample-Assets.git external/assets/large-gltf/sponza/glTF-Sample-Assets
-git -C external/assets/large-gltf/sponza/glTF-Sample-Assets sparse-checkout set Models/Sponza/glTF Models/Sponza/LICENSE.md Models/Sponza/README.md Models/Sponza/metadata.json
+git -C external/assets/large-gltf/sponza/glTF-Sample-Assets sparse-checkout set --no-cone /Models/Sponza/glTF /Models/Sponza/LICENSE.md /Models/Sponza/README.md /Models/Sponza/metadata.json
 cp -R external/assets/large-gltf/sponza/glTF-Sample-Assets/Models/Sponza external/assets/large-gltf/sponza/Sponza
 ```
 
