@@ -1,5 +1,6 @@
 #include "yr_test.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -86,6 +87,17 @@ YR_TEST(render_scene_ir_defaults_are_backend_friendly) {
     YR_EXPECT_EQ(material.type, yr::MaterialKind::Diffuse);
     YR_EXPECT_NEAR(material.roughness, 0.0, 1e-6);
     YR_EXPECT_NEAR(material.specular, 0.04, 1e-6);
+    YR_EXPECT_NEAR(material.albedo_alpha, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.metallic, 0.0, 1e-6);
+    YR_EXPECT_EQ(material.metallic_roughness_texture, -1);
+    YR_EXPECT_EQ(material.normal_texture, -1);
+    YR_EXPECT_EQ(material.emissive_texture, -1);
+    YR_EXPECT_EQ(material.occlusion_texture, -1);
+    YR_EXPECT_NEAR(material.normal_scale, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.occlusion_strength, 1.0, 1e-6);
+    YR_EXPECT_EQ(material.alpha_mode, yr::RenderAlphaMode::Opaque);
+    YR_EXPECT_NEAR(material.alpha_cutoff, 0.5, 1e-6);
+    YR_EXPECT_TRUE(!material.double_sided);
     YR_EXPECT_NEAR(material.ior, 1.5, 1e-6);
     YR_EXPECT_TRUE(!material.thin);
     YR_EXPECT_NEAR(material.absorption_color.x, 1.0, 1e-6);
@@ -625,6 +637,82 @@ YR_TEST(scene_compiler_imports_gltf_texture_and_uvs) {
     YR_EXPECT_EQ(compiled.materials[0].albedo_texture, 0);
 }
 
+YR_TEST(scene_compiler_preserves_gltf_pbr_material_fields) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "pbr",
+        FixturePath("assets/gltf/PbrMaterialCore/glTF/PbrMaterialCore.gltf")
+    });
+    scene.instances.push_back(yr::InstanceDescription{"pbr", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderSceneIR& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
+    const yr::RenderMaterial& material = compiled.materials[0];
+    YR_EXPECT_EQ(material.type, yr::MaterialKind::Metal);
+    YR_EXPECT_NEAR(material.albedo.x, 0.2, 1e-6);
+    YR_EXPECT_NEAR(material.albedo.y, 0.4, 1e-6);
+    YR_EXPECT_NEAR(material.albedo.z, 0.6, 1e-6);
+    YR_EXPECT_NEAR(material.albedo_alpha, 0.7, 1e-6);
+    YR_EXPECT_NEAR(material.metallic, 0.75, 1e-6);
+    YR_EXPECT_NEAR(material.roughness, 0.25, 1e-6);
+    YR_EXPECT_NEAR(material.normal_scale, 0.5, 1e-6);
+    YR_EXPECT_NEAR(material.occlusion_strength, 0.25, 1e-6);
+    YR_EXPECT_EQ(material.alpha_mode, yr::RenderAlphaMode::Mask);
+    YR_EXPECT_NEAR(material.alpha_cutoff, 0.33, 1e-6);
+    YR_EXPECT_TRUE(material.double_sided);
+    YR_EXPECT_TRUE(material.albedo_texture >= 0);
+    YR_EXPECT_TRUE(material.metallic_roughness_texture >= 0);
+    YR_EXPECT_TRUE(material.normal_texture >= 0);
+    YR_EXPECT_TRUE(material.occlusion_texture >= 0);
+    YR_EXPECT_TRUE(material.emissive_texture >= 0);
+}
+
+YR_TEST(scene_compiler_texture_cache_keeps_distinct_color_spaces) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "pbr",
+        FixturePath("assets/gltf/PbrMaterialCore/glTF/PbrMaterialCore.gltf")
+    });
+    scene.instances.push_back(yr::InstanceDescription{"pbr", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderSceneIR& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.textures.size(), std::size_t{2});
+    YR_EXPECT_EQ(compiled.textures[0].color_space, yr::TextureColorSpace::Srgb);
+    YR_EXPECT_EQ(compiled.textures[1].color_space, yr::TextureColorSpace::Linear);
+    YR_EXPECT_EQ(compiled.materials[0].albedo_texture, 0);
+    YR_EXPECT_EQ(compiled.materials[0].emissive_texture, 0);
+    YR_EXPECT_EQ(compiled.materials[0].metallic_roughness_texture, 1);
+    YR_EXPECT_EQ(compiled.materials[0].normal_texture, 1);
+    YR_EXPECT_EQ(compiled.materials[0].occlusion_texture, 1);
+}
+
+YR_TEST(scene_compiler_imports_gltf_tangents) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "pbr",
+        FixturePath("assets/gltf/PbrMaterialCore/glTF/PbrMaterialCore.gltf")
+    });
+    scene.instances.push_back(yr::InstanceDescription{"pbr", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderTriangle& triangle = result.scene->triangles[0];
+    YR_EXPECT_TRUE(triangle.has_tangents);
+    YR_EXPECT_NEAR(triangle.tangent_handedness0, 1.0, 1e-6);
+    YR_EXPECT_TRUE(std::isfinite(triangle.t0.x));
+    YR_EXPECT_TRUE(yr::LengthSquared(triangle.t0) > 0.0f);
+}
+
 YR_TEST(scene_compiler_propagates_gltf_texture_wrap_modes) {
     yr::SceneDescription scene = MakeBaseScene();
     scene.assets.push_back(yr::AssetDescription{
@@ -755,6 +843,25 @@ YR_TEST(scene_compiler_imports_obj_material_texture_and_uvs) {
     YR_EXPECT_NEAR(compiled.materials[0].absorption_distance, 1.0, 1e-6);
     YR_EXPECT_TRUE(compiled.triangles[0].has_uv);
     YR_EXPECT_NEAR(compiled.triangles[0].uv1.x, 1.0, 1e-6);
+}
+
+YR_TEST(scene_compiler_generates_tangents_for_uv_normal_assets) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"quad", FixturePath("assets/normal_quad.obj")});
+    scene.instances.push_back(yr::InstanceDescription{"quad", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderSceneIR& compiled = result.scene.value();
+    YR_EXPECT_EQ(compiled.triangles.size(), std::size_t{2});
+    for (const yr::RenderTriangle& triangle : compiled.triangles) {
+        YR_EXPECT_TRUE(triangle.has_tangents);
+        YR_EXPECT_TRUE(yr::LengthSquared(triangle.t0) > 0.0f);
+        YR_EXPECT_TRUE(yr::LengthSquared(triangle.t1) > 0.0f);
+        YR_EXPECT_TRUE(yr::LengthSquared(triangle.t2) > 0.0f);
+    }
 }
 
 YR_TEST(scene_compiler_caches_duplicate_obj_textures) {

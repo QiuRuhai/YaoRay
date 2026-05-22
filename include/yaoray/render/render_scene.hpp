@@ -39,6 +39,12 @@ struct RenderEnvironmentDistribution {
     bool uniform = false;
 };
 
+enum class RenderAlphaMode {
+    Opaque,
+    Mask,
+    Blend,
+};
+
 struct RenderMaterial {
     MaterialKind type = MaterialKind::Diffuse;
     Color3f albedo{0.8f, 0.8f, 0.8f};
@@ -50,6 +56,17 @@ struct RenderMaterial {
     bool thin = false;
     Color3f absorption_color{1.0f, 1.0f, 1.0f};
     float absorption_distance = 1.0f;
+    float albedo_alpha = 1.0f;
+    float metallic = 0.0f;
+    int metallic_roughness_texture = -1;
+    int normal_texture = -1;
+    int emissive_texture = -1;
+    int occlusion_texture = -1;
+    float normal_scale = 1.0f;
+    float occlusion_strength = 1.0f;
+    RenderAlphaMode alpha_mode = RenderAlphaMode::Opaque;
+    float alpha_cutoff = 0.5f;
+    bool double_sided = false;
 };
 
 struct RenderTriangle {
@@ -66,6 +83,13 @@ struct RenderTriangle {
     Vec3f n1;
     Vec3f n2;
     bool has_vertex_normals = false;
+    Vec3f t0;
+    Vec3f t1;
+    Vec3f t2;
+    float tangent_handedness0 = 1.0f;
+    float tangent_handedness1 = 1.0f;
+    float tangent_handedness2 = 1.0f;
+    bool has_tangents = false;
 };
 
 struct RenderAreaLight {

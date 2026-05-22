@@ -300,9 +300,109 @@ Vec3f ApplyNormalTransform(Vec3f normal, const TransformDescription& transform) 
 
 constexpr float DegenerateTriangleEpsilon = 1.0e-12f;
 
+bool IsFinite(Vec3f value) {
+    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+Vec3f FallbackTangent(Vec3f normal) {
+    const Vec3f axis = std::fabs(normal.x) < 0.9f ? Vec3f{1.0f, 0.0f, 0.0f} : Vec3f{0.0f, 1.0f, 0.0f};
+    const Vec3f tangent = axis - normal * Dot(axis, normal);
+    return Normalize(tangent);
+}
+
+Vec3f OrthogonalizeTangent(Vec3f tangent, Vec3f normal) {
+    if (LengthSquared(normal) == 0.0f) {
+        return Normalize(tangent);
+    }
+    const Vec3f unit_normal = Normalize(normal);
+    const Vec3f projected = tangent - unit_normal * Dot(tangent, unit_normal);
+    if (LengthSquared(projected) <= DegenerateTriangleEpsilon || !IsFinite(projected)) {
+        return FallbackTangent(unit_normal);
+    }
+    return Normalize(projected);
+}
+
+struct PrimitiveTangent {
+    Vec3f direction;
+    float handedness = 1.0f;
+    bool valid = false;
+};
+
+std::vector<PrimitiveTangent> BuildPrimitiveTangents(
+    const AssetPrimitive& primitive,
+    bool has_uv,
+    bool has_normals
+) {
+    std::vector<PrimitiveTangent> tangents(primitive.positions.size());
+    if (primitive.tangents.size() == primitive.positions.size()) {
+        for (std::size_t vertex = 0; vertex < primitive.tangents.size(); ++vertex) {
+            const Vec3f normal = has_normals ? primitive.normals[vertex] : Vec3f{};
+            const Vec3f tangent = OrthogonalizeTangent(primitive.tangents[vertex].direction, normal);
+            tangents[vertex] = PrimitiveTangent{tangent, primitive.tangents[vertex].handedness, LengthSquared(tangent) > 0.0f};
+        }
+        return tangents;
+    }
+
+    if (!has_uv || !has_normals) {
+        return tangents;
+    }
+
+    std::vector<Vec3f> accumulated(primitive.positions.size());
+    for (std::size_t index_offset = 0; index_offset < primitive.indices.size(); index_offset += 3) {
+        const std::uint32_t i0 = primitive.indices[index_offset + 0];
+        const std::uint32_t i1 = primitive.indices[index_offset + 1];
+        const std::uint32_t i2 = primitive.indices[index_offset + 2];
+        if (i0 >= primitive.positions.size() || i1 >= primitive.positions.size() || i2 >= primitive.positions.size()) {
+            continue;
+        }
+
+        const Vec3f edge1 = primitive.positions[i1] - primitive.positions[i0];
+        const Vec3f edge2 = primitive.positions[i2] - primitive.positions[i0];
+        const Vec2f uv0 = primitive.texcoords0[i0];
+        const Vec2f uv1 = primitive.texcoords0[i1];
+        const Vec2f uv2 = primitive.texcoords0[i2];
+        const Vec2f duv1{uv1.x - uv0.x, uv1.y - uv0.y};
+        const Vec2f duv2{uv2.x - uv0.x, uv2.y - uv0.y};
+        const float determinant = duv1.x * duv2.y - duv1.y * duv2.x;
+        if (std::fabs(determinant) <= 1.0e-12f) {
+            continue;
+        }
+        const Vec3f tangent = (edge1 * duv2.y - edge2 * duv1.y) / determinant;
+        if (!IsFinite(tangent) || LengthSquared(tangent) <= DegenerateTriangleEpsilon) {
+            continue;
+        }
+        accumulated[i0] = accumulated[i0] + tangent;
+        accumulated[i1] = accumulated[i1] + tangent;
+        accumulated[i2] = accumulated[i2] + tangent;
+    }
+
+    for (std::size_t vertex = 0; vertex < tangents.size(); ++vertex) {
+        const Vec3f normal = Normalize(primitive.normals[vertex]);
+        if (LengthSquared(normal) == 0.0f) {
+            continue;
+        }
+        const Vec3f tangent = OrthogonalizeTangent(accumulated[vertex], normal);
+        tangents[vertex] = PrimitiveTangent{tangent, 1.0f, LengthSquared(tangent) > 0.0f};
+    }
+    return tangents;
+}
+
 struct TextureCache {
     std::unordered_map<std::string, int> indices;
 };
+
+enum class TextureUsage {
+    Color,
+    Data,
+};
+
+TextureColorSpace TextureColorSpaceForUsage(TextureUsage usage) {
+    return usage == TextureUsage::Color ? TextureColorSpace::Srgb : TextureColorSpace::Linear;
+}
+
+std::string TextureUsageName(TextureUsage usage) {
+    return usage == TextureUsage::Color ? "color" : "data";
+}
 
 bool AppendTriangle(
     const SceneDescription& scene,
@@ -375,11 +475,16 @@ std::string TextureWrapName(TextureWrap wrap) {
     return "repeat";
 }
 
-std::string CanonicalTextureKey(const std::filesystem::path& path, TextureWrap wrap_s, TextureWrap wrap_t) {
+std::string CanonicalTextureKey(
+    const std::filesystem::path& path,
+    TextureWrap wrap_s,
+    TextureWrap wrap_t,
+    TextureUsage usage
+) {
     std::error_code ec;
     const std::filesystem::path canonical = std::filesystem::weakly_canonical(path, ec);
     const std::string normalized = ec ? path.lexically_normal().generic_string() : canonical.generic_string();
-    return normalized + "|s=" + TextureWrapName(wrap_s) + "|t=" + TextureWrapName(wrap_t);
+    return normalized + "|s=" + TextureWrapName(wrap_s) + "|t=" + TextureWrapName(wrap_t) + "|usage=" + TextureUsageName(usage);
 }
 
 std::optional<int> LoadTextureIndex(
@@ -388,16 +493,17 @@ std::optional<int> LoadTextureIndex(
     const std::filesystem::path& path,
     TextureWrap wrap_s,
     TextureWrap wrap_t,
+    TextureUsage usage,
     TextureCache& texture_cache,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
-    const std::string key = CanonicalTextureKey(path, wrap_s, wrap_t);
+    const std::string key = CanonicalTextureKey(path, wrap_s, wrap_t, usage);
     const auto found = texture_cache.indices.find(key);
     if (found != texture_cache.indices.end()) {
         return found->second;
     }
 
-    TextureLoadResult load = LoadPngTexture(path);
+    TextureLoadResult load = LoadPngTexture(path, TextureColorSpaceForUsage(usage));
     if (!load.ok) {
         diagnostics.push_back(Error(scene, "assets.path", load.error));
         return std::nullopt;
@@ -410,6 +516,67 @@ std::optional<int> LoadTextureIndex(
     compiled.textures.push_back(std::move(load.texture));
     texture_cache.indices.emplace(key, texture_index);
     return texture_index;
+}
+
+RenderAlphaMode ConvertAssetAlphaMode(AssetAlphaMode mode) {
+    switch (mode) {
+        case AssetAlphaMode::Opaque:
+            return RenderAlphaMode::Opaque;
+        case AssetAlphaMode::Mask:
+            return RenderAlphaMode::Mask;
+        case AssetAlphaMode::Blend:
+            return RenderAlphaMode::Blend;
+    }
+    return RenderAlphaMode::Opaque;
+}
+
+std::optional<int> CompileMaterialTexture(
+    const SceneDescription& scene,
+    RenderSceneIR& compiled,
+    const AssetResource& resource,
+    int asset_texture_index,
+    std::string_view slot_name,
+    TextureUsage usage,
+    TextureCache& texture_cache,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    if (asset_texture_index == -1) {
+        return -1;
+    }
+    if (asset_texture_index < -1 || static_cast<std::size_t>(asset_texture_index) >= resource.textures.size()) {
+        diagnostics.push_back(Error(scene, "assets.path", "asset material references an invalid " + std::string{slot_name} + " texture"));
+        return std::nullopt;
+    }
+
+    const AssetTexture& texture = resource.textures[static_cast<std::size_t>(asset_texture_index)];
+    if (texture.image < 0 || static_cast<std::size_t>(texture.image) >= resource.images.size()) {
+        diagnostics.push_back(Error(scene, "assets.path", "asset texture references an invalid image"));
+        return std::nullopt;
+    }
+    if (texture.sampler < -1 ||
+        (texture.sampler >= 0 && static_cast<std::size_t>(texture.sampler) >= resource.samplers.size())) {
+        diagnostics.push_back(Error(scene, "assets.path", "asset texture references an invalid sampler"));
+        return std::nullopt;
+    }
+
+    TextureWrap wrap_s = TextureWrap::Repeat;
+    TextureWrap wrap_t = TextureWrap::Repeat;
+    if (texture.sampler >= 0) {
+        const AssetSampler& sampler = resource.samplers[static_cast<std::size_t>(texture.sampler)];
+        wrap_s = sampler.wrap_s;
+        wrap_t = sampler.wrap_t;
+    }
+
+    return LoadTextureIndex(
+        scene,
+        compiled,
+        resource.images[static_cast<std::size_t>(texture.image)].path,
+        wrap_s,
+        wrap_t,
+        usage,
+        texture_cache,
+        diagnostics
+    );
 }
 
 std::vector<int> CompileAssetMaterials(
@@ -426,57 +593,84 @@ std::vector<int> CompileAssetMaterials(
         RenderMaterial render_material;
         render_material.type = material.approximate_type;
         render_material.albedo = material.base_color;
+        render_material.albedo_alpha = material.base_color_alpha;
         render_material.emission = material.emission;
+        render_material.metallic = material.metallic;
         render_material.roughness = material.roughness;
         render_material.specular = material.specular;
-        if (material.base_color_texture < -1) {
-            diagnostics.push_back(Error(scene, "assets.path", "asset material references an invalid base color texture"));
+        render_material.normal_scale = material.normal_scale;
+        render_material.occlusion_strength = material.occlusion_strength;
+        render_material.alpha_mode = ConvertAssetAlphaMode(material.alpha_mode);
+        render_material.alpha_cutoff = material.alpha_cutoff;
+        render_material.double_sided = material.double_sided;
+        if (render_material.alpha_mode == RenderAlphaMode::Blend) {
+            diagnostics.push_back(Warning(scene, "assets.path", "glTF alphaMode BLEND is preserved but rendered as opaque in this compatibility slice"));
+        }
+
+        const std::optional<int> albedo_texture = CompileMaterialTexture(
+            scene,
+            compiled,
+            resource,
+            material.base_color_texture,
+            "base color",
+            TextureUsage::Color,
+            texture_cache,
+            diagnostics
+        );
+        const std::optional<int> metallic_roughness_texture = CompileMaterialTexture(
+            scene,
+            compiled,
+            resource,
+            material.metallic_roughness_texture,
+            "metallic-roughness",
+            TextureUsage::Data,
+            texture_cache,
+            diagnostics
+        );
+        const std::optional<int> normal_texture = CompileMaterialTexture(
+            scene,
+            compiled,
+            resource,
+            material.normal_texture,
+            "normal",
+            TextureUsage::Data,
+            texture_cache,
+            diagnostics
+        );
+        const std::optional<int> occlusion_texture = CompileMaterialTexture(
+            scene,
+            compiled,
+            resource,
+            material.occlusion_texture,
+            "occlusion",
+            TextureUsage::Data,
+            texture_cache,
+            diagnostics
+        );
+        const std::optional<int> emissive_texture = CompileMaterialTexture(
+            scene,
+            compiled,
+            resource,
+            material.emissive_texture,
+            "emissive",
+            TextureUsage::Color,
+            texture_cache,
+            diagnostics
+        );
+        if (!albedo_texture.has_value() ||
+            !metallic_roughness_texture.has_value() ||
+            !normal_texture.has_value() ||
+            !occlusion_texture.has_value() ||
+            !emissive_texture.has_value()) {
             material_indices.push_back(-1);
             continue;
         }
-        if (material.base_color_texture >= 0) {
-            if (static_cast<std::size_t>(material.base_color_texture) >= resource.textures.size()) {
-                diagnostics.push_back(Error(scene, "assets.path", "asset material references an invalid base color texture"));
-                material_indices.push_back(-1);
-                continue;
-            }
 
-            const AssetTexture& texture = resource.textures[static_cast<std::size_t>(material.base_color_texture)];
-            if (texture.image < 0 || static_cast<std::size_t>(texture.image) >= resource.images.size()) {
-                diagnostics.push_back(Error(scene, "assets.path", "asset texture references an invalid image"));
-                material_indices.push_back(-1);
-                continue;
-            }
-            if (texture.sampler < -1 ||
-                (texture.sampler >= 0 && static_cast<std::size_t>(texture.sampler) >= resource.samplers.size())) {
-                diagnostics.push_back(Error(scene, "assets.path", "asset texture references an invalid sampler"));
-                material_indices.push_back(-1);
-                continue;
-            }
-
-            TextureWrap wrap_s = TextureWrap::Repeat;
-            TextureWrap wrap_t = TextureWrap::Repeat;
-            if (texture.sampler >= 0) {
-                const AssetSampler& sampler = resource.samplers[static_cast<std::size_t>(texture.sampler)];
-                wrap_s = sampler.wrap_s;
-                wrap_t = sampler.wrap_t;
-            }
-
-            const std::optional<int> texture_index = LoadTextureIndex(
-                scene,
-                compiled,
-                resource.images[static_cast<std::size_t>(texture.image)].path,
-                wrap_s,
-                wrap_t,
-                texture_cache,
-                diagnostics
-            );
-            if (!texture_index.has_value()) {
-                material_indices.push_back(-1);
-                continue;
-            }
-            render_material.albedo_texture = *texture_index;
-        }
+        render_material.albedo_texture = *albedo_texture;
+        render_material.metallic_roughness_texture = *metallic_roughness_texture;
+        render_material.normal_texture = *normal_texture;
+        render_material.occlusion_texture = *occlusion_texture;
+        render_material.emissive_texture = *emissive_texture;
 
         const int render_material_index = static_cast<int>(compiled.materials.size());
         compiled.materials.push_back(render_material);
@@ -549,9 +743,14 @@ bool AppendAssetPrimitive(
         diagnostics.push_back(Error(scene, "assets.path", "asset primitive normal count does not match positions"));
         return false;
     }
+    if (!primitive.tangents.empty() && primitive.tangents.size() != primitive.positions.size()) {
+        diagnostics.push_back(Error(scene, "assets.path", "asset primitive tangent count does not match positions"));
+        return false;
+    }
 
     const bool has_uv = primitive.texcoords0.size() == primitive.positions.size();
     const bool has_normals = primitive.normals.size() == primitive.positions.size();
+    const std::vector<PrimitiveTangent> primitive_tangents = BuildPrimitiveTangents(primitive, has_uv, has_normals);
     for (std::size_t index_offset = 0; index_offset < primitive.indices.size(); index_offset += 3) {
         const std::uint32_t i0 = primitive.indices[index_offset + 0];
         const std::uint32_t i1 = primitive.indices[index_offset + 1];
@@ -614,6 +813,26 @@ bool AppendAssetPrimitive(
                 LengthSquared(n0) > 0.0f &&
                 LengthSquared(n1) > 0.0f &&
                 LengthSquared(n2) > 0.0f;
+        }
+        if (i0 < primitive_tangents.size() &&
+            i1 < primitive_tangents.size() &&
+            i2 < primitive_tangents.size() &&
+            primitive_tangents[i0].valid &&
+            primitive_tangents[i1].valid &&
+            primitive_tangents[i2].valid) {
+            const Vec3f n0 = render_triangle.has_vertex_normals ? render_triangle.n0 : render_triangle.normal;
+            const Vec3f n1 = render_triangle.has_vertex_normals ? render_triangle.n1 : render_triangle.normal;
+            const Vec3f n2 = render_triangle.has_vertex_normals ? render_triangle.n2 : render_triangle.normal;
+            render_triangle.t0 = OrthogonalizeTangent(TransformVector(transform, primitive_tangents[i0].direction), n0);
+            render_triangle.t1 = OrthogonalizeTangent(TransformVector(transform, primitive_tangents[i1].direction), n1);
+            render_triangle.t2 = OrthogonalizeTangent(TransformVector(transform, primitive_tangents[i2].direction), n2);
+            render_triangle.tangent_handedness0 = primitive_tangents[i0].handedness;
+            render_triangle.tangent_handedness1 = primitive_tangents[i1].handedness;
+            render_triangle.tangent_handedness2 = primitive_tangents[i2].handedness;
+            render_triangle.has_tangents =
+                LengthSquared(render_triangle.t0) > 0.0f &&
+                LengthSquared(render_triangle.t1) > 0.0f &&
+                LengthSquared(render_triangle.t2) > 0.0f;
         }
         compiled.triangles.push_back(render_triangle);
     }
