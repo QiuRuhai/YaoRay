@@ -296,7 +296,8 @@ glTF tests:
 - node local transform is preserved instead of baked into positions;
 - base-color texture, image path, and sampler wrap modes are preserved;
 - unsupported wrap modes still warn and default to repeat;
-- GLB fixture still loads.
+- GLB assets with unsupported embedded base-color textures report clear errors
+  instead of silently dropping texture references.
 
 Compiler tests:
 
