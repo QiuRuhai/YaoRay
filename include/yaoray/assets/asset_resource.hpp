@@ -17,6 +17,17 @@ enum class AssetPrimitiveTopology {
     Triangles,
 };
 
+enum class AssetAlphaMode {
+    Opaque,
+    Mask,
+    Blend,
+};
+
+struct AssetTangent {
+    Vec3f direction;
+    float handedness = 1.0f;
+};
+
 struct AssetScene {
     std::string name;
     std::vector<int> root_nodes;
@@ -43,6 +54,7 @@ struct AssetPrimitive {
     std::vector<Point3f> positions;
     std::vector<Vec3f> normals;
     std::vector<Vec2f> texcoords0;
+    std::vector<AssetTangent> tangents;
     std::vector<std::uint32_t> indices;
     int material = -1;
 };
@@ -56,11 +68,21 @@ struct AssetMaterial {
     std::string name;
     MaterialKind approximate_type = MaterialKind::Diffuse;
     Color3f base_color{0.8f, 0.8f, 0.8f};
+    float base_color_alpha = 1.0f;
     Color3f emission;
     float metallic = 0.0f;
     float roughness = 1.0f;
     float specular = 0.04f;
     int base_color_texture = -1;
+    int metallic_roughness_texture = -1;
+    int normal_texture = -1;
+    int occlusion_texture = -1;
+    int emissive_texture = -1;
+    float normal_scale = 1.0f;
+    float occlusion_strength = 1.0f;
+    AssetAlphaMode alpha_mode = AssetAlphaMode::Opaque;
+    float alpha_cutoff = 0.5f;
+    bool double_sided = false;
 };
 
 struct AssetTexture {

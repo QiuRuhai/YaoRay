@@ -29,6 +29,15 @@ bool ErrorContains(const yr::AssetLoadResult& result, std::string_view text) {
     return false;
 }
 
+bool WarningContains(const yr::AssetLoadResult& result, std::string_view text) {
+    for (const std::string& warning : result.warnings) {
+        if (warning.find(text) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 const yr::AssetResource& ResourceValue(const yr::AssetLoadResult& result) {
     if (!result.resource.has_value()) {
         throw std::runtime_error("expected AssetLoadResult::resource to contain a value");
@@ -98,8 +107,24 @@ YR_TEST(asset_resource_defaults_are_empty_static_scene_data) {
     YR_EXPECT_TRUE(primitive.positions.empty());
     YR_EXPECT_TRUE(primitive.normals.empty());
     YR_EXPECT_TRUE(primitive.texcoords0.empty());
+    YR_EXPECT_TRUE(primitive.tangents.empty());
     YR_EXPECT_TRUE(primitive.indices.empty());
     YR_EXPECT_EQ(primitive.material, -1);
+}
+
+YR_TEST(asset_material_defaults_include_gltf_pbr_fields) {
+    const yr::AssetMaterial material;
+
+    YR_EXPECT_NEAR(material.base_color_alpha, 1.0, 1e-6);
+    YR_EXPECT_EQ(material.metallic_roughness_texture, -1);
+    YR_EXPECT_EQ(material.normal_texture, -1);
+    YR_EXPECT_EQ(material.occlusion_texture, -1);
+    YR_EXPECT_EQ(material.emissive_texture, -1);
+    YR_EXPECT_NEAR(material.normal_scale, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.occlusion_strength, 1.0, 1e-6);
+    YR_EXPECT_EQ(material.alpha_mode, yr::AssetAlphaMode::Opaque);
+    YR_EXPECT_NEAR(material.alpha_cutoff, 0.5, 1e-6);
+    YR_EXPECT_TRUE(!material.double_sided);
 }
 
 YR_TEST(obj_loader_loads_triangle_obj_as_asset_resource) {
@@ -344,6 +369,49 @@ YR_TEST(gltf_loader_warns_and_defaults_for_unsupported_texture_wraps) {
     const yr::AssetSampler& sampler = SamplerValue(resource, texture.sampler);
     YR_EXPECT_EQ(sampler.wrap_s, yr::TextureWrap::Repeat);
     YR_EXPECT_EQ(sampler.wrap_t, yr::TextureWrap::Repeat);
+}
+
+YR_TEST(gltf_loader_loads_core_pbr_material_slots) {
+    const yr::AssetLoadResult result =
+        yr::LoadGltfResource(FixturePath("assets/gltf/PbrMaterialCore/glTF/PbrMaterialCore.gltf"));
+
+    const yr::AssetResource& resource = ResourceValue(result);
+    YR_EXPECT_TRUE(result.errors.empty());
+    const yr::AssetMaterial& material = FirstMaterial(resource);
+    YR_EXPECT_EQ(material.name, std::string{"CorePbrMaterial"});
+    YR_EXPECT_NEAR(material.base_color.x, 0.2, 1e-6);
+    YR_EXPECT_NEAR(material.base_color.y, 0.4, 1e-6);
+    YR_EXPECT_NEAR(material.base_color.z, 0.6, 1e-6);
+    YR_EXPECT_NEAR(material.base_color_alpha, 0.7, 1e-6);
+    YR_EXPECT_EQ(material.base_color_texture, 0);
+    YR_EXPECT_EQ(material.metallic_roughness_texture, 1);
+    YR_EXPECT_EQ(material.normal_texture, 2);
+    YR_EXPECT_EQ(material.occlusion_texture, 1);
+    YR_EXPECT_EQ(material.emissive_texture, 0);
+    YR_EXPECT_NEAR(material.metallic, 0.75, 1e-6);
+    YR_EXPECT_NEAR(material.roughness, 0.25, 1e-6);
+    YR_EXPECT_NEAR(material.normal_scale, 0.5, 1e-6);
+    YR_EXPECT_NEAR(material.occlusion_strength, 0.25, 1e-6);
+    YR_EXPECT_NEAR(material.emission.x, 0.1, 1e-6);
+    YR_EXPECT_NEAR(material.emission.y, 0.2, 1e-6);
+    YR_EXPECT_NEAR(material.emission.z, 0.3, 1e-6);
+    YR_EXPECT_EQ(material.alpha_mode, yr::AssetAlphaMode::Mask);
+    YR_EXPECT_NEAR(material.alpha_cutoff, 0.33, 1e-6);
+    YR_EXPECT_TRUE(material.double_sided);
+
+    const yr::AssetPrimitive& primitive = FirstPrimitive(resource);
+    YR_EXPECT_EQ(primitive.tangents.size(), std::size_t{4});
+    YR_EXPECT_NEAR(primitive.tangents[0].handedness, 1.0, 1e-6);
+}
+
+YR_TEST(gltf_loader_warns_and_preserves_blend_alpha_mode) {
+    const yr::AssetLoadResult result =
+        yr::LoadGltfResource(FixturePath("assets/gltf/PbrMaterialBlend/glTF/PbrMaterialBlend.gltf"));
+
+    const yr::AssetResource& resource = ResourceValue(result);
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_EQ(FirstMaterial(resource).alpha_mode, yr::AssetAlphaMode::Blend);
+    YR_EXPECT_TRUE(WarningContains(result, "alphaMode BLEND"));
 }
 
 YR_TEST(gltf_loader_rejects_invalid_base_color_texture_index) {
