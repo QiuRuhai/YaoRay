@@ -110,6 +110,53 @@ add_executable(yaoray
 target_link_libraries(yaoray PRIVATE yaoray_core yaoray_film yaoray_scene yaoray_render yaoray_backends)
 
 if(BUILD_TESTING)
+    add_executable(yaoray_glass_showcase_visual_sanity
+        tests/glass_showcase_visual_sanity.cpp
+    )
+    target_link_libraries(yaoray_glass_showcase_visual_sanity PRIVATE stb)
+
+    function(add_yaoray_cli_render_test name)
+        set(options EXPECT_FAILURE RUN_IMAGE_SANITY)
+        set(oneValueArgs SCENE OUTPUT BACKEND)
+        set(multiValueArgs EXPECT_REGEX)
+        cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+        if(NOT ARG_SCENE)
+            message(FATAL_ERROR "add_yaoray_cli_render_test requires SCENE")
+        endif()
+
+        set(test_args
+            "-DYAORAY_EXE=$<TARGET_FILE:yaoray>"
+            "-DSCENE_PATH=${ARG_SCENE}"
+            "-DEXPECT_FAILURE=${ARG_EXPECT_FAILURE}"
+        )
+        if(ARG_OUTPUT)
+            list(APPEND test_args "-DOUTPUT_PATH=${ARG_OUTPUT}")
+        endif()
+        if(ARG_BACKEND)
+            list(APPEND test_args "-DBACKEND=${ARG_BACKEND}")
+        endif()
+
+        list(LENGTH ARG_EXPECT_REGEX regex_count)
+        list(APPEND test_args "-DEXPECT_REGEX_COUNT=${regex_count}")
+        if(regex_count GREATER 0)
+            math(EXPR last_regex_index "${regex_count} - 1")
+            foreach(index RANGE 0 ${last_regex_index})
+                list(GET ARG_EXPECT_REGEX ${index} regex)
+                list(APPEND test_args "-DEXPECT_REGEX_${index}=${regex}")
+            endforeach()
+        endif()
+
+        if(ARG_RUN_IMAGE_SANITY)
+            list(APPEND test_args "-DIMAGE_SANITY_EXE=$<TARGET_FILE:yaoray_glass_showcase_visual_sanity>")
+        endif()
+
+        add_test(NAME ${name}
+            COMMAND ${CMAKE_COMMAND} ${test_args}
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_cli_render_test.cmake"
+        )
+    endfunction()
+
     add_test(NAME yaoray_tests COMMAND yaoray_tests)
     add_test(NAME yaoray_cli_help COMMAND yaoray --help)
     set_tests_properties(yaoray_cli_help PROPERTIES PASS_REGULAR_EXPRESSION "YaoRay")
@@ -117,59 +164,123 @@ if(BUILD_TESTING)
     set_tests_properties(yaoray_cli_version PROPERTIES PASS_REGULAR_EXPRESSION "0.1.0")
     add_test(NAME yaoray_cli_render_help COMMAND yaoray render --help)
     set_tests_properties(yaoray_cli_render_help PROPERTIES PASS_REGULAR_EXPRESSION "integrator")
-    add_test(NAME yaoray_cli_render_cpu
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-            "$outPath = '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/out/builtin.png'; Remove-Item -Force -ErrorAction SilentlyContinue $outPath; $out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/builtin_triangle.toml' --backend cpu 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -ne 0) { exit 1 }; if ($out -notmatch 'Integrator: debug_direct') { exit 1 }; if ($out -notmatch 'Rendered image:') { exit 1 }; if ($out -notmatch 'Rays traced:') { exit 1 }; if ($out -notmatch 'Shadow rays:') { exit 1 }; if ($out -notmatch 'Occluded shadow rays:') { exit 1 }; if ($out -notmatch 'BVH nodes:') { exit 1 }; if ($out -notmatch 'BVH max depth:') { exit 1 }; if ($out -notmatch 'BVH node tests:') { exit 1 }; if (-not (Test-Path $outPath)) { exit 1 }; [byte[]]$bytes = [System.IO.File]::ReadAllBytes($outPath); [byte[]]$expected = 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A; if ($bytes.Length -lt 8) { exit 1 }; for ($i = 0; $i -lt 8; $i++) { if ($bytes[$i] -ne $expected[$i]) { exit 1 } }"
+    add_yaoray_cli_render_test(yaoray_cli_render_cpu
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/builtin_triangle.toml"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/out/builtin.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: debug_direct"
+            "Rendered image:"
+            "Rays traced:"
+            "Shadow rays:"
+            "Occluded shadow rays:"
+            "BVH nodes:"
+            "BVH max depth:"
+            "BVH node tests:"
     )
-    add_test(NAME yaoray_cli_render_obj
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-            "$outPath = '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/out/obj_quad.png'; Remove-Item -Force -ErrorAction SilentlyContinue $outPath; $out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/obj_quad.toml' --backend cpu 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -ne 0) { exit 1 }; if ($out -notmatch 'Integrator: debug_direct') { exit 1 }; if ($out -notmatch 'Compiled triangles: 2') { exit 1 }; if ($out -notmatch 'BVH nodes:') { exit 1 }; if ($out -notmatch 'BVH max depth:') { exit 1 }; if ($out -notmatch 'BVH node tests:') { exit 1 }; if ($out -notmatch 'Shadow rays:') { exit 1 }; if ($out -notmatch 'Occluded shadow rays:') { exit 1 }; if ($out -notmatch 'Rendered image:') { exit 1 }; if (-not (Test-Path $outPath)) { exit 1 }; [byte[]]$bytes = [System.IO.File]::ReadAllBytes($outPath); [byte[]]$expected = 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A; if ($bytes.Length -lt 8) { exit 1 }; for ($i = 0; $i -lt 8; $i++) { if ($bytes[$i] -ne $expected[$i]) { exit 1 } }"
+    add_yaoray_cli_render_test(yaoray_cli_render_obj
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/obj_quad.toml"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/out/obj_quad.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: debug_direct"
+            "Compiled triangles: 2"
+            "BVH nodes:"
+            "BVH max depth:"
+            "BVH node tests:"
+            "Shadow rays:"
+            "Occluded shadow rays:"
+            "Rendered image:"
     )
-    add_test(NAME yaoray_cli_render_textured_obj
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-            "$outPath = '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/textured_quad.png'; Remove-Item -Force -ErrorAction SilentlyContinue $outPath; $out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/textured_quad.toml' --backend cpu 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -ne 0) { exit 1 }; if ($out -notmatch 'Integrator: path') { exit 1 }; if ($out -notmatch 'Compiled triangles: 2') { exit 1 }; if ($out -notmatch 'Rendered image:') { exit 1 }; if (-not (Test-Path $outPath)) { exit 1 }; [byte[]]$bytes = [System.IO.File]::ReadAllBytes($outPath); [byte[]]$expected = 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A; if ($bytes.Length -lt 8) { exit 1 }; for ($i = 0; $i -lt 8; $i++) { if ($bytes[$i] -ne $expected[$i]) { exit 1 } }"
+    add_yaoray_cli_render_test(yaoray_cli_render_textured_obj
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/textured_quad.toml"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/textured_quad.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: path"
+            "Compiled triangles: 2"
+            "Rendered image:"
     )
-    add_test(NAME yaoray_cli_render_gltf
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-            "$outPath = '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/gltf_textured_asset.png'; Remove-Item -Force -ErrorAction SilentlyContinue $outPath; $out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/gltf_textured_asset.toml' --backend cpu 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -ne 0) { exit 1 }; if ($out -notmatch 'Integrator: path') { exit 1 }; if ($out -notmatch 'Compiled triangles: 2') { exit 1 }; if ($out -notmatch 'Rendered image:') { exit 1 }; if (-not (Test-Path $outPath)) { exit 1 }; [byte[]]$bytes = [System.IO.File]::ReadAllBytes($outPath); [byte[]]$expected = 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A; if ($bytes.Length -lt 8) { exit 1 }; for ($i = 0; $i -lt 8; $i++) { if ($bytes[$i] -ne $expected[$i]) { exit 1 } }"
+    add_yaoray_cli_render_test(yaoray_cli_render_gltf
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/gltf_textured_asset.toml"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/gltf_textured_asset.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: path"
+            "Compiled triangles: 2"
+            "Rendered image:"
     )
-    add_test(NAME yaoray_cli_render_cornell_box
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-            "$outPath = '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/cornell_box.png'; Remove-Item -Force -ErrorAction SilentlyContinue $outPath; $out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/cornell_box.toml' --backend cpu 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -ne 0) { exit 1 }; if ($out -notmatch 'Integrator: debug_direct') { exit 1 }; if ($out -notmatch 'Compiled triangles: 38') { exit 1 }; if ($out -notmatch 'Rendered image:') { exit 1 }; if ($out -notmatch 'Shadow rays:') { exit 1 }; if ($out -notmatch 'BVH nodes:') { exit 1 }; if (-not (Test-Path $outPath)) { exit 1 }; [byte[]]$bytes = [System.IO.File]::ReadAllBytes($outPath); [byte[]]$expected = 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A; if ($bytes.Length -lt 8) { exit 1 }; for ($i = 0; $i -lt 8; $i++) { if ($bytes[$i] -ne $expected[$i]) { exit 1 } }"
+    add_yaoray_cli_render_test(yaoray_cli_render_cornell_box
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/cornell_box.toml"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/cornell_box.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: debug_direct"
+            "Compiled triangles: 38"
+            "Rendered image:"
+            "Shadow rays:"
+            "BVH nodes:"
     )
-    add_test(NAME yaoray_cli_render_path
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-            "$outPath = '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/out/path_tracer_bounce.png'; Remove-Item -Force -ErrorAction SilentlyContinue $outPath; $out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/path_tracer_bounce.toml' --backend cpu 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -ne 0) { exit 1 }; if ($out -notmatch 'Integrator: path') { exit 1 }; if ($out -notmatch 'Rendered image:') { exit 1 }; if ($out -notmatch 'Threads: 2') { exit 1 }; if ($out -notmatch 'Rays traced:') { exit 1 }; if ($out -notmatch 'Samples/sec:') { exit 1 }; if ($out -notmatch 'Rays/sec:') { exit 1 }; if ($out -notmatch 'Shadow rays:') { exit 1 }; if ($out -notmatch 'BVH nodes:') { exit 1 }; if (-not (Test-Path $outPath)) { exit 1 }; [byte[]]$bytes = [System.IO.File]::ReadAllBytes($outPath); [byte[]]$expected = 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A; if ($bytes.Length -lt 8) { exit 1 }; for ($i = 0; $i -lt 8; $i++) { if ($bytes[$i] -ne $expected[$i]) { exit 1 } }"
+    add_yaoray_cli_render_test(yaoray_cli_render_path
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/path_tracer_bounce.toml"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/out/path_tracer_bounce.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: path"
+            "Rendered image:"
+            "Threads: 2"
+            "Rays traced:"
+            "Samples/sec:"
+            "Rays/sec:"
+            "Shadow rays:"
+            "BVH nodes:"
     )
-    add_test(NAME yaoray_cli_render_hdri_showcase
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-            "$outPath = '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/hdri_lighting_showcase.png'; Remove-Item -Force -ErrorAction SilentlyContinue $outPath; $out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/hdri_lighting_showcase.toml' --backend cpu 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -ne 0) { exit 1 }; if ($out -notmatch 'Integrator: path') { exit 1 }; if ($out -notmatch 'Rendered image:') { exit 1 }; if ($out -notmatch 'Shadow rays:') { exit 1 }; if (-not (Test-Path $outPath)) { exit 1 }; [byte[]]$bytes = [System.IO.File]::ReadAllBytes($outPath); [byte[]]$expected = 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A; if ($bytes.Length -lt 8) { exit 1 }; for ($i = 0; $i -lt 8; $i++) { if ($bytes[$i] -ne $expected[$i]) { exit 1 } }"
+    add_yaoray_cli_render_test(yaoray_cli_render_hdri_showcase
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/hdri_lighting_showcase.toml"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/hdri_lighting_showcase.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: path"
+            "Rendered image:"
+            "Shadow rays:"
     )
-    add_test(NAME yaoray_cli_render_glass_showcase
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-            "$outPath = '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/glass_showcase.png'; Remove-Item -Force -ErrorAction SilentlyContinue $outPath; $out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/glass_showcase.toml' --backend cpu 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -ne 0) { exit 1 }; if ($out -notmatch 'Integrator: path') { exit 1 }; if ($out -notmatch 'Rendered image:') { exit 1 }; if ($out -notmatch 'Shadow rays:') { exit 1 }; if (-not (Test-Path $outPath)) { exit 1 }; [byte[]]$bytes = [System.IO.File]::ReadAllBytes($outPath); [byte[]]$expected = 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A; if ($bytes.Length -lt 8) { exit 1 }; for ($i = 0; $i -lt 8; $i++) { if ($bytes[$i] -ne $expected[$i]) { exit 1 } }"
+    add_yaoray_cli_render_test(yaoray_cli_render_glass_showcase
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/glass_showcase.toml"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/glass_showcase.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: path"
+            "Rendered image:"
+            "Shadow rays:"
     )
-    add_test(NAME yaoray_cli_render_glass_showcase_visual_sanity
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_glass_showcase_visual.ps1"
-            "$<TARGET_FILE:yaoray>"
-            "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/glass_showcase.toml"
-            "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/glass_showcase.png"
+    add_yaoray_cli_render_test(yaoray_cli_render_glass_showcase_visual_sanity
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/glass_showcase.toml"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/scenes/examples/out/glass_showcase.png"
+        BACKEND cpu
+        RUN_IMAGE_SANITY
+        EXPECT_REGEX
+            "Integrator: path"
+            "Rendered image:"
     )
-    add_test(NAME yaoray_cli_render_cuda
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-            "$out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/builtin_triangle.toml' --backend cuda 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -eq 0) { exit 1 }; if ($out -notmatch 'CUDA backend not implemented yet') { exit 1 }"
+    add_yaoray_cli_render_test(yaoray_cli_render_cuda
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/builtin_triangle.toml"
+        BACKEND cuda
+        EXPECT_FAILURE
+        EXPECT_REGEX "CUDA backend not implemented yet"
     )
-    add_test(NAME yaoray_cli_render_unsupported_asset
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-            "$out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/unsupported_asset.toml' 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -eq 0) { exit 1 }; if ($out -notmatch 'asset import not implemented yet') { exit 1 }"
+    add_yaoray_cli_render_test(yaoray_cli_render_unsupported_asset
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/unsupported_asset.toml"
+        EXPECT_FAILURE
+        EXPECT_REGEX "asset import not implemented yet"
     )
-    add_test(NAME yaoray_cli_render_missing_file
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-            "$out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/nope.toml' 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -eq 0) { exit 1 }; if ($out -notmatch 'scene file not found') { exit 1 }"
+    add_yaoray_cli_render_test(yaoray_cli_render_missing_file
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/nope.toml"
+        EXPECT_FAILURE
+        EXPECT_REGEX "scene file not found"
     )
-    add_test(NAME yaoray_cli_render_invalid_scene
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-            "$out = & '$<TARGET_FILE:yaoray>' render '${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/invalid_width.toml' 2>&1 | Out-String; Write-Output $out; if ($LASTEXITCODE -eq 0) { exit 1 }; if ($out -notmatch 'render.width') { exit 1 }"
+    add_yaoray_cli_render_test(yaoray_cli_render_invalid_scene
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/invalid_width.toml"
+        EXPECT_FAILURE
+        EXPECT_REGEX "render.width"
     )
 endif()
