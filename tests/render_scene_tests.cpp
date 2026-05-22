@@ -641,6 +641,26 @@ YR_TEST(scene_compiler_imports_gltf_texture_and_uvs) {
     YR_EXPECT_EQ(compiled.materials[0].albedo_texture, 0);
 }
 
+YR_TEST(scene_compiler_imports_gltf_jpeg_texture) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "textured_jpeg",
+        FixturePath("assets/gltf/JpegTexture/glTF/JpegTexture.gltf")
+    });
+    scene.instances.push_back(yr::InstanceDescription{"textured_jpeg", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderSceneIR& compiled = result.scene.value();
+    YR_EXPECT_TRUE(!compiled.triangles.empty());
+    YR_EXPECT_TRUE(compiled.triangles[0].has_uv);
+    YR_EXPECT_EQ(compiled.textures.size(), std::size_t{1});
+    YR_EXPECT_EQ(compiled.textures[0].color_space, yr::TextureColorSpace::Srgb);
+    YR_EXPECT_EQ(compiled.materials[0].albedo_texture, 0);
+}
+
 YR_TEST(scene_compiler_preserves_gltf_pbr_material_fields) {
     yr::SceneDescription scene = MakeBaseScene();
     scene.assets.push_back(yr::AssetDescription{

@@ -503,7 +503,7 @@ std::optional<int> LoadTextureIndex(
         return found->second;
     }
 
-    TextureLoadResult load = LoadPngTexture(path, TextureColorSpaceForUsage(usage));
+    TextureLoadResult load = LoadLdrTexture(path, TextureColorSpaceForUsage(usage));
     if (!load.ok) {
         diagnostics.push_back(Error(scene, "assets.path", load.error));
         return std::nullopt;
