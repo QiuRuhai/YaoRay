@@ -65,6 +65,7 @@ YR_TEST(cpu_prepare_scene_builds_bvh_from_render_scene_ir) {
     YR_EXPECT_EQ(prepared.scene->bvh.nodes.size(), std::size_t{1});
     YR_EXPECT_EQ(prepared.scene->bvh.triangle_indices.size(), std::size_t{1});
     YR_EXPECT_EQ(prepared.scene->bvh.max_depth, 1);
+    YR_EXPECT_TRUE(prepared.elapsed_seconds >= 0.0);
 }
 
 YR_TEST(cpu_backend_prepare_builds_cpu_prepared_scene) {
@@ -76,6 +77,7 @@ YR_TEST(cpu_backend_prepare_builds_cpu_prepared_scene) {
     YR_EXPECT_TRUE(prepared.ok);
     YR_EXPECT_TRUE(prepared.error.empty());
     YR_EXPECT_TRUE(prepared.scene != nullptr);
+    YR_EXPECT_TRUE(prepared.elapsed_seconds >= 0.0);
     YR_EXPECT_EQ(prepared.scene->Kind(), yr::RenderBackendKind::Cpu);
 
     const auto* cpu_scene = dynamic_cast<const yr::CpuPreparedScene*>(prepared.scene.get());

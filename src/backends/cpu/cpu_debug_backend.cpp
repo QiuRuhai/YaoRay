@@ -44,6 +44,7 @@ RenderStats ToRenderStats(const CpuPathTraceStats& stats) {
 
 BackendPrepareResult ToBackendPrepareResult(CpuPrepareResult prepared) {
     BackendPrepareResult result;
+    result.elapsed_seconds = prepared.elapsed_seconds;
     if (!prepared.ok || !prepared.scene.has_value()) {
         result.ok = false;
         result.error = prepared.error.empty() ? "failed to prepare CPU scene" : prepared.error;

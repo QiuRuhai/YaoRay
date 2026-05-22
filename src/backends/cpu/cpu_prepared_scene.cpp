@@ -1,5 +1,6 @@
 #include <yaoray/backends/cpu/cpu_prepared_scene.hpp>
 
+#include <chrono>
 #include <utility>
 
 namespace yr {
@@ -24,7 +25,11 @@ const RenderSceneIR& CpuPreparedScene::Scene() const {
 CpuPrepareResult PrepareCpuScene(const RenderSceneIR& scene) {
     CpuPrepareResult result;
 
+    const auto start = std::chrono::steady_clock::now();
     BvhBuildResult build = BuildBvh(scene.triangles);
+    const auto end = std::chrono::steady_clock::now();
+    result.elapsed_seconds = std::chrono::duration<double>(end - start).count();
+
     if (!build.errors.empty()) {
         result.ok = false;
         result.error = build.errors[0];

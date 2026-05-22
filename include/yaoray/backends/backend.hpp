@@ -46,6 +46,7 @@ struct BackendPrepareResult {
     bool ok = false;
     std::string error;
     std::unique_ptr<PreparedScene> scene;
+    double elapsed_seconds = 0.0;
 };
 
 class RenderBackend {

@@ -24,6 +24,7 @@ struct CpuPrepareResult {
     bool ok = false;
     std::string error;
     std::optional<CpuPreparedScene> scene;
+    double elapsed_seconds = 0.0;
 };
 
 CpuPrepareResult PrepareCpuScene(const RenderSceneIR& scene);
