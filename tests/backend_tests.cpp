@@ -40,6 +40,24 @@ yr::RenderSceneIR MakeBackendTriangleScene(int width = 4, int height = 3) {
     return scene;
 }
 
+class ForeignPreparedScene final : public yr::PreparedScene {
+public:
+    explicit ForeignPreparedScene(const yr::RenderSceneIR& scene)
+        : scene_(&scene) {
+    }
+
+    yr::RenderBackendKind Kind() const override {
+        return yr::RenderBackendKind::Cuda;
+    }
+
+    const yr::RenderSceneIR& SourceScene() const override {
+        return *scene_;
+    }
+
+private:
+    const yr::RenderSceneIR* scene_ = nullptr;
+};
+
 } // namespace
 
 YR_TEST(create_render_backend_returns_cpu_backend) {
@@ -58,16 +76,42 @@ YR_TEST(cpu_prepare_scene_builds_bvh_from_render_scene_ir) {
     YR_EXPECT_TRUE(prepared.error.empty());
     YR_EXPECT_TRUE(prepared.scene.has_value());
     YR_EXPECT_TRUE(prepared.scene->render_scene == &scene);
+    YR_EXPECT_EQ(&prepared.scene->SourceScene(), &scene);
+    YR_EXPECT_EQ(&prepared.scene->Scene(), &scene);
+    YR_EXPECT_EQ(prepared.scene->Kind(), yr::RenderBackendKind::Cpu);
     YR_EXPECT_EQ(prepared.scene->bvh.nodes.size(), std::size_t{1});
     YR_EXPECT_EQ(prepared.scene->bvh.triangle_indices.size(), std::size_t{1});
     YR_EXPECT_EQ(prepared.scene->bvh.max_depth, 1);
+}
+
+YR_TEST(cpu_backend_prepare_builds_cpu_prepared_scene) {
+    const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cpu);
+    const yr::RenderSceneIR scene = MakeBackendTriangleScene(4, 3);
+
+    yr::BackendPrepareResult prepared = backend->Prepare(scene);
+
+    YR_EXPECT_TRUE(prepared.ok);
+    YR_EXPECT_TRUE(prepared.error.empty());
+    YR_EXPECT_TRUE(prepared.scene != nullptr);
+    YR_EXPECT_EQ(prepared.scene->Kind(), yr::RenderBackendKind::Cpu);
+
+    const auto* cpu_scene = dynamic_cast<const yr::CpuPreparedScene*>(prepared.scene.get());
+    YR_EXPECT_TRUE(cpu_scene != nullptr);
+    YR_EXPECT_EQ(&cpu_scene->SourceScene(), &scene);
+    YR_EXPECT_EQ(cpu_scene->bvh.nodes.size(), std::size_t{1});
+    YR_EXPECT_EQ(cpu_scene->bvh.triangle_indices.size(), std::size_t{1});
+    YR_EXPECT_EQ(cpu_scene->bvh.max_depth, 1);
 }
 
 YR_TEST(cpu_backend_renders_film_and_stats) {
     const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cpu);
     const yr::RenderSceneIR scene = MakeBackendTriangleScene(4, 3);
 
-    const yr::RenderResult result = backend->Render(scene, yr::RenderRequest{});
+    yr::BackendPrepareResult prepared = backend->Prepare(scene);
+    YR_EXPECT_TRUE(prepared.ok);
+    YR_EXPECT_TRUE(prepared.scene != nullptr);
+
+    const yr::RenderResult result = backend->Render(*prepared.scene, yr::RenderRequest{});
 
     YR_EXPECT_TRUE(result.ok);
     YR_EXPECT_TRUE(result.error.empty());
@@ -92,7 +136,11 @@ YR_TEST(cpu_backend_dispatches_path_integrator) {
     scene.spp = 4;
     scene.threads = 2;
 
-    const yr::RenderResult result = backend->Render(scene, yr::RenderRequest{});
+    yr::BackendPrepareResult prepared = backend->Prepare(scene);
+    YR_EXPECT_TRUE(prepared.ok);
+    YR_EXPECT_TRUE(prepared.scene != nullptr);
+
+    const yr::RenderResult result = backend->Render(*prepared.scene, yr::RenderRequest{});
 
     YR_EXPECT_TRUE(result.ok);
     YR_EXPECT_TRUE(result.error.empty());
@@ -109,13 +157,29 @@ YR_TEST(cpu_backend_keeps_debug_direct_as_default_integrator) {
     scene.spp = 4;
     scene.threads = 4;
 
-    const yr::RenderResult result = backend->Render(scene, yr::RenderRequest{});
+    yr::BackendPrepareResult prepared = backend->Prepare(scene);
+    YR_EXPECT_TRUE(prepared.ok);
+    YR_EXPECT_TRUE(prepared.scene != nullptr);
+
+    const yr::RenderResult result = backend->Render(*prepared.scene, yr::RenderRequest{});
 
     YR_EXPECT_TRUE(result.ok);
     YR_EXPECT_TRUE(result.film.has_value());
     YR_EXPECT_EQ(result.film->SampleCount(0, 0), 1);
     YR_EXPECT_EQ(result.stats.rays_traced, std::uint64_t{12});
     YR_EXPECT_EQ(result.stats.threads, 1);
+}
+
+YR_TEST(cpu_backend_rejects_non_cpu_prepared_scene) {
+    const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cpu);
+    const yr::RenderSceneIR scene = MakeBackendTriangleScene(1, 1);
+    const ForeignPreparedScene foreign_scene(scene);
+
+    const yr::RenderResult result = backend->Render(foreign_scene, yr::RenderRequest{});
+
+    YR_EXPECT_TRUE(!result.ok);
+    YR_EXPECT_TRUE(!result.film.has_value());
+    YR_EXPECT_TRUE(result.error.find("CPU backend received a non-CPU prepared scene") != std::string::npos);
 }
 
 YR_TEST(create_render_backend_returns_cuda_stub_backend) {
@@ -125,14 +189,26 @@ YR_TEST(create_render_backend_returns_cuda_stub_backend) {
     YR_EXPECT_EQ(backend->Kind(), yr::RenderBackendKind::Cuda);
 }
 
-YR_TEST(cuda_backend_returns_not_implemented_failure) {
+YR_TEST(cuda_backend_prepare_returns_not_implemented_failure) {
     const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cuda);
     yr::RenderSceneIR scene = MakeBackendTriangleScene(1, 1);
     scene.requested_backend = yr::RenderBackendKind::Cuda;
 
-    const yr::RenderResult result = backend->Render(scene, yr::RenderRequest{});
+    yr::BackendPrepareResult prepared = backend->Prepare(scene);
+
+    YR_EXPECT_TRUE(!prepared.ok);
+    YR_EXPECT_TRUE(prepared.scene == nullptr);
+    YR_EXPECT_TRUE(prepared.error.find("CUDA backend preparation is not implemented yet") != std::string::npos);
+}
+
+YR_TEST(cuda_backend_render_returns_not_implemented_failure) {
+    const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cuda);
+    const yr::RenderSceneIR scene = MakeBackendTriangleScene(1, 1);
+    const ForeignPreparedScene prepared(scene);
+
+    const yr::RenderResult result = backend->Render(prepared, yr::RenderRequest{});
 
     YR_EXPECT_TRUE(!result.ok);
     YR_EXPECT_TRUE(!result.film.has_value());
-    YR_EXPECT_TRUE(result.error.find("CUDA backend not implemented yet") != std::string::npos);
+    YR_EXPECT_TRUE(result.error.find("CUDA backend rendering is not implemented yet") != std::string::npos);
 }

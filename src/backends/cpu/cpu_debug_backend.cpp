@@ -4,6 +4,7 @@
 #include <yaoray/backends/cpu/cpu_path_tracer.hpp>
 #include <yaoray/backends/cpu/cpu_prepared_scene.hpp>
 
+#include <memory>
 #include <utility>
 
 namespace yr {
@@ -41,33 +42,51 @@ RenderStats ToRenderStats(const CpuPathTraceStats& stats) {
     return result;
 }
 
-} // namespace
-
-RenderBackendKind CpuDebugBackend::Kind() const {
-    return RenderBackendKind::Cpu;
-}
-
-RenderResult CpuDebugBackend::Render(const RenderSceneIR& scene, const RenderRequest& request) {
-    (void)request;
-
-    RenderResult result;
-
-    CpuPrepareResult prepared = PrepareCpuScene(scene);
+BackendPrepareResult ToBackendPrepareResult(CpuPrepareResult prepared) {
+    BackendPrepareResult result;
     if (!prepared.ok || !prepared.scene.has_value()) {
         result.ok = false;
         result.error = prepared.error.empty() ? "failed to prepare CPU scene" : prepared.error;
         return result;
     }
 
+    CpuPreparedScene& cpu_scene = prepared.scene.value();
     result.ok = true;
-    if (scene.integrator == RenderIntegratorKind::Path) {
-        CpuPathTraceResult path_result = RenderCpuPathTrace(prepared.scene.value());
+    result.scene = std::make_unique<CpuPreparedScene>(cpu_scene.Scene(), std::move(cpu_scene.bvh));
+    return result;
+}
+
+} // namespace
+
+RenderBackendKind CpuDebugBackend::Kind() const {
+    return RenderBackendKind::Cpu;
+}
+
+BackendPrepareResult CpuDebugBackend::Prepare(const RenderSceneIR& scene) {
+    return ToBackendPrepareResult(PrepareCpuScene(scene));
+}
+
+RenderResult CpuDebugBackend::Render(const PreparedScene& scene, const RenderRequest& request) {
+    (void)request;
+
+    RenderResult result;
+    const auto* cpu_scene = dynamic_cast<const CpuPreparedScene*>(&scene);
+    if (scene.Kind() != RenderBackendKind::Cpu || cpu_scene == nullptr) {
+        result.ok = false;
+        result.error = "CPU backend received a non-CPU prepared scene.";
+        return result;
+    }
+
+    const RenderSceneIR& render_scene = cpu_scene->Scene();
+    result.ok = true;
+    if (render_scene.integrator == RenderIntegratorKind::Path) {
+        CpuPathTraceResult path_result = RenderCpuPathTrace(*cpu_scene);
         result.film.emplace(std::move(path_result.film));
         result.stats = ToRenderStats(path_result.stats);
         return result;
     }
 
-    CpuDebugRenderResult debug_result = RenderCpuDebug(prepared.scene.value());
+    CpuDebugRenderResult debug_result = RenderCpuDebug(*cpu_scene);
     result.film.emplace(std::move(debug_result.film));
     result.stats = ToRenderStats(debug_result.stats);
     return result;

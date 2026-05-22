@@ -13,13 +13,22 @@ public:
         return RenderBackendKind::Cuda;
     }
 
-    RenderResult Render(const RenderSceneIR& scene, const RenderRequest& request) override {
+    BackendPrepareResult Prepare(const RenderSceneIR& scene) override {
+        (void)scene;
+
+        BackendPrepareResult result;
+        result.ok = false;
+        result.error = "CUDA backend preparation is not implemented yet.";
+        return result;
+    }
+
+    RenderResult Render(const PreparedScene& scene, const RenderRequest& request) override {
         (void)scene;
         (void)request;
 
         RenderResult result;
         result.ok = false;
-        result.error = "CUDA backend not implemented yet.";
+        result.error = "CUDA backend rendering is not implemented yet.";
         return result;
     }
 };

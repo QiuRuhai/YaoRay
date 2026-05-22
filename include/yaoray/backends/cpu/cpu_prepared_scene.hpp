@@ -3,18 +3,21 @@
 #include <optional>
 #include <string>
 
+#include <yaoray/backends/backend.hpp>
 #include <yaoray/render/bvh.hpp>
-#include <yaoray/render/render_scene.hpp>
 
 namespace yr {
 
-struct CpuPreparedScene {
+struct CpuPreparedScene final : public PreparedScene {
+    CpuPreparedScene() = default;
+    CpuPreparedScene(const RenderSceneIR& scene, RenderBvh prepared_bvh);
+
+    RenderBackendKind Kind() const override;
+    const RenderSceneIR& SourceScene() const override;
+    const RenderSceneIR& Scene() const;
+
     const RenderSceneIR* render_scene = nullptr;
     RenderBvh bvh;
-
-    const RenderSceneIR& Scene() const {
-        return *render_scene;
-    }
 };
 
 struct CpuPrepareResult {

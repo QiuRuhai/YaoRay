@@ -34,12 +34,27 @@ struct RenderResult {
     RenderStats stats;
 };
 
+class PreparedScene {
+public:
+    virtual ~PreparedScene() = default;
+
+    virtual RenderBackendKind Kind() const = 0;
+    virtual const RenderSceneIR& SourceScene() const = 0;
+};
+
+struct BackendPrepareResult {
+    bool ok = false;
+    std::string error;
+    std::unique_ptr<PreparedScene> scene;
+};
+
 class RenderBackend {
 public:
     virtual ~RenderBackend() = default;
 
     virtual RenderBackendKind Kind() const = 0;
-    virtual RenderResult Render(const RenderSceneIR& scene, const RenderRequest& request) = 0;
+    virtual BackendPrepareResult Prepare(const RenderSceneIR& scene) = 0;
+    virtual RenderResult Render(const PreparedScene& scene, const RenderRequest& request) = 0;
 };
 
 std::unique_ptr<RenderBackend> CreateRenderBackend(RenderBackendKind kind);

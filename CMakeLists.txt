@@ -266,7 +266,7 @@ if(BUILD_TESTING)
         SCENE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/builtin_triangle.toml"
         BACKEND cuda
         EXPECT_FAILURE
-        EXPECT_REGEX "CUDA backend not implemented yet"
+        EXPECT_REGEX "Render backend preparation failed: CUDA backend preparation is not implemented yet"
     )
     add_yaoray_cli_render_test(yaoray_cli_render_unsupported_asset
         SCENE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/unsupported_asset.toml"

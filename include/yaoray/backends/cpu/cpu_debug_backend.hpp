@@ -7,7 +7,8 @@ namespace yr {
 class CpuDebugBackend final : public RenderBackend {
 public:
     RenderBackendKind Kind() const override;
-    RenderResult Render(const RenderSceneIR& scene, const RenderRequest& request) override;
+    BackendPrepareResult Prepare(const RenderSceneIR& scene) override;
+    RenderResult Render(const PreparedScene& scene, const RenderRequest& request) override;
 };
 
 } // namespace yr

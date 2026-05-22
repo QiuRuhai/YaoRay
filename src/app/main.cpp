@@ -126,7 +126,15 @@ int RunRender(int argc, char** argv) {
         return 1;
     }
 
-    const yr::RenderResult render_result = backend->Render(render_scene, yr::RenderRequest{});
+    yr::BackendPrepareResult prepare_result = backend->Prepare(render_scene);
+    if (!prepare_result.ok || prepare_result.scene == nullptr) {
+        std::cerr << "Render backend preparation failed: "
+                  << (prepare_result.error.empty() ? "unknown error" : prepare_result.error)
+                  << '\n';
+        return 1;
+    }
+
+    const yr::RenderResult render_result = backend->Render(*prepare_result.scene, yr::RenderRequest{});
     if (!render_result.ok) {
         std::cerr << render_result.error << '\n';
         return 1;
