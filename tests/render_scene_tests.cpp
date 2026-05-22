@@ -63,6 +63,10 @@ std::filesystem::path FixturePath(std::string_view relative) {
     return std::filesystem::path{YAORAY_TEST_DATA_DIR} / std::string{relative};
 }
 
+std::filesystem::path ProjectPath(std::string_view relative) {
+    return std::filesystem::path{YAORAY_TEST_DATA_DIR}.parent_path().parent_path() / std::string{relative};
+}
+
 } // namespace
 
 YR_TEST(render_scene_ir_defaults_are_backend_friendly) {
@@ -711,6 +715,65 @@ YR_TEST(scene_compiler_imports_gltf_tangents) {
     YR_EXPECT_NEAR(triangle.tangent_handedness0, 1.0, 1e-6);
     YR_EXPECT_TRUE(std::isfinite(triangle.t0.x));
     YR_EXPECT_TRUE(yr::LengthSquared(triangle.t0) > 0.0f);
+}
+
+YR_TEST(scene_compiler_compiles_flight_helmet_pbr_fields) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "helmet",
+        ProjectPath("scenes/examples/assets/gltf/FlightHelmet/glTF/FlightHelmet.gltf")
+    });
+    scene.instances.push_back(yr::InstanceDescription{"helmet", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    if (!result.scene.has_value()) {
+        return;
+    }
+
+    const yr::RenderSceneIR& compiled = result.scene.value();
+    YR_EXPECT_TRUE(!compiled.triangles.empty());
+    YR_EXPECT_TRUE(!compiled.materials.empty());
+    YR_EXPECT_TRUE(!compiled.textures.empty());
+
+    bool has_normal_texture = false;
+    bool has_metallic_roughness_texture = false;
+    for (const yr::RenderMaterial& material : compiled.materials) {
+        has_normal_texture = has_normal_texture || material.normal_texture >= 0;
+        has_metallic_roughness_texture =
+            has_metallic_roughness_texture || material.metallic_roughness_texture >= 0;
+    }
+
+    bool has_tangent_triangle = false;
+    for (const yr::RenderTriangle& triangle : compiled.triangles) {
+        has_tangent_triangle = has_tangent_triangle || triangle.has_tangents;
+    }
+
+    YR_EXPECT_TRUE(has_normal_texture);
+    YR_EXPECT_TRUE(has_metallic_roughness_texture);
+    YR_EXPECT_TRUE(has_tangent_triangle);
+}
+
+YR_TEST(scene_compiler_skips_degenerate_imported_gltf_triangles) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{
+        "degenerate",
+        FixturePath("assets/gltf/DegenerateTriangle/glTF/DegenerateTriangle.gltf")
+    });
+    scene.instances.push_back(yr::InstanceDescription{"degenerate", {}});
+
+    const yr::SceneCompileResult result = yr::CompileScene(scene);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "assets.path", "skipping degenerate asset triangle"));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    if (!result.scene.has_value()) {
+        return;
+    }
+
+    YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{1});
 }
 
 YR_TEST(scene_compiler_propagates_gltf_texture_wrap_modes) {

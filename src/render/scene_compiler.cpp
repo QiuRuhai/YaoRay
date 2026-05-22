@@ -751,6 +751,7 @@ bool AppendAssetPrimitive(
     const bool has_uv = primitive.texcoords0.size() == primitive.positions.size();
     const bool has_normals = primitive.normals.size() == primitive.positions.size();
     const std::vector<PrimitiveTangent> primitive_tangents = BuildPrimitiveTangents(primitive, has_uv, has_normals);
+    bool warned_degenerate_triangle = false;
     for (std::size_t index_offset = 0; index_offset < primitive.indices.size(); index_offset += 3) {
         const std::uint32_t i0 = primitive.indices[index_offset + 0];
         const std::uint32_t i1 = primitive.indices[index_offset + 1];
@@ -765,8 +766,11 @@ bool AppendAssetPrimitive(
         const Point3f world_p2 = TransformPoint(transform, primitive.positions[i2]);
         const Vec3f face_normal = Cross(world_p1 - world_p0, world_p2 - world_p0);
         if (LengthSquared(face_normal) <= DegenerateTriangleEpsilon) {
-            diagnostics.push_back(Error(scene, "assets.path", "asset primitive produces degenerate triangle"));
-            return false;
+            if (!warned_degenerate_triangle) {
+                diagnostics.push_back(Warning(scene, "assets.path", "skipping degenerate asset triangle"));
+                warned_degenerate_triangle = true;
+            }
+            continue;
         }
 
         int material_index = override_material_index.value_or(-1);

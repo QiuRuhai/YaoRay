@@ -414,6 +414,32 @@ YR_TEST(gltf_loader_warns_and_preserves_blend_alpha_mode) {
     YR_EXPECT_TRUE(WarningContains(result, "alphaMode BLEND"));
 }
 
+YR_TEST(gltf_loader_loads_flight_helmet_asset) {
+    const yr::AssetLoadResult result = yr::LoadGltfResource(
+        std::filesystem::path{YAORAY_TEST_DATA_DIR}.parent_path().parent_path() /
+        "scenes/examples/assets/gltf/FlightHelmet/glTF/FlightHelmet.gltf"
+    );
+
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_TRUE(result.resource.has_value());
+    if (!result.resource.has_value()) {
+        return;
+    }
+
+    const yr::AssetResource& resource = ResourceValue(result);
+    YR_EXPECT_TRUE(!resource.meshes.empty());
+    YR_EXPECT_TRUE(!resource.materials.empty());
+    YR_EXPECT_TRUE(!resource.textures.empty());
+
+    bool has_tangents = false;
+    for (const yr::AssetMesh& mesh : resource.meshes) {
+        for (const yr::AssetPrimitive& primitive : mesh.primitives) {
+            has_tangents = has_tangents || !primitive.tangents.empty();
+        }
+    }
+    YR_EXPECT_TRUE(has_tangents);
+}
+
 YR_TEST(gltf_loader_rejects_invalid_base_color_texture_index) {
     const yr::AssetLoadResult result = yr::LoadGltfResource(
         FixturePath("assets/gltf/InvalidBaseColorTextureIndex/glTF/InvalidBaseColorTextureIndex.gltf")
