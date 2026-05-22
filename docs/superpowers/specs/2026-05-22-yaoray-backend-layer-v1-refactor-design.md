@@ -306,3 +306,9 @@ No rendered CPU output or stats semantics should change.
 - CUDA requests fail with clear not-implemented errors.
 - Existing CPU tests and CLI render tests pass.
 - Full CTest passes on macOS.
+
+## Implementation Status
+
+Backend Layer v1 is implemented as a two-stage backend lifecycle. `RenderBackend::Prepare()` produces backend-owned prepared-scene data, and `RenderBackend::Render()` consumes a `PreparedScene` instead of raw `RenderSceneIR`.
+
+CPU rendering keeps the existing debug and path integrator behavior through `CpuPreparedScene`, including CPU BVH preparation outside `RenderSceneIR`. CUDA is represented by named `CudaBackend` and `CudaPreparedScene` classes that compile as ordinary C++ on macOS and return controlled not-implemented errors without requiring CUDA headers, kernels, or CMake CUDA language support.

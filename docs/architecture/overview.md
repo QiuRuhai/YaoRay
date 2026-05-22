@@ -4,7 +4,7 @@ YaoRay uses a layered renderer architecture. The current implementation has sema
 
 The semantic layer describes the scene in terms people can author and debug: cameras, lights, assets, instances, material overrides, render settings, and Film settings. The current implementation parses this semantic layer from TOML scene files into `SceneDescription`.
 
-The render layer compiles that semantic scene into backend-neutral input. The current `yaoray_render` slice provides a minimal `RenderSceneIR` with render settings, camera data, environment data, area lights, materials, textures, and flat world-space triangles. Rendering is dispatched through a common backend interface so CPU, CUDA, and future OptiX backends can prepare and consume their own runtime representations without app-layer special cases.
+The render layer compiles that semantic scene into backend-neutral input. The current `yaoray_render` slice provides a minimal `RenderSceneIR` with render settings, camera data, environment data, area lights, materials, textures, and flat world-space triangles. Rendering is dispatched through a two-stage backend interface: each backend first prepares backend-owned runtime data from `RenderSceneIR`, then renders from that prepared scene without app-layer knowledge of CPU BVHs, CUDA buffers, or future OptiX handles.
 
 The CPU backend prepares `CpuPreparedScene` from `RenderSceneIR` by building the CPU `RenderBvh`. The BVH is no longer part of shared compiler output, which keeps later CUDA or OptiX acceleration structures out of the render IR.
 
@@ -15,7 +15,7 @@ Current implemented slices:
 - initial backend-neutral `RenderSceneIR` compilation with temporary `builtin:triangle` asset support
 - CPU rendering with deterministic area-light direct lighting and BVH shadow rays
 - PNG output for renderable scenes, with PPM still available for debug/test output
-- common render backend interface with CPU debug and CUDA not-implemented backends
+- two-stage render backend interface with CPU `CpuPreparedScene` rendering and a named CUDA not-implemented backend placeholder
 - shared `AssetResource` import for OBJ and static glTF/GLB assets through the `yaoray_assets` module
 - CPU backend BVH preparation over compiled render triangles
 - TOML named diffuse, emissive, mirror, metal, plastic, and dielectric/glass materials with instance-level material binding
