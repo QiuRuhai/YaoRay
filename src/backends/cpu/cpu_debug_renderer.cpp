@@ -1,11 +1,12 @@
 #include <yaoray/backends/cpu/cpu_debug_renderer.hpp>
 
+#include <yaoray/backends/cpu/cpu_surface.hpp>
 #include <yaoray/core/ray.hpp>
-#include <yaoray/render/bvh.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 
 namespace yr {
 namespace {
@@ -67,17 +68,18 @@ void AccumulateTraceStats(CpuDebugRenderStats& stats, const BvhTraceStats& trace
 Color3f ShadeHit(
     const CpuPreparedScene& prepared_scene,
     const Ray3f& ray,
-    const BvhHit& hit,
+    const CpuSurfaceHit& hit,
     CpuDebugRenderStats& stats
 ) {
     const RenderSceneIR& scene = prepared_scene.Scene();
-    if (hit.triangle == nullptr || !IsValidMaterialIndex(scene, hit.triangle->material_index)) {
+    if (hit.geometry_hit.triangle == nullptr ||
+        !IsValidMaterialIndex(scene, hit.geometry_hit.triangle->material_index)) {
         return Color3f{1.0f, 0.0f, 1.0f};
     }
 
-    const RenderTriangle& triangle = *hit.triangle;
-    const RenderMaterial& material = scene.materials[static_cast<std::size_t>(triangle.material_index)];
-    const Point3f hit_point = ray.origin + ray.direction * hit.t;
+    const RenderTriangle& triangle = *hit.geometry_hit.triangle;
+    const RenderMaterial& material = hit.sample.material;
+    const Point3f hit_point = ray.origin + ray.direction * hit.geometry_hit.t;
     const Vec3f normal = FaceForward(Normalize(triangle.normal), -ray.direction);
 
     Color3f radiance = material.emission;
@@ -116,9 +118,15 @@ Color3f ShadeHit(
         ++stats.shadow_rays;
         BvhTraceStats shadow_trace;
         const Ray3f shadow_ray{shadow_origin, wi};
-        const BvhHit shadow_hit = IntersectBvh(scene, prepared_scene.bvh, shadow_ray, shadow_trace);
+        const CpuSurfaceHit shadow_hit = TraceVisibleSurface(
+            prepared_scene,
+            shadow_ray,
+            1.0e-5f,
+            shadow_distance - shadow_bias,
+            &shadow_trace
+        );
         AccumulateTraceStats(stats, shadow_trace);
-        if (shadow_hit.hit && shadow_hit.t < shadow_distance - shadow_bias) {
+        if (shadow_hit.hit || shadow_hit.exhausted) {
             ++stats.occluded_shadow_rays;
             continue;
         }
@@ -145,9 +153,15 @@ CpuDebugRenderResult RenderCpuDebug(const CpuPreparedScene& prepared_scene) {
             ++result.stats.rays_traced;
 
             BvhTraceStats trace_stats;
-            const BvhHit hit = IntersectBvh(scene, prepared_scene.bvh, ray, trace_stats);
+            const CpuSurfaceHit hit = TraceVisibleSurface(
+                prepared_scene,
+                ray,
+                1.0e-5f,
+                std::numeric_limits<float>::infinity(),
+                &trace_stats
+            );
             AccumulateTraceStats(result.stats, trace_stats);
-            if (hit.hit && hit.triangle != nullptr) {
+            if (hit.hit && hit.geometry_hit.triangle != nullptr) {
                 ++result.stats.hits;
                 result.film.AddSample(x, y, ShadeHit(prepared_scene, ray, hit, result.stats));
             } else {

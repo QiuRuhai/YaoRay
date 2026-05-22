@@ -92,7 +92,7 @@ RenderEnvironmentDistribution BuildEnvironmentDistribution(const RenderTexture& 
         float row_sum = 0.0f;
         for (int x = 0; x < width; ++x) {
             const std::size_t index = TexelIndex(x, y, width);
-            const Color3f color = index < texture.texels.size() ? texture.texels[index] : Color3f{};
+            const Color3f color = index < texture.texels.size() ? texture.texels[index].rgb() : Color3f{};
             const float weight = Luminance(color) * sin_theta;
             distribution.texel_weights[index] = weight;
             row_sum += weight;

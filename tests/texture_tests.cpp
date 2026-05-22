@@ -1,5 +1,6 @@
 #include "yr_test.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <string>
@@ -139,6 +140,26 @@ YR_TEST(texture_bilinear_single_pixel_returns_only_texel) {
     YR_EXPECT_NEAR(color.z, 0.75, 1e-6);
 }
 
+YR_TEST(texture_sample_texture4_preserves_alpha) {
+    yr::RenderTexture texture;
+    texture.width = 2;
+    texture.height = 1;
+    texture.filter = yr::TextureFilter::Nearest;
+    texture.texels = {
+        yr::Color4f{1.0f, 0.0f, 0.0f, 0.25f},
+        yr::Color4f{0.0f, 1.0f, 0.0f, 0.75f}
+    };
+
+    const yr::Color4f left = yr::SampleTexture4(texture, yr::Vec2f{0.25f, 0.5f});
+    const yr::Color4f right = yr::SampleTexture4(texture, yr::Vec2f{0.75f, 0.5f});
+
+    YR_EXPECT_NEAR(left.x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(left.w, 0.25, 1e-6);
+    YR_EXPECT_NEAR(right.y, 1.0, 1e-6);
+    YR_EXPECT_NEAR(right.w, 0.75, 1e-6);
+    YR_EXPECT_NEAR(yr::SampleTextureAlpha(texture, yr::Vec2f{0.75f, 0.5f}), 0.75, 1e-6);
+}
+
 YR_TEST(texture_srgb_to_linear_uses_standard_transfer_curve) {
     YR_EXPECT_NEAR(yr::SrgbToLinear(0.0f), 0.0, 1e-6);
     YR_EXPECT_NEAR(yr::SrgbToLinear(1.0f), 1.0, 1e-6);
@@ -212,6 +233,44 @@ YR_TEST(texture_loader_rejects_non_png_extension) {
 
     YR_EXPECT_TRUE(!result.ok);
     YR_EXPECT_TRUE(result.error.find(".png") != std::string::npos);
+}
+
+YR_TEST(texture_loader_preserves_png_alpha_channel) {
+    const yr::TextureLoadResult result = yr::LoadPngTexture(TextureFixturePath("assets/gltf/SimpleTexture/glTF/testTexture.png"));
+
+    YR_EXPECT_TRUE(result.ok);
+    YR_EXPECT_TRUE(result.error.empty());
+    YR_EXPECT_TRUE(!result.texture.texels.empty());
+    for (const yr::Color4f& texel : result.texture.texels) {
+        YR_EXPECT_TRUE(texel.w >= 0.0f);
+        YR_EXPECT_TRUE(texel.w <= 1.0f);
+    }
+}
+
+YR_TEST(texture_loader_uses_requested_color_space) {
+    const std::filesystem::path path = TextureFixturePath("assets/gltf/SimpleTexture/glTF/testTexture.png");
+    const yr::TextureLoadResult srgb = yr::LoadPngTexture(path, yr::TextureColorSpace::Srgb);
+    const yr::TextureLoadResult linear = yr::LoadPngTexture(path, yr::TextureColorSpace::Linear);
+
+    YR_EXPECT_TRUE(srgb.ok);
+    YR_EXPECT_TRUE(linear.ok);
+    YR_EXPECT_EQ(srgb.texture.width, linear.texture.width);
+    YR_EXPECT_EQ(srgb.texture.height, linear.texture.height);
+    YR_EXPECT_EQ(srgb.texture.texels.size(), linear.texture.texels.size());
+    YR_EXPECT_EQ(srgb.texture.color_space, yr::TextureColorSpace::Srgb);
+    YR_EXPECT_EQ(linear.texture.color_space, yr::TextureColorSpace::Linear);
+
+    bool found_rgb_difference = false;
+    for (std::size_t index = 0; index < srgb.texture.texels.size(); ++index) {
+        const yr::Color4f srgb_texel = srgb.texture.texels[index];
+        const yr::Color4f linear_texel = linear.texture.texels[index];
+        YR_EXPECT_NEAR(srgb_texel.w, linear_texel.w, 1e-6);
+        found_rgb_difference = found_rgb_difference ||
+                               std::abs(srgb_texel.x - linear_texel.x) > 1.0e-6f ||
+                               std::abs(srgb_texel.y - linear_texel.y) > 1.0e-6f ||
+                               std::abs(srgb_texel.z - linear_texel.z) > 1.0e-6f;
+    }
+    YR_EXPECT_TRUE(found_rgb_difference);
 }
 
 YR_TEST(texture_loader_reports_missing_file) {

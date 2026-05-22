@@ -1,6 +1,8 @@
 #include <yaoray/backends/cpu/cpu_path_tracer.hpp>
 
+#include <yaoray/backends/cpu/cpu_material.hpp>
 #include <yaoray/backends/cpu/cpu_sampler.hpp>
+#include <yaoray/backends/cpu/cpu_surface.hpp>
 #include <yaoray/backends/cpu/cpu_tile_scheduler.hpp>
 #include <yaoray/core/ray.hpp>
 #include <yaoray/render/bvh.hpp>
@@ -8,8 +10,6 @@
 #include <yaoray/render/environment.hpp>
 #include <yaoray/render/light_sampling.hpp>
 #include <yaoray/render/mis.hpp>
-#include <yaoray/render/shading.hpp>
-#include <yaoray/render/texture.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -53,26 +53,6 @@ struct ShadowVisibility {
 
 Color3f Multiply(Color3f a, Color3f b) {
     return Color3f{a.x * b.x, a.y * b.y, a.z * b.z};
-}
-
-RenderMaterial ResolveHitMaterial(
-    const RenderSceneIR& scene,
-    const RenderTriangle& triangle,
-    const RenderMaterial& material,
-    Point3f hit_point
-) {
-    RenderMaterial resolved = material;
-    if (material.albedo_texture < 0 || !triangle.has_uv) {
-        return resolved;
-    }
-    const std::size_t texture_index = static_cast<std::size_t>(material.albedo_texture);
-    if (texture_index >= scene.textures.size()) {
-        return resolved;
-    }
-    const Vec3f barycentric = BarycentricCoordinates(hit_point, triangle);
-    const Vec2f uv = InterpolateUv(triangle, barycentric);
-    resolved.albedo = SampleTexture(scene.textures[texture_index], uv);
-    return resolved;
 }
 
 bool IsNearBlack(Color3f color) {
@@ -235,11 +215,20 @@ ShadowVisibility TraceShadowVisibility(
 
     for (int transparent_hit_count = 0; transparent_hit_count < MaxTransparentShadowHits; ++transparent_hit_count) {
         BvhTraceStats shadow_trace;
-        const BvhHit hit = IntersectBvh(scene, prepared_scene.bvh, ray, shadow_trace);
+        const CpuSurfaceHit surface_hit = TraceVisibleSurface(
+            prepared_scene,
+            ray,
+            1.0e-5f,
+            remaining_distance,
+            &shadow_trace
+        );
         AccumulateTraceStats(stats, shadow_trace);
 
         const bool finite_segment = std::isfinite(remaining_distance);
-        if (!hit.hit || hit.triangle == nullptr || (finite_segment && hit.t >= remaining_distance)) {
+        if (surface_hit.exhausted) {
+            return ShadowVisibility{false, Color3f{}};
+        }
+        if (!surface_hit.hit || surface_hit.geometry_hit.triangle == nullptr) {
             if (medium.active) {
                 if (!finite_segment) {
                     return ShadowVisibility{false, Color3f{}};
@@ -256,21 +245,19 @@ ShadowVisibility TraceShadowVisibility(
         if (medium.active) {
             visibility.transmittance = Multiply(
                 visibility.transmittance,
-                BeerLambertTransmittance(medium.absorption_color, medium.absorption_distance, hit.t)
+                BeerLambertTransmittance(medium.absorption_color, medium.absorption_distance, surface_hit.geometry_hit.t)
             );
             if (IsShadowTransmittanceBlack(visibility.transmittance)) {
                 return ShadowVisibility{false, Color3f{}};
             }
         }
 
-        if (!IsValidMaterialIndex(scene, hit.triangle->material_index)) {
+        if (!IsValidMaterialIndex(scene, surface_hit.geometry_hit.triangle->material_index)) {
             return ShadowVisibility{false, Color3f{}};
         }
 
-        const RenderTriangle& triangle = *hit.triangle;
-        const RenderMaterial& base_material = scene.materials[static_cast<std::size_t>(triangle.material_index)];
-        const Point3f hit_point = ray.At(hit.t);
-        const RenderMaterial material = ResolveHitMaterial(scene, triangle, base_material, hit_point);
+        const Point3f hit_point = ray.At(surface_hit.geometry_hit.t);
+        const RenderMaterial& material = surface_hit.sample.material;
         if (!IsShadowTransparentMaterial(material)) {
             return ShadowVisibility{false, Color3f{}};
         }
@@ -286,7 +273,7 @@ ShadowVisibility TraceShadowVisibility(
 
         const float bias = SurfaceBias(hit_point);
         if (finite_segment) {
-            remaining_distance -= hit.t + bias;
+            remaining_distance -= surface_hit.geometry_hit.t + bias;
             if (remaining_distance <= 0.0f) {
                 visibility.visible = !IsShadowTransmittanceBlack(visibility.transmittance);
                 return visibility;
@@ -489,9 +476,15 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
         ++stats.rays_traced;
 
         BvhTraceStats trace_stats;
-        const BvhHit hit = IntersectBvh(scene, prepared_scene.bvh, ray, trace_stats);
+        const CpuSurfaceHit surface_hit = TraceVisibleSurface(
+            prepared_scene,
+            ray,
+            1.0e-5f,
+            std::numeric_limits<float>::infinity(),
+            &trace_stats
+        );
         AccumulateTraceStats(stats, trace_stats);
-        if (!hit.hit || hit.triangle == nullptr) {
+        if (!surface_hit.hit || surface_hit.geometry_hit.triangle == nullptr || surface_hit.exhausted) {
             ++stats.misses;
             const float environment_weight = EnvironmentHitMisWeight(scene, previous_bounce, ray.direction);
             radiance = radiance + Multiply(throughput, EnvironmentColor(scene, ray.direction)) * environment_weight;
@@ -499,25 +492,20 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
         }
 
         ++stats.hits;
-        ApplyMediumAttenuation(throughput, medium, hit.t);
+        ApplyMediumAttenuation(throughput, medium, surface_hit.geometry_hit.t);
         if (IsNearBlack(throughput)) {
             break;
         }
 
-        if (!IsValidMaterialIndex(scene, hit.triangle->material_index)) {
+        if (!IsValidMaterialIndex(scene, surface_hit.geometry_hit.triangle->material_index)) {
             radiance = radiance + Multiply(throughput, Color3f{1.0f, 0.0f, 1.0f});
             break;
         }
 
-        const RenderTriangle& triangle = *hit.triangle;
-        const RenderMaterial& base_material = scene.materials[static_cast<std::size_t>(triangle.material_index)];
-        const Point3f hit_point = ray.At(hit.t);
-        const RenderMaterial material = ResolveHitMaterial(scene, triangle, base_material, hit_point);
-        const Vec3f geometric_normal = FaceForward(Normalize(triangle.normal), -ray.direction);
-        const Vec3f barycentric = BarycentricCoordinates(hit_point, triangle);
-        const Vec3f normal =
-            FaceForward(ResolveShadingNormal(triangle, barycentric, geometric_normal), geometric_normal);
+        const Point3f hit_point = ray.At(surface_hit.geometry_hit.t);
         const Vec3f wo = -ray.direction;
+        const RenderMaterial& material = surface_hit.sample.material;
+        const Vec3f normal = surface_hit.sample.shading_normal;
 
         if (!IsNearBlack(material.emission)) {
             const float emission_weight = EmissiveHitMisWeight(scene, previous_bounce, hit_point);

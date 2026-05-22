@@ -62,7 +62,9 @@ BvhHit IntersectBvh(
     const RenderSceneIR& scene,
     const RenderBvh& bvh,
     const Ray3f& ray,
-    BvhTraceStats& stats
+    BvhTraceStats& stats,
+    float t_min = 1.0e-5f,
+    float t_max = std::numeric_limits<float>::infinity()
 );
 
 } // namespace yr

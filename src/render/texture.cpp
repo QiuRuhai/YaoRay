@@ -50,17 +50,23 @@ int WrappedTexelIndex(int value, int count, TextureWrap wrap) {
     return wrapped;
 }
 
-Color3f TexelAt(const RenderTexture& texture, int x, int y) {
+Color4f TexelAt(const RenderTexture& texture, int x, int y) {
     const std::size_t index = static_cast<std::size_t>(y) * static_cast<std::size_t>(texture.width) +
                               static_cast<std::size_t>(x);
     if (index >= texture.texels.size()) {
-        return Color3f{};
+        return Color4f{};
     }
     return texture.texels[index];
 }
 
-Color3f Lerp(Color3f a, Color3f b, float t) {
-    return a * (1.0f - t) + b * t;
+Color4f Lerp(Color4f a, Color4f b, float t) {
+    const float one_minus_t = 1.0f - t;
+    return Color4f{
+        a.x * one_minus_t + b.x * t,
+        a.y * one_minus_t + b.y * t,
+        a.z * one_minus_t + b.z * t,
+        a.w * one_minus_t + b.w * t
+    };
 }
 
 std::string LowerExtension(const std::filesystem::path& path) {
@@ -85,16 +91,11 @@ float SrgbToLinear(float value) {
     return std::pow((clamped + 0.055f) / 1.055f, 2.4f);
 }
 
-Color3f SampleTexture(const RenderTexture& texture, Vec2f uv) {
-    if (texture.filter == TextureFilter::Nearest) {
-        return SampleTextureNearest(texture, uv);
-    }
-    return SampleTextureBilinear(texture, uv);
-}
+namespace {
 
-Color3f SampleTextureNearest(const RenderTexture& texture, Vec2f uv) {
+Color4f SampleTextureNearest4(const RenderTexture& texture, Vec2f uv) {
     if (texture.width <= 0 || texture.height <= 0 || texture.texels.empty()) {
-        return Color3f{};
+        return Color4f{};
     }
 
     const int x = NearestIndex(uv.x, texture.width, texture.wrap_s);
@@ -102,9 +103,9 @@ Color3f SampleTextureNearest(const RenderTexture& texture, Vec2f uv) {
     return TexelAt(texture, x, y);
 }
 
-Color3f SampleTextureBilinear(const RenderTexture& texture, Vec2f uv) {
+Color4f SampleTextureBilinear4(const RenderTexture& texture, Vec2f uv) {
     if (texture.width <= 0 || texture.height <= 0 || texture.texels.empty()) {
-        return Color3f{};
+        return Color4f{};
     }
     if (texture.width == 1 && texture.height == 1) {
         return texture.texels[0];
@@ -122,14 +123,44 @@ Color3f SampleTextureBilinear(const RenderTexture& texture, Vec2f uv) {
     const int iy0 = WrappedTexelIndex(y0, texture.height, texture.wrap_t);
     const int iy1 = WrappedTexelIndex(y0 + 1, texture.height, texture.wrap_t);
 
-    const Color3f c00 = TexelAt(texture, ix0, iy0);
-    const Color3f c10 = TexelAt(texture, ix1, iy0);
-    const Color3f c01 = TexelAt(texture, ix0, iy1);
-    const Color3f c11 = TexelAt(texture, ix1, iy1);
+    const Color4f c00 = TexelAt(texture, ix0, iy0);
+    const Color4f c10 = TexelAt(texture, ix1, iy0);
+    const Color4f c01 = TexelAt(texture, ix0, iy1);
+    const Color4f c11 = TexelAt(texture, ix1, iy1);
     return Lerp(Lerp(c00, c10, tx), Lerp(c01, c11, tx), ty);
 }
 
-TextureLoadResult LoadPngTexture(const std::filesystem::path& path) {
+float DecodePngChannel(unsigned char value, TextureColorSpace color_space) {
+    const float normalized = static_cast<float>(value) / 255.0f;
+    return color_space == TextureColorSpace::Srgb ? SrgbToLinear(normalized) : normalized;
+}
+
+} // namespace
+
+Color3f SampleTexture(const RenderTexture& texture, Vec2f uv) {
+    return SampleTexture4(texture, uv).rgb();
+}
+
+Color4f SampleTexture4(const RenderTexture& texture, Vec2f uv) {
+    if (texture.filter == TextureFilter::Nearest) {
+        return SampleTextureNearest4(texture, uv);
+    }
+    return SampleTextureBilinear4(texture, uv);
+}
+
+Color3f SampleTextureNearest(const RenderTexture& texture, Vec2f uv) {
+    return SampleTextureNearest4(texture, uv).rgb();
+}
+
+Color3f SampleTextureBilinear(const RenderTexture& texture, Vec2f uv) {
+    return SampleTextureBilinear4(texture, uv).rgb();
+}
+
+float SampleTextureAlpha(const RenderTexture& texture, Vec2f uv) {
+    return SampleTexture4(texture, uv).w;
+}
+
+TextureLoadResult LoadPngTexture(const std::filesystem::path& path, TextureColorSpace color_space) {
     if (LowerExtension(path) != ".png") {
         return TextureLoadResult{RenderTexture{}, false, "texture path must use a .png extension: " + path.generic_string()};
     }
@@ -153,13 +184,15 @@ TextureLoadResult LoadPngTexture(const std::filesystem::path& path) {
     RenderTexture texture;
     texture.width = width;
     texture.height = height;
+    texture.color_space = color_space;
     texture.texels.reserve(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
     for (int i = 0; i < width * height; ++i) {
         const int base = i * 4;
-        texture.texels.push_back(Color3f{
-            SrgbToLinear(static_cast<float>(pixels[base + 0]) / 255.0f),
-            SrgbToLinear(static_cast<float>(pixels[base + 1]) / 255.0f),
-            SrgbToLinear(static_cast<float>(pixels[base + 2]) / 255.0f)
+        texture.texels.push_back(Color4f{
+            DecodePngChannel(pixels[base + 0], color_space),
+            DecodePngChannel(pixels[base + 1], color_space),
+            DecodePngChannel(pixels[base + 2], color_space),
+            static_cast<float>(pixels[base + 3]) / 255.0f
         });
     }
     stbi_image_free(pixels);
@@ -211,6 +244,7 @@ TextureLoadResult LoadHdrTexture(const std::filesystem::path& path) {
     texture.filter = TextureFilter::Bilinear;
     texture.wrap_s = TextureWrap::Repeat;
     texture.wrap_t = TextureWrap::ClampToEdge;
+    texture.color_space = TextureColorSpace::Linear;
     texture.texels.reserve(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
     for (int i = 0; i < width * height; ++i) {
         const int base = i * 3;
@@ -223,7 +257,7 @@ TextureLoadResult LoadHdrTexture(const std::filesystem::path& path) {
                 "HDR environment contains non-finite texels: " + path.generic_string()
             };
         }
-        texture.texels.push_back(color);
+        texture.texels.push_back(Color4f{color});
     }
     stbi_image_free(pixels);
 

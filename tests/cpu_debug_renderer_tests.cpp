@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include <yaoray/backends/cpu/cpu_debug_renderer.hpp>
 #include <yaoray/render/render_scene.hpp>
@@ -194,6 +195,44 @@ YR_TEST(cpu_debug_renderer_shadow_ray_blocks_direct_light) {
     YR_EXPECT_TRUE(blocked_center.x < unblocked_center.x * 0.1f);
     YR_EXPECT_TRUE(blocked_result.stats.shadow_rays > 0);
     YR_EXPECT_TRUE(blocked_result.stats.occluded_shadow_rays > 0);
+}
+
+YR_TEST(cpu_debug_renderer_alpha_mask_shadow_occluder_is_transparent) {
+    yr::RenderSceneIR unblocked = MakeDebugTriangleScene(3, 3);
+    AddCenterLight(unblocked, yr::Point3f{0.0f, 2.0f, 2.0f}, yr::Color3f{8.0f, 8.0f, 8.0f});
+
+    yr::RenderSceneIR masked = unblocked;
+    yr::RenderMaterial mask_material;
+    mask_material.alpha_mode = yr::RenderAlphaMode::Mask;
+    mask_material.alpha_cutoff = 0.5f;
+    mask_material.albedo_texture = 0;
+    masked.materials.push_back(mask_material);
+    masked.textures.push_back(yr::RenderTexture{
+        1,
+        1,
+        std::vector<yr::Color4f>{yr::Color4f{1.0f, 1.0f, 1.0f, 0.0f}}
+    });
+    yr::RenderTriangle occluder{
+        yr::Point3f{-0.75f, 1.0f, 0.25f},
+        yr::Point3f{0.75f, 1.0f, 0.25f},
+        yr::Point3f{0.0f, 1.0f, 1.75f},
+        yr::Vec3f{0.0f, -1.0f, 0.0f},
+        1
+    };
+    occluder.uv0 = yr::Vec2f{0.0f, 0.0f};
+    occluder.uv1 = yr::Vec2f{1.0f, 0.0f};
+    occluder.uv2 = yr::Vec2f{0.0f, 1.0f};
+    occluder.has_uv = true;
+    masked.triangles.push_back(occluder);
+
+    const yr::CpuDebugRenderResult unblocked_result = yr::RenderCpuDebug(PrepareDebugScene(unblocked));
+    const yr::CpuDebugRenderResult masked_result = yr::RenderCpuDebug(PrepareDebugScene(masked));
+    const yr::Color3f unblocked_center = unblocked_result.film.LinearPixel(1, 1);
+    const yr::Color3f masked_center = masked_result.film.LinearPixel(1, 1);
+
+    YR_EXPECT_TRUE(unblocked_center.x > 0.5f);
+    YR_EXPECT_TRUE(masked_center.x > unblocked_center.x * 0.9f);
+    YR_EXPECT_EQ(masked_result.stats.occluded_shadow_rays, std::uint64_t{0});
 }
 
 YR_TEST(cpu_debug_renderer_does_not_treat_visible_light_panel_as_shadow_occluder_at_large_scale) {

@@ -285,6 +285,28 @@ std::optional<Vec2f> ReadVec2AccessorValue(
     return Vec2f{values[0], values[1]};
 }
 
+std::optional<AssetTangent> ReadTangentAccessorValue(
+    const tinygltf::Model& model,
+    const tinygltf::Accessor& accessor,
+    std::size_t index
+) {
+    if (!AccessorHasBufferView(accessor) ||
+        accessor.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT ||
+        accessor.type != TINYGLTF_TYPE_VEC4 ||
+        index >= accessor.count ||
+        !BufferViewIndexValid(model, accessor.bufferView)) {
+        return std::nullopt;
+    }
+
+    const tinygltf::BufferView& view = model.bufferViews[static_cast<std::size_t>(accessor.bufferView)];
+    const std::byte* data = AccessorData(model, accessor, view, index);
+    if (data == nullptr) {
+        return std::nullopt;
+    }
+    const float* values = reinterpret_cast<const float*>(data);
+    return AssetTangent{Vec3f{values[0], values[1], values[2]}, values[3]};
+}
+
 std::optional<std::uint32_t> ReadIndexAccessorValue(
     const tinygltf::Model& model,
     const tinygltf::Accessor& accessor,
@@ -379,6 +401,57 @@ bool StartsWith(std::string_view value, std::string_view prefix) {
     return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
 }
 
+AssetAlphaMode ConvertAlphaMode(const std::string& alpha_mode, AssetLoadResult& result) {
+    if (alpha_mode == "MASK") {
+        return AssetAlphaMode::Mask;
+    }
+    if (alpha_mode == "BLEND") {
+        result.warnings.push_back(
+            "glTF alphaMode BLEND is preserved but rendered as opaque in this compatibility slice"
+        );
+        return AssetAlphaMode::Blend;
+    }
+    if (alpha_mode != "OPAQUE") {
+        result.warnings.push_back("unsupported glTF alphaMode: " + alpha_mode + "; using opaque");
+    }
+    return AssetAlphaMode::Opaque;
+}
+
+std::optional<int> ValidateMaterialTextureIndex(
+    const tinygltf::Model& model,
+    int texture_index,
+    std::string_view slot_name,
+    AssetLoadResult& result
+) {
+    if (texture_index == -1) {
+        return -1;
+    }
+    if (texture_index < -1 || static_cast<std::size_t>(texture_index) >= model.textures.size()) {
+        result.errors.push_back("invalid " + std::string{slot_name} + " texture index");
+        return std::nullopt;
+    }
+
+    const tinygltf::Texture& texture = model.textures[static_cast<std::size_t>(texture_index)];
+    if (texture.source < 0 || static_cast<std::size_t>(texture.source) >= model.images.size()) {
+        result.errors.push_back(std::string{slot_name} + " texture image source is invalid");
+        return std::nullopt;
+    }
+
+    const tinygltf::Image& image = model.images[static_cast<std::size_t>(texture.source)];
+    if (StartsWith(image.uri, "data:")) {
+        result.errors.push_back(std::string{slot_name} + " texture image data URI is unsupported");
+        return std::nullopt;
+    }
+    if (image.uri.empty()) {
+        result.errors.push_back(
+            std::string{slot_name} + " texture image requires an external image URI; embedded images and data URI textures are unsupported"
+        );
+        return std::nullopt;
+    }
+
+    return texture_index;
+}
+
 std::optional<AssetMaterial> ConvertMaterial(
     const tinygltf::Model& model,
     const tinygltf::Material& material,
@@ -392,6 +465,7 @@ std::optional<AssetMaterial> ConvertMaterial(
         static_cast<float>(pbr.baseColorFactor[1]),
         static_cast<float>(pbr.baseColorFactor[2])
     };
+    imported.base_color_alpha = static_cast<float>(pbr.baseColorFactor[3]);
     imported.emission = Color3f{
         static_cast<float>(material.emissiveFactor[0]),
         static_cast<float>(material.emissiveFactor[1]),
@@ -408,35 +482,45 @@ std::optional<AssetMaterial> ConvertMaterial(
         imported.approximate_type = MaterialKind::Diffuse;
     }
 
-    if (pbr.baseColorTexture.index >= 0) {
-        if (static_cast<std::size_t>(pbr.baseColorTexture.index) >= model.textures.size()) {
-            result.errors.push_back("invalid base color texture index");
-            return std::nullopt;
-        }
-
-        const tinygltf::Texture& texture = model.textures[static_cast<std::size_t>(pbr.baseColorTexture.index)];
-        if (texture.source < 0 || static_cast<std::size_t>(texture.source) >= model.images.size()) {
-            result.errors.push_back("base color texture image source is invalid");
-            return std::nullopt;
-        }
-
-        const tinygltf::Image& image = model.images[static_cast<std::size_t>(texture.source)];
-        if (StartsWith(image.uri, "data:")) {
-            result.errors.push_back("base color texture image data URI is unsupported");
-            return std::nullopt;
-        }
-        if (image.uri.empty()) {
-            result.errors.push_back(
-                "base color texture image requires an external image URI; embedded images and data URI textures are unsupported"
-            );
-            return std::nullopt;
-        }
-
-        imported.base_color_texture = pbr.baseColorTexture.index;
-    } else if (pbr.baseColorTexture.index < -1) {
-        result.errors.push_back("invalid base color texture index");
+    const std::optional<int> base_color_texture =
+        ValidateMaterialTextureIndex(model, pbr.baseColorTexture.index, "base color", result);
+    if (!base_color_texture.has_value()) {
         return std::nullopt;
     }
+    imported.base_color_texture = *base_color_texture;
+
+    const std::optional<int> metallic_roughness_texture =
+        ValidateMaterialTextureIndex(model, pbr.metallicRoughnessTexture.index, "metallic-roughness", result);
+    if (!metallic_roughness_texture.has_value()) {
+        return std::nullopt;
+    }
+    imported.metallic_roughness_texture = *metallic_roughness_texture;
+
+    const std::optional<int> normal_texture =
+        ValidateMaterialTextureIndex(model, material.normalTexture.index, "normal", result);
+    if (!normal_texture.has_value()) {
+        return std::nullopt;
+    }
+    imported.normal_texture = *normal_texture;
+    imported.normal_scale = static_cast<float>(material.normalTexture.scale);
+
+    const std::optional<int> occlusion_texture =
+        ValidateMaterialTextureIndex(model, material.occlusionTexture.index, "occlusion", result);
+    if (!occlusion_texture.has_value()) {
+        return std::nullopt;
+    }
+    imported.occlusion_texture = *occlusion_texture;
+    imported.occlusion_strength = static_cast<float>(material.occlusionTexture.strength);
+
+    const std::optional<int> emissive_texture =
+        ValidateMaterialTextureIndex(model, material.emissiveTexture.index, "emissive", result);
+    if (!emissive_texture.has_value()) {
+        return std::nullopt;
+    }
+    imported.emissive_texture = *emissive_texture;
+    imported.alpha_mode = ConvertAlphaMode(material.alphaMode, result);
+    imported.alpha_cutoff = static_cast<float>(material.alphaCutoff);
+    imported.double_sided = material.doubleSided;
     return imported;
 }
 
@@ -523,6 +607,26 @@ bool AppendPrimitiveResource(
                 return false;
             }
             imported.texcoords0.push_back(*uv);
+        }
+    }
+
+    if (const auto found = primitive.attributes.find("TANGENT"); found != primitive.attributes.end()) {
+        const std::optional<const tinygltf::Accessor*> tangent_accessor = GetAccessor(model, found->second);
+        if (!tangent_accessor.has_value()) {
+            result.errors.push_back("glTF primitive references an invalid TANGENT accessor");
+            return false;
+        }
+        if ((**tangent_accessor).count != (**position_accessor).count) {
+            result.errors.push_back("glTF TANGENT accessor count must match POSITION accessor count");
+            return false;
+        }
+        for (std::size_t vertex = 0; vertex < (**tangent_accessor).count; ++vertex) {
+            const std::optional<AssetTangent> tangent = ReadTangentAccessorValue(model, **tangent_accessor, vertex);
+            if (!tangent.has_value()) {
+                result.errors.push_back("glTF primitive has invalid TANGENT data");
+                return false;
+            }
+            imported.tangents.push_back(*tangent);
         }
     }
 
