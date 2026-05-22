@@ -38,6 +38,9 @@ Color3f SampleTextureNearest(const RenderTexture& texture, Vec2f uv);
 Color3f SampleTextureBilinear(const RenderTexture& texture, Vec2f uv);
 float SampleTextureAlpha(const RenderTexture& texture, Vec2f uv);
 
+TextureLoadResult LoadLdrTexture(
+    const std::filesystem::path& path,
+    TextureColorSpace color_space = TextureColorSpace::Srgb);
 TextureLoadResult LoadPngTexture(
     const std::filesystem::path& path,
     TextureColorSpace color_space = TextureColorSpace::Srgb);

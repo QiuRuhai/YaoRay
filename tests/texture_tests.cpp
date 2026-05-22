@@ -194,6 +194,65 @@ YR_TEST(texture_loader_reads_png_texels) {
     YR_EXPECT_NEAR(result.texture.texels[3].z, 1.0, 1e-6);
 }
 
+YR_TEST(texture_loader_reads_jpeg_texels) {
+    const yr::TextureLoadResult result = yr::LoadLdrTexture(TextureFixturePath("assets/checker_2x2.jpg"));
+
+    YR_EXPECT_TRUE(result.ok);
+    YR_EXPECT_TRUE(result.error.empty());
+    YR_EXPECT_EQ(result.texture.width, 2);
+    YR_EXPECT_EQ(result.texture.height, 2);
+    YR_EXPECT_EQ(result.texture.filter, yr::TextureFilter::Bilinear);
+    YR_EXPECT_EQ(result.texture.wrap_s, yr::TextureWrap::Repeat);
+    YR_EXPECT_EQ(result.texture.wrap_t, yr::TextureWrap::Repeat);
+    YR_EXPECT_EQ(result.texture.color_space, yr::TextureColorSpace::Srgb);
+    YR_EXPECT_EQ(result.texture.texels.size(), std::size_t{4});
+    for (const yr::Color4f& texel : result.texture.texels) {
+        YR_EXPECT_TRUE(texel.x >= 0.0f);
+        YR_EXPECT_TRUE(texel.x <= 1.0f);
+        YR_EXPECT_TRUE(texel.y >= 0.0f);
+        YR_EXPECT_TRUE(texel.y <= 1.0f);
+        YR_EXPECT_TRUE(texel.z >= 0.0f);
+        YR_EXPECT_TRUE(texel.z <= 1.0f);
+        YR_EXPECT_NEAR(texel.w, 1.0, 1e-6);
+    }
+}
+
+YR_TEST(texture_loader_uses_requested_color_space_for_jpeg) {
+    const std::filesystem::path path = TextureFixturePath("assets/checker_2x2.jpg");
+    const yr::TextureLoadResult srgb = yr::LoadLdrTexture(path, yr::TextureColorSpace::Srgb);
+    const yr::TextureLoadResult linear = yr::LoadLdrTexture(path, yr::TextureColorSpace::Linear);
+
+    YR_EXPECT_TRUE(srgb.ok);
+    YR_EXPECT_TRUE(linear.ok);
+    YR_EXPECT_EQ(srgb.texture.width, linear.texture.width);
+    YR_EXPECT_EQ(srgb.texture.height, linear.texture.height);
+    YR_EXPECT_EQ(srgb.texture.texels.size(), linear.texture.texels.size());
+    YR_EXPECT_EQ(srgb.texture.color_space, yr::TextureColorSpace::Srgb);
+    YR_EXPECT_EQ(linear.texture.color_space, yr::TextureColorSpace::Linear);
+
+    bool found_rgb_difference = false;
+    for (std::size_t index = 0; index < srgb.texture.texels.size(); ++index) {
+        const yr::Color4f srgb_texel = srgb.texture.texels[index];
+        const yr::Color4f linear_texel = linear.texture.texels[index];
+        YR_EXPECT_NEAR(srgb_texel.w, 1.0, 1e-6);
+        YR_EXPECT_NEAR(linear_texel.w, 1.0, 1e-6);
+        found_rgb_difference = found_rgb_difference ||
+                               std::abs(srgb_texel.x - linear_texel.x) > 1.0e-6f ||
+                               std::abs(srgb_texel.y - linear_texel.y) > 1.0e-6f ||
+                               std::abs(srgb_texel.z - linear_texel.z) > 1.0e-6f;
+    }
+    YR_EXPECT_TRUE(found_rgb_difference);
+}
+
+YR_TEST(texture_loader_rejects_unsupported_ldr_extension) {
+    const yr::TextureLoadResult result = yr::LoadLdrTexture(TextureFixturePath("assets/triangle.obj"));
+
+    YR_EXPECT_TRUE(!result.ok);
+    YR_EXPECT_TRUE(result.error.find(".png") != std::string::npos);
+    YR_EXPECT_TRUE(result.error.find(".jpg") != std::string::npos);
+    YR_EXPECT_TRUE(result.error.find(".jpeg") != std::string::npos);
+}
+
 YR_TEST(texture_loader_reads_hdr_texels_as_linear_float) {
     const yr::TextureLoadResult result = yr::LoadHdrTexture(TextureFixturePath("assets/tiny_env.hdr"));
 
@@ -274,7 +333,7 @@ YR_TEST(texture_loader_uses_requested_color_space) {
 }
 
 YR_TEST(texture_loader_reports_missing_file) {
-    const yr::TextureLoadResult result = yr::LoadPngTexture(TextureFixturePath("assets/missing_texture.png"));
+    const yr::TextureLoadResult result = yr::LoadLdrTexture(TextureFixturePath("assets/missing_texture.jpg"));
 
     YR_EXPECT_TRUE(!result.ok);
     YR_EXPECT_TRUE(result.error.find("not found") != std::string::npos);

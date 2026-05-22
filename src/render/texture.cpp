@@ -8,6 +8,7 @@
 #include <cmath>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace yr {
@@ -130,7 +131,11 @@ Color4f SampleTextureBilinear4(const RenderTexture& texture, Vec2f uv) {
     return Lerp(Lerp(c00, c10, tx), Lerp(c01, c11, tx), ty);
 }
 
-float DecodePngChannel(unsigned char value, TextureColorSpace color_space) {
+bool IsSupportedLdrExtension(std::string_view extension) {
+    return extension == ".png" || extension == ".jpg" || extension == ".jpeg";
+}
+
+float DecodeLdrChannel(unsigned char value, TextureColorSpace color_space) {
     const float normalized = static_cast<float>(value) / 255.0f;
     return color_space == TextureColorSpace::Srgb ? SrgbToLinear(normalized) : normalized;
 }
@@ -160,9 +165,14 @@ float SampleTextureAlpha(const RenderTexture& texture, Vec2f uv) {
     return SampleTexture4(texture, uv).w;
 }
 
-TextureLoadResult LoadPngTexture(const std::filesystem::path& path, TextureColorSpace color_space) {
-    if (LowerExtension(path) != ".png") {
-        return TextureLoadResult{RenderTexture{}, false, "texture path must use a .png extension: " + path.generic_string()};
+TextureLoadResult LoadLdrTexture(const std::filesystem::path& path, TextureColorSpace color_space) {
+    const std::string extension = LowerExtension(path);
+    if (!IsSupportedLdrExtension(extension)) {
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "texture path must use a .png, .jpg, or .jpeg extension: " + path.generic_string()
+        };
     }
     if (!std::filesystem::exists(path)) {
         return TextureLoadResult{RenderTexture{}, false, "texture file not found: " + path.generic_string()};
@@ -177,7 +187,16 @@ TextureLoadResult LoadPngTexture(const std::filesystem::path& path, TextureColor
         return TextureLoadResult{
             RenderTexture{},
             false,
-            "failed to load PNG texture: " + path.generic_string() + (reason == nullptr ? "" : std::string{" ("} + reason + ")")
+            "failed to load LDR texture: " + path.generic_string() +
+                (reason == nullptr ? "" : std::string{" ("} + reason + ")")
+        };
+    }
+    if (width <= 0 || height <= 0) {
+        stbi_image_free(pixels);
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "LDR texture has invalid dimensions: " + path.generic_string()
         };
     }
 
@@ -189,15 +208,22 @@ TextureLoadResult LoadPngTexture(const std::filesystem::path& path, TextureColor
     for (int i = 0; i < width * height; ++i) {
         const int base = i * 4;
         texture.texels.push_back(Color4f{
-            DecodePngChannel(pixels[base + 0], color_space),
-            DecodePngChannel(pixels[base + 1], color_space),
-            DecodePngChannel(pixels[base + 2], color_space),
+            DecodeLdrChannel(pixels[base + 0], color_space),
+            DecodeLdrChannel(pixels[base + 1], color_space),
+            DecodeLdrChannel(pixels[base + 2], color_space),
             static_cast<float>(pixels[base + 3]) / 255.0f
         });
     }
     stbi_image_free(pixels);
 
     return TextureLoadResult{std::move(texture), true, {}};
+}
+
+TextureLoadResult LoadPngTexture(const std::filesystem::path& path, TextureColorSpace color_space) {
+    if (LowerExtension(path) != ".png") {
+        return TextureLoadResult{RenderTexture{}, false, "texture path must use a .png extension: " + path.generic_string()};
+    }
+    return LoadLdrTexture(path, color_space);
 }
 
 TextureLoadResult LoadHdrTexture(const std::filesystem::path& path) {
