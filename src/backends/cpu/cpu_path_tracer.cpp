@@ -1,5 +1,6 @@
 #include <yaoray/backends/cpu/cpu_path_tracer.hpp>
 
+#include <yaoray/backends/cpu/cpu_material.hpp>
 #include <yaoray/backends/cpu/cpu_sampler.hpp>
 #include <yaoray/backends/cpu/cpu_tile_scheduler.hpp>
 #include <yaoray/core/ray.hpp>
@@ -9,7 +10,6 @@
 #include <yaoray/render/light_sampling.hpp>
 #include <yaoray/render/mis.hpp>
 #include <yaoray/render/shading.hpp>
-#include <yaoray/render/texture.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -53,26 +53,6 @@ struct ShadowVisibility {
 
 Color3f Multiply(Color3f a, Color3f b) {
     return Color3f{a.x * b.x, a.y * b.y, a.z * b.z};
-}
-
-RenderMaterial ResolveHitMaterial(
-    const RenderSceneIR& scene,
-    const RenderTriangle& triangle,
-    const RenderMaterial& material,
-    Point3f hit_point
-) {
-    RenderMaterial resolved = material;
-    if (material.albedo_texture < 0 || !triangle.has_uv) {
-        return resolved;
-    }
-    const std::size_t texture_index = static_cast<std::size_t>(material.albedo_texture);
-    if (texture_index >= scene.textures.size()) {
-        return resolved;
-    }
-    const Vec3f barycentric = BarycentricCoordinates(hit_point, triangle);
-    const Vec2f uv = InterpolateUv(triangle, barycentric);
-    resolved.albedo = SampleTexture(scene.textures[texture_index], uv);
-    return resolved;
 }
 
 bool IsNearBlack(Color3f color) {
@@ -270,7 +250,16 @@ ShadowVisibility TraceShadowVisibility(
         const RenderTriangle& triangle = *hit.triangle;
         const RenderMaterial& base_material = scene.materials[static_cast<std::size_t>(triangle.material_index)];
         const Point3f hit_point = ray.At(hit.t);
-        const RenderMaterial material = ResolveHitMaterial(scene, triangle, base_material, hit_point);
+        const Vec3f barycentric = BarycentricCoordinates(hit_point, triangle);
+        const ResolvedMaterialSample material_sample = ResolveCpuMaterialSample(
+            scene,
+            triangle,
+            base_material,
+            barycentric,
+            Normalize(triangle.normal),
+            -ray.direction
+        );
+        const RenderMaterial& material = material_sample.material;
         if (!IsShadowTransparentMaterial(material)) {
             return ShadowVisibility{false, Color3f{}};
         }
@@ -512,12 +501,19 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
         const RenderTriangle& triangle = *hit.triangle;
         const RenderMaterial& base_material = scene.materials[static_cast<std::size_t>(triangle.material_index)];
         const Point3f hit_point = ray.At(hit.t);
-        const RenderMaterial material = ResolveHitMaterial(scene, triangle, base_material, hit_point);
         const Vec3f geometric_normal = FaceForward(Normalize(triangle.normal), -ray.direction);
         const Vec3f barycentric = BarycentricCoordinates(hit_point, triangle);
-        const Vec3f normal =
-            FaceForward(ResolveShadingNormal(triangle, barycentric, geometric_normal), geometric_normal);
         const Vec3f wo = -ray.direction;
+        const ResolvedMaterialSample material_sample = ResolveCpuMaterialSample(
+            scene,
+            triangle,
+            base_material,
+            barycentric,
+            geometric_normal,
+            wo
+        );
+        const RenderMaterial& material = material_sample.material;
+        const Vec3f normal = material_sample.shading_normal;
 
         if (!IsNearBlack(material.emission)) {
             const float emission_weight = EmissiveHitMisWeight(scene, previous_bounce, hit_point);

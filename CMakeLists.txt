@@ -73,6 +73,7 @@ add_library(yaoray_backends STATIC
     src/backends/backend.cpp
     src/backends/cpu/cpu_debug_backend.cpp
     src/backends/cpu/cpu_debug_renderer.cpp
+    src/backends/cpu/cpu_material.cpp
     src/backends/cpu/cpu_prepared_scene.cpp
     src/backends/cpu/cpu_tile_scheduler.cpp
     src/backends/cpu/cpu_sampler.cpp
@@ -98,6 +99,7 @@ add_executable(yaoray_tests
     tests/light_sampling_tests.cpp
     tests/texture_tests.cpp
     tests/backend_tests.cpp
+    tests/cpu_material_tests.cpp
     tests/cpu_debug_renderer_tests.cpp
     tests/cpu_tile_scheduler_tests.cpp
     tests/cpu_sampler_tests.cpp
