@@ -77,6 +77,8 @@ add_library(yaoray_backends STATIC
     src/backends/cpu/cpu_tile_scheduler.cpp
     src/backends/cpu/cpu_sampler.cpp
     src/backends/cpu/cpu_path_tracer.cpp
+    src/backends/cuda/cuda_backend.cpp
+    src/backends/cuda/cuda_prepared_scene.cpp
 )
 target_include_directories(yaoray_backends PUBLIC include)
 target_link_libraries(yaoray_backends PUBLIC yaoray_core yaoray_film yaoray_render)

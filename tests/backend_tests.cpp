@@ -7,6 +7,7 @@
 
 #include <yaoray/backends/backend.hpp>
 #include <yaoray/backends/cpu/cpu_prepared_scene.hpp>
+#include <yaoray/backends/cuda/cuda_prepared_scene.hpp>
 #include <yaoray/render/render_scene.hpp>
 
 namespace {
@@ -39,24 +40,6 @@ yr::RenderSceneIR MakeBackendTriangleScene(int width = 4, int height = 3) {
     });
     return scene;
 }
-
-class ForeignPreparedScene final : public yr::PreparedScene {
-public:
-    explicit ForeignPreparedScene(const yr::RenderSceneIR& scene)
-        : scene_(&scene) {
-    }
-
-    yr::RenderBackendKind Kind() const override {
-        return yr::RenderBackendKind::Cuda;
-    }
-
-    const yr::RenderSceneIR& SourceScene() const override {
-        return *scene_;
-    }
-
-private:
-    const yr::RenderSceneIR* scene_ = nullptr;
-};
 
 } // namespace
 
@@ -173,13 +156,22 @@ YR_TEST(cpu_backend_keeps_debug_direct_as_default_integrator) {
 YR_TEST(cpu_backend_rejects_non_cpu_prepared_scene) {
     const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cpu);
     const yr::RenderSceneIR scene = MakeBackendTriangleScene(1, 1);
-    const ForeignPreparedScene foreign_scene(scene);
+    const yr::CudaPreparedScene cuda_scene(scene);
 
-    const yr::RenderResult result = backend->Render(foreign_scene, yr::RenderRequest{});
+    const yr::RenderResult result = backend->Render(cuda_scene, yr::RenderRequest{});
 
     YR_EXPECT_TRUE(!result.ok);
     YR_EXPECT_TRUE(!result.film.has_value());
     YR_EXPECT_TRUE(result.error.find("CPU backend received a non-CPU prepared scene") != std::string::npos);
+}
+
+YR_TEST(cuda_prepared_scene_exposes_source_scene) {
+    const yr::RenderSceneIR scene = MakeBackendTriangleScene(2, 2);
+
+    const yr::CudaPreparedScene prepared(scene);
+
+    YR_EXPECT_EQ(prepared.Kind(), yr::RenderBackendKind::Cuda);
+    YR_EXPECT_EQ(&prepared.SourceScene(), &scene);
 }
 
 YR_TEST(create_render_backend_returns_cuda_stub_backend) {
@@ -204,7 +196,7 @@ YR_TEST(cuda_backend_prepare_returns_not_implemented_failure) {
 YR_TEST(cuda_backend_render_returns_not_implemented_failure) {
     const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cuda);
     const yr::RenderSceneIR scene = MakeBackendTriangleScene(1, 1);
-    const ForeignPreparedScene prepared(scene);
+    const yr::CudaPreparedScene prepared(scene);
 
     const yr::RenderResult result = backend->Render(prepared, yr::RenderRequest{});
 
