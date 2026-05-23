@@ -16,6 +16,15 @@ output = "out/local_sponza.png"
 tone_mapper = "aces"
 exposure = 0.0
 
+[offline]
+progress = true
+progress_interval_seconds = 5
+checkpoint_png = "out/local_sponza.checkpoint.png"
+checkpoint_png_interval_seconds = 60
+checkpoint_state = "out/local_sponza.yrcheckpoint"
+checkpoint_state_interval_seconds = 60
+resume = false
+
 [camera]
 type = "perspective"
 position = [0.0, 1.2, 6.0]

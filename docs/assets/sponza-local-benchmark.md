@@ -29,8 +29,15 @@ and textures stay local.
 cmake --build build --config Debug
 ./build/yaoray render scenes/examples/local_sponza.toml --backend cpu
 test -s scenes/examples/out/local_sponza.png
+test -s scenes/examples/out/local_sponza.checkpoint.png
+test -s scenes/examples/out/local_sponza.yrcheckpoint
 ```
 
 The smoke render is intentionally low resolution and low sample count. It proves
 that the native glTF asset path, decoded texture path, CPU BVH prepare, and CPU
 path tracer can handle a larger scene. It is not a final quality preset.
+
+To resume a later run, set `resume = true` in `[offline]`. YaoRay validates the
+checkpoint against the current render settings before continuing. If the scene,
+resolution, target spp, seed, camera, or compiled resource counts change, resume
+fails instead of mixing incompatible samples.
