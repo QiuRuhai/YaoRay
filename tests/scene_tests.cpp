@@ -106,6 +106,13 @@ YR_TEST(scene_defaults_match_schema) {
     YR_EXPECT_NEAR(scene.render.radiance_clamp, 0.0, 1e-6);
     YR_EXPECT_EQ(scene.film.tone_mapper, yr::ToneMapperKind::Aces);
     YR_EXPECT_NEAR(scene.film.exposure, 0.0, 1e-6);
+    YR_EXPECT_TRUE(!scene.offline.progress);
+    YR_EXPECT_EQ(scene.offline.progress_interval_seconds, 5);
+    YR_EXPECT_EQ(scene.offline.checkpoint_png.generic_string(), std::string{});
+    YR_EXPECT_EQ(scene.offline.checkpoint_png_interval_seconds, 60);
+    YR_EXPECT_EQ(scene.offline.checkpoint_state.generic_string(), std::string{});
+    YR_EXPECT_EQ(scene.offline.checkpoint_state_interval_seconds, 60);
+    YR_EXPECT_TRUE(!scene.offline.resume);
     YR_EXPECT_EQ(scene.environment.type, yr::EnvironmentKind::None);
     YR_EXPECT_TRUE(scene.materials.empty());
     YR_EXPECT_TRUE(scene.assets.empty());
@@ -380,6 +387,150 @@ fov_y = 45
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
     YR_EXPECT_EQ(result.scene.value().render.integrator, yr::RenderIntegratorKind::Path);
+}
+
+YR_TEST(scene_parser_loads_offline_settings) {
+    const std::filesystem::path path = WriteTempScene(
+        "offline_settings.toml",
+        ValidSceneWith(R"toml(
+[offline]
+progress = true
+progress_interval_seconds = 2
+checkpoint_png = "out/progress.png"
+checkpoint_png_interval_seconds = 3
+checkpoint_state = "out/progress.yrcheckpoint"
+checkpoint_state_interval_seconds = 4
+resume = true
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::SceneDescription& scene = result.scene.value();
+    const std::filesystem::path dir = path.parent_path();
+    YR_EXPECT_TRUE(scene.offline.progress);
+    YR_EXPECT_EQ(scene.offline.progress_interval_seconds, 2);
+    YR_EXPECT_EQ(scene.offline.checkpoint_png.generic_string(), (dir / "out/progress.png").lexically_normal().generic_string());
+    YR_EXPECT_EQ(scene.offline.checkpoint_png_interval_seconds, 3);
+    YR_EXPECT_EQ(scene.offline.checkpoint_state.generic_string(), (dir / "out/progress.yrcheckpoint").lexically_normal().generic_string());
+    YR_EXPECT_EQ(scene.offline.checkpoint_state_interval_seconds, 4);
+    YR_EXPECT_TRUE(scene.offline.resume);
+}
+
+YR_TEST(scene_parser_rejects_offline_resume_without_state_path) {
+    const std::filesystem::path path = WriteTempScene(
+        "offline_resume_without_state.toml",
+        ValidSceneWith(R"toml(
+[offline]
+resume = true
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "offline.resume", "requires offline.checkpoint_state"));
+}
+
+YR_TEST(scene_parser_rejects_offline_bad_extensions_and_intervals) {
+    const std::filesystem::path path = WriteTempScene(
+        "offline_bad_fields.toml",
+        ValidSceneWith(R"toml(
+[offline]
+progress = true
+progress_interval_seconds = 0
+checkpoint_png = "out/progress.ppm"
+checkpoint_png_interval_seconds = 0
+checkpoint_state = "out/progress.bin"
+checkpoint_state_interval_seconds = 0
+)toml")
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "offline.progress_interval_seconds", "must be positive"));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "offline.checkpoint_png", "must use a .png extension"));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "offline.checkpoint_png_interval_seconds", "must be positive"));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "offline.checkpoint_state", "must use a .yrcheckpoint extension"));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "offline.checkpoint_state_interval_seconds", "must be positive"));
+}
+
+YR_TEST(scene_parser_maps_deprecated_film_checkpoint_aliases_to_offline_preview) {
+    const std::filesystem::path path = WriteTempScene(
+        "film_checkpoint_alias.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+checkpoint_path = "out/alias.png"
+checkpoint_interval_s = 9
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::SceneDescription& scene = result.scene.value();
+    YR_EXPECT_EQ(scene.offline.checkpoint_png.generic_string(), (path.parent_path() / "out/alias.png").lexically_normal().generic_string());
+    YR_EXPECT_EQ(scene.offline.checkpoint_png_interval_seconds, 9);
+}
+
+YR_TEST(scene_parser_warns_when_offline_overrides_film_checkpoint_aliases) {
+    const std::filesystem::path path = WriteTempScene(
+        "offline_wins_over_film_alias.toml",
+        ValidScene(
+            R"toml(
+[render]
+width = 64
+height = 32
+)toml",
+            R"toml(
+[film]
+output = "out/test.png"
+checkpoint_path = "out/alias.png"
+checkpoint_interval_s = 9
+)toml",
+            R"toml(
+[camera]
+type = "perspective"
+position = [0, 1, 4]
+target = [0, 1, 0]
+fov_y = 45
+)toml",
+            R"toml(
+[offline]
+checkpoint_png = "out/offline.png"
+checkpoint_png_interval_seconds = 3
+)toml"
+        )
+    );
+
+    const yr::SceneLoadResult result = yr::LoadSceneFile(path);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "film.checkpoint_path", "deprecated"));
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "film.checkpoint_interval_s", "deprecated"));
+    const yr::SceneDescription& scene = result.scene.value();
+    YR_EXPECT_EQ(scene.offline.checkpoint_png.generic_string(), (path.parent_path() / "out/offline.png").lexically_normal().generic_string());
+    YR_EXPECT_EQ(scene.offline.checkpoint_png_interval_seconds, 3);
 }
 
 YR_TEST(scene_parser_loads_independent_render_sampler) {

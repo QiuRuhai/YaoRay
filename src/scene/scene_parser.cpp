@@ -2,7 +2,9 @@
 
 #include <toml.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -22,12 +24,28 @@ SceneDiagnostic Error(const std::filesystem::path& file, std::string field, std:
     return SceneDiagnostic{DiagnosticSeverity::Error, file, std::move(field), std::move(message)};
 }
 
+SceneDiagnostic Warning(const std::filesystem::path& file, std::string field, std::string message) {
+    return SceneDiagnostic{DiagnosticSeverity::Warning, file, std::move(field), std::move(message)};
+}
+
 std::filesystem::path NormalizeScenePath(const std::filesystem::path& scene_dir, const std::string& value) {
     std::filesystem::path path{value};
     if (path.is_relative()) {
         path = scene_dir / path;
     }
     return path.lexically_normal();
+}
+
+std::string LowerExtension(const std::filesystem::path& path) {
+    std::string extension = path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return extension;
+}
+
+bool HasExtension(const std::filesystem::path& path, std::string_view extension) {
+    return LowerExtension(path) == extension;
 }
 
 bool IsBuiltinAssetPath(std::string_view value) {
@@ -577,6 +595,108 @@ void ParseFilm(
     }
 }
 
+void ParseOffline(
+    const toml::table& table,
+    SceneDescription& scene,
+    const std::filesystem::path& scene_dir,
+    const std::filesystem::path& file,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    CheckUnknownFields(
+        table,
+        "offline",
+        {
+            "progress",
+            "progress_interval_seconds",
+            "checkpoint_png",
+            "checkpoint_png_interval_seconds",
+            "checkpoint_state",
+            "checkpoint_state_interval_seconds",
+            "resume",
+        },
+        file,
+        diagnostics
+    );
+
+    if (const auto progress = ReadBool(table, "progress", file, "offline.progress", diagnostics)) {
+        scene.offline.progress = *progress;
+    }
+    if (const auto interval = ReadInt(table, "progress_interval_seconds", file, "offline.progress_interval_seconds", diagnostics)) {
+        scene.offline.progress_interval_seconds = *interval;
+    }
+    if (const auto path = ReadString(table, "checkpoint_png", file, "offline.checkpoint_png", diagnostics)) {
+        scene.offline.checkpoint_png = path->empty() ? std::filesystem::path{} : NormalizeScenePath(scene_dir, *path);
+    }
+    if (const auto interval = ReadInt(table, "checkpoint_png_interval_seconds", file, "offline.checkpoint_png_interval_seconds", diagnostics)) {
+        scene.offline.checkpoint_png_interval_seconds = *interval;
+    }
+    if (const auto path = ReadString(table, "checkpoint_state", file, "offline.checkpoint_state", diagnostics)) {
+        scene.offline.checkpoint_state = path->empty() ? std::filesystem::path{} : NormalizeScenePath(scene_dir, *path);
+    }
+    if (const auto interval =
+            ReadInt(table, "checkpoint_state_interval_seconds", file, "offline.checkpoint_state_interval_seconds", diagnostics)) {
+        scene.offline.checkpoint_state_interval_seconds = *interval;
+    }
+    if (const auto resume = ReadBool(table, "resume", file, "offline.resume", diagnostics)) {
+        scene.offline.resume = *resume;
+    }
+
+    if (scene.offline.progress && scene.offline.progress_interval_seconds <= 0) {
+        diagnostics.push_back(Error(file, "offline.progress_interval_seconds", "must be positive when offline.progress is true"));
+    }
+    if (!scene.offline.checkpoint_png.empty()) {
+        if (!HasExtension(scene.offline.checkpoint_png, ".png")) {
+            diagnostics.push_back(Error(file, "offline.checkpoint_png", "must use a .png extension"));
+        }
+        if (scene.offline.checkpoint_png_interval_seconds <= 0) {
+            diagnostics.push_back(Error(file, "offline.checkpoint_png_interval_seconds", "must be positive when offline.checkpoint_png is set"));
+        }
+    }
+    if (!scene.offline.checkpoint_state.empty()) {
+        if (!HasExtension(scene.offline.checkpoint_state, ".yrcheckpoint")) {
+            diagnostics.push_back(Error(file, "offline.checkpoint_state", "must use a .yrcheckpoint extension"));
+        }
+        if (scene.offline.checkpoint_state_interval_seconds <= 0) {
+            diagnostics.push_back(
+                Error(file, "offline.checkpoint_state_interval_seconds", "must be positive when offline.checkpoint_state is set")
+            );
+        }
+    }
+    if (scene.offline.resume && scene.offline.checkpoint_state.empty()) {
+        diagnostics.push_back(Error(file, "offline.resume", "requires offline.checkpoint_state"));
+    }
+}
+
+void ApplyFilmCheckpointAliases(
+    bool has_offline_table,
+    SceneDescription& scene,
+    const std::filesystem::path& file,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const bool has_film_checkpoint_path = !scene.film.checkpoint_path.empty();
+    const bool has_film_checkpoint_interval = scene.film.checkpoint_interval_s > 0;
+    if (!has_film_checkpoint_path && !has_film_checkpoint_interval) {
+        return;
+    }
+
+    if (has_offline_table) {
+        if (has_film_checkpoint_path) {
+            diagnostics.push_back(Warning(file, "film.checkpoint_path", "deprecated; use offline.checkpoint_png"));
+        }
+        if (has_film_checkpoint_interval) {
+            diagnostics.push_back(Warning(file, "film.checkpoint_interval_s", "deprecated; use offline.checkpoint_png_interval_seconds"));
+        }
+        return;
+    }
+
+    if (has_film_checkpoint_path) {
+        scene.offline.checkpoint_png = scene.film.checkpoint_path;
+    }
+    if (has_film_checkpoint_interval) {
+        scene.offline.checkpoint_png_interval_seconds = scene.film.checkpoint_interval_s;
+    }
+}
+
 void ParseCamera(
     const toml::table& table,
     SceneDescription& scene,
@@ -975,13 +1095,14 @@ SceneLoadResult LoadSceneFile(const std::filesystem::path& path) {
     CheckUnknownFields(
         root,
         "",
-        {"render", "film", "camera", "assets", "materials", "instances", "lights", "environment"},
+        {"render", "film", "offline", "camera", "assets", "materials", "instances", "lights", "environment"},
         file,
         result.diagnostics
     );
 
     const toml::table* render = RequiredTable(root, "render", file, result.diagnostics);
     const toml::table* film = RequiredTable(root, "film", file, result.diagnostics);
+    const toml::table* offline = root["offline"].as_table();
     const toml::table* camera = RequiredTable(root, "camera", file, result.diagnostics);
     const toml::table* environment = root["environment"].as_table();
 
@@ -991,6 +1112,10 @@ SceneLoadResult LoadSceneFile(const std::filesystem::path& path) {
     if (film != nullptr) {
         ParseFilm(*film, scene, scene_dir, file, result.diagnostics);
     }
+    if (offline != nullptr) {
+        ParseOffline(*offline, scene, scene_dir, file, result.diagnostics);
+    }
+    ApplyFilmCheckpointAliases(offline != nullptr, scene, file, result.diagnostics);
     if (camera != nullptr) {
         ParseCamera(*camera, scene, file, result.diagnostics);
     }
