@@ -547,22 +547,45 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
 
 } // namespace
 
-CpuPathTraceResult RenderCpuPathTrace(const CpuPreparedScene& prepared_scene) {
+CpuPathTraceResult RenderCpuPathTrace(const CpuPreparedScene& prepared_scene, const RenderRequest& request) {
     const RenderSceneIR& scene = prepared_scene.Scene();
-    CpuPathTraceResult result{Film{scene.width, scene.height}, {}};
+    CpuPathTraceResult result{request.resume_film == nullptr ? Film{scene.width, scene.height} : *request.resume_film, {}, true, {}};
     const CpuTileSchedule schedule = BuildCpuTileSchedule(scene.width, scene.height, scene.threads);
     result.stats.bvh_nodes = static_cast<int>(prepared_scene.bvh.nodes.size());
     result.stats.bvh_max_depth = prepared_scene.bvh.max_depth;
     result.stats.threads = schedule.worker_count;
 
-    const auto start = std::chrono::steady_clock::now();
     const int samples_per_pixel = std::max(1, scene.spp);
-    std::vector<CpuPathTraceStats> worker_stats(static_cast<std::size_t>(schedule.worker_count));
-    ForEachCpuTile(schedule, [&](const CpuTile& tile, int worker_index) {
-        CpuPathTraceStats& stats = worker_stats[static_cast<std::size_t>(worker_index)];
-        for (int y = tile.y0; y < tile.y1; ++y) {
-            for (int x = tile.x0; x < tile.x1; ++x) {
-                for (int sample = 0; sample < samples_per_pixel; ++sample) {
+    if (request.resume_completed_spp < 0 || request.resume_completed_spp > samples_per_pixel) {
+        result.ok = false;
+        result.error = "invalid resume completed spp";
+        return result;
+    }
+    if (request.resume_film != nullptr) {
+        if (request.resume_film->Width() != scene.width || request.resume_film->Height() != scene.height) {
+            result.ok = false;
+            result.error = "resume film dimensions do not match render scene";
+            return result;
+        }
+        for (int y = 0; y < request.resume_film->Height(); ++y) {
+            for (int x = 0; x < request.resume_film->Width(); ++x) {
+                if (request.resume_film->SampleCount(x, y) != static_cast<std::uint32_t>(request.resume_completed_spp)) {
+                    result.ok = false;
+                    result.error = "resume film sample counts do not match resume completed spp";
+                    return result;
+                }
+            }
+        }
+    }
+
+    const auto start = std::chrono::steady_clock::now();
+    std::uint64_t cumulative_rays = 0;
+    for (int sample = request.resume_completed_spp; sample < samples_per_pixel; ++sample) {
+        std::vector<CpuPathTraceStats> worker_stats(static_cast<std::size_t>(schedule.worker_count));
+        ForEachCpuTile(schedule, [&](const CpuTile& tile, int worker_index) {
+            CpuPathTraceStats& stats = worker_stats[static_cast<std::size_t>(worker_index)];
+            for (int y = tile.y0; y < tile.y1; ++y) {
+                for (int x = tile.x0; x < tile.x1; ++x) {
                     CpuSampler sampler{
                         scene.sampler,
                         SeedForPixelSample(scene.seed, x, y, sample),
@@ -577,11 +600,34 @@ CpuPathTraceResult RenderCpuPathTrace(const CpuPreparedScene& prepared_scene) {
                     result.film.AddSample(x, y, sample_radiance);
                 }
             }
-        }
-    });
+        });
 
-    for (const CpuPathTraceStats& stats : worker_stats) {
-        MergeTraceStats(result.stats, stats);
+        for (const CpuPathTraceStats& stats : worker_stats) {
+            MergeTraceStats(result.stats, stats);
+        }
+        cumulative_rays = result.stats.rays_traced;
+
+        if (request.progress_callback) {
+            const auto now = std::chrono::steady_clock::now();
+            const int completed_spp = sample + 1;
+            const RenderProgress progress{
+                completed_spp,
+                samples_per_pixel,
+                static_cast<std::uint64_t>(completed_spp) * static_cast<std::uint64_t>(scene.width) *
+                    static_cast<std::uint64_t>(scene.height),
+                static_cast<std::uint64_t>(samples_per_pixel) * static_cast<std::uint64_t>(scene.width) *
+                    static_cast<std::uint64_t>(scene.height),
+                cumulative_rays,
+                std::chrono::duration<double>(now - start).count()
+            };
+            const RenderProgressDecision decision = request.progress_callback(progress, result.film);
+            if (decision.cancel) {
+                result.ok = false;
+                result.error = decision.error.empty() ? "render cancelled by progress callback" : decision.error;
+                result.stats.elapsed_seconds = progress.elapsed_seconds;
+                return result;
+            }
+        }
     }
 
     const auto end = std::chrono::steady_clock::now();

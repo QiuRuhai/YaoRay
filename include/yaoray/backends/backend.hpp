@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -10,7 +11,26 @@
 
 namespace yr {
 
+struct RenderProgress {
+    int completed_spp = 0;
+    int target_spp = 0;
+    std::uint64_t completed_samples = 0;
+    std::uint64_t target_samples = 0;
+    std::uint64_t rays_traced = 0;
+    double elapsed_seconds = 0.0;
+};
+
+struct RenderProgressDecision {
+    bool cancel = false;
+    std::string error;
+};
+
+using RenderProgressCallback = std::function<RenderProgressDecision(const RenderProgress&, const Film&)>;
+
 struct RenderRequest {
+    const Film* resume_film = nullptr;
+    int resume_completed_spp = 0;
+    RenderProgressCallback progress_callback;
 };
 
 struct RenderStats {
