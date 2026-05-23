@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include <yaoray/film/film.hpp>
+#include <yaoray/film/film_checkpoint.hpp>
 #include <yaoray/film/image_writer.hpp>
 #include <yaoray/film/tone_mapping.hpp>
 
@@ -56,6 +57,84 @@ YR_TEST(film_rejects_bad_samples) {
     const yr::Color3f avg = film.LinearPixel(0, 0);
     YR_EXPECT_NEAR(avg.x, 1.0, 1e-6);
     YR_EXPECT_EQ(film.BadSampleCount(), 1);
+}
+
+YR_TEST(film_exposes_pixels_for_checkpoint_reconstruction) {
+    yr::Film film{2, 1};
+    film.SetPixelForCheckpoint(0, 0, yr::FilmPixel{yr::Color3f{2.0f, 4.0f, 6.0f}, 2});
+    film.SetPixelForCheckpoint(1, 0, yr::FilmPixel{yr::Color3f{1.0f, 3.0f, 5.0f}, 1});
+
+    YR_EXPECT_EQ(film.Pixels().size(), std::size_t{2});
+    YR_EXPECT_EQ(film.SampleCount(0, 0), 2);
+    YR_EXPECT_EQ(film.SampleCount(1, 0), 1);
+    YR_EXPECT_NEAR(film.LinearPixel(0, 0).x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(film.LinearPixel(0, 0).y, 2.0, 1e-6);
+    YR_EXPECT_NEAR(film.LinearPixel(0, 0).z, 3.0, 1e-6);
+}
+
+YR_TEST(film_checkpoint_round_trips_tiny_film) {
+    yr::Film film{2, 1};
+    film.SetPixelForCheckpoint(0, 0, yr::FilmPixel{yr::Color3f{2.0f, 4.0f, 6.0f}, 2});
+    film.SetPixelForCheckpoint(1, 0, yr::FilmPixel{yr::Color3f{1.0f, 3.0f, 5.0f}, 2});
+    const std::filesystem::path path = ImageWriterTestPath("roundtrip.yrcheckpoint");
+    std::filesystem::remove(path);
+
+    const yr::FilmCheckpointMetadata metadata{2, 1, 4, 2, std::uint64_t{12345}};
+    const yr::FilmCheckpointWriteResult write = yr::WriteFilmCheckpoint(path, film, metadata);
+    const yr::FilmCheckpointLoadResult load = yr::LoadFilmCheckpoint(path, 2, 1, 4, std::uint64_t{12345});
+
+    YR_EXPECT_TRUE(write.ok);
+    YR_EXPECT_TRUE(write.error.empty());
+    YR_EXPECT_TRUE(load.ok);
+    YR_EXPECT_TRUE(load.error.empty());
+    YR_EXPECT_TRUE(load.film.has_value());
+    YR_EXPECT_EQ(load.metadata.completed_spp, 2);
+    YR_EXPECT_EQ(load.film->SampleCount(0, 0), 2);
+    YR_EXPECT_NEAR(load.film->LinearPixel(0, 0).x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(load.film->LinearPixel(1, 0).z, 2.5, 1e-6);
+}
+
+YR_TEST(film_checkpoint_rejects_settings_hash_mismatch) {
+    yr::Film film{1, 1};
+    film.SetPixelForCheckpoint(0, 0, yr::FilmPixel{yr::Color3f{1.0f, 2.0f, 3.0f}, 1});
+    const std::filesystem::path path = ImageWriterTestPath("bad_hash.yrcheckpoint");
+    const yr::FilmCheckpointMetadata metadata{1, 1, 2, 1, std::uint64_t{111}};
+
+    const yr::FilmCheckpointWriteResult write = yr::WriteFilmCheckpoint(path, film, metadata);
+    const yr::FilmCheckpointLoadResult load = yr::LoadFilmCheckpoint(path, 1, 1, 2, std::uint64_t{222});
+
+    YR_EXPECT_TRUE(write.ok);
+    YR_EXPECT_TRUE(!load.ok);
+    YR_EXPECT_TRUE(load.error.find("settings hash") != std::string::npos);
+}
+
+YR_TEST(film_checkpoint_rejects_dimension_mismatch) {
+    yr::Film film{1, 1};
+    film.SetPixelForCheckpoint(0, 0, yr::FilmPixel{yr::Color3f{1.0f, 2.0f, 3.0f}, 1});
+    const std::filesystem::path path = ImageWriterTestPath("bad_dimensions.yrcheckpoint");
+    const yr::FilmCheckpointMetadata metadata{1, 1, 2, 1, std::uint64_t{111}};
+
+    const yr::FilmCheckpointWriteResult write = yr::WriteFilmCheckpoint(path, film, metadata);
+    const yr::FilmCheckpointLoadResult load = yr::LoadFilmCheckpoint(path, 2, 1, 2, std::uint64_t{111});
+
+    YR_EXPECT_TRUE(write.ok);
+    YR_EXPECT_TRUE(!load.ok);
+    YR_EXPECT_TRUE(load.error.find("dimensions") != std::string::npos);
+}
+
+YR_TEST(film_checkpoint_rejects_non_uniform_resume_samples) {
+    yr::Film film{2, 1};
+    film.SetPixelForCheckpoint(0, 0, yr::FilmPixel{yr::Color3f{1.0f, 2.0f, 3.0f}, 1});
+    film.SetPixelForCheckpoint(1, 0, yr::FilmPixel{yr::Color3f{1.0f, 2.0f, 3.0f}, 2});
+    const std::filesystem::path path = ImageWriterTestPath("non_uniform.yrcheckpoint");
+    const yr::FilmCheckpointMetadata metadata{2, 1, 4, 2, std::uint64_t{111}};
+
+    const yr::FilmCheckpointWriteResult write = yr::WriteFilmCheckpoint(path, film, metadata);
+    const yr::FilmCheckpointLoadResult load = yr::LoadFilmCheckpoint(path, 2, 1, 4, std::uint64_t{111});
+
+    YR_EXPECT_TRUE(write.ok);
+    YR_EXPECT_TRUE(!load.ok);
+    YR_EXPECT_TRUE(load.error.find("sample count") != std::string::npos);
 }
 
 YR_TEST(tone_mapping_produces_display_range_colors) {

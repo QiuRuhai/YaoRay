@@ -24,6 +24,8 @@ public:
     Color3f LinearPixel(int x, int y) const;
     std::uint32_t SampleCount(int x, int y) const;
     std::uint64_t BadSampleCount() const { return bad_sample_count_; }
+    const std::vector<FilmPixel>& Pixels() const { return pixels_; }
+    void SetPixelForCheckpoint(int x, int y, FilmPixel pixel);
 
 private:
     std::size_t Index(int x, int y) const;

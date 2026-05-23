@@ -21,6 +21,7 @@ target_include_directories(yaoray_core PUBLIC include)
 
 add_library(yaoray_film STATIC
     src/film/film.cpp
+    src/film/film_checkpoint.cpp
     src/film/image_writer.cpp
     src/film/tone_mapping.cpp
 )
