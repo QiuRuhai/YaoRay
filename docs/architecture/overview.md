@@ -4,9 +4,11 @@ YaoRay uses a layered renderer architecture. The current implementation has sema
 
 The semantic layer describes the scene in terms people can author and debug: cameras, lights, assets, instances, material overrides, render settings, and Film settings. The current implementation parses this semantic layer from TOML scene files into `SceneDescription`.
 
-The render layer compiles that semantic scene into backend-neutral input. The current `yaoray_render` slice provides a minimal `RenderSceneIR` with render settings, camera data, environment data, area lights, materials, textures, and flat world-space triangles. Rendering is dispatched through a two-stage backend interface: each backend first prepares backend-owned runtime data from `RenderSceneIR`, then renders from that prepared scene without app-layer knowledge of CPU BVHs, CUDA buffers, or future OptiX handles.
+The render layer compiles that semantic scene into backend-neutral input. The current `yaoray_render` slice provides a minimal `RenderSceneIR` with render settings, camera data, environment data, area lights, materials, textures, and flat world-space triangles. Rendering is dispatched through a two-stage backend interface: each backend first prepares backend-owned runtime data from a `RenderSceneIR` value, then renders from that prepared scene without app-layer knowledge of CPU BVHs, CUDA buffers, or future OptiX handles. Prepared scenes own the render input they need, so rendering does not depend on caller-owned `RenderSceneIR` lifetime after preparation.
 
 The CPU backend prepares `CpuPreparedScene` from `RenderSceneIR` by building the CPU `RenderBvh`. The BVH is no longer part of shared compiler output, which keeps later CUDA or OptiX acceleration structures out of the render IR.
+
+Backends expose a small capability record so tests and future app code can distinguish runnable CPU support from controlled backend stubs. CPU currently reports debug, path, offline progress, and texture-backed material support; CUDA is present as a named backend but does not yet report runnable rendering support.
 
 Current implemented slices:
 
