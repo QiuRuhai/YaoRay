@@ -61,7 +61,6 @@ AssetMaterial ConvertObjMaterial(
     imported.name = material.name;
     imported.approximate_type = MaterialKind::Diffuse;
     imported.base_color = Color3f{material.diffuse[0], material.diffuse[1], material.diffuse[2]};
-    imported.roughness = 0.0f;
     imported.specular = 0.04f;
     if (!material.diffuse_texname.empty()) {
         imported.base_color_texture = AddObjTexture(resource, asset_dir / material.diffuse_texname);

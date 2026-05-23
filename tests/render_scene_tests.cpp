@@ -987,6 +987,7 @@ YR_TEST(scene_compiler_imports_obj_material_texture_and_uvs) {
     YR_EXPECT_TRUE(result.scene.has_value());
     const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
+    YR_EXPECT_EQ(compiled.materials[0].type, yr::MaterialKind::Diffuse);
     YR_EXPECT_EQ(compiled.textures.size(), std::size_t{1});
     YR_EXPECT_EQ(compiled.triangles.size(), std::size_t{2});
     YR_EXPECT_EQ(compiled.materials[0].albedo_texture, 0);

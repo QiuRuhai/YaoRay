@@ -115,6 +115,9 @@ YR_TEST(asset_resource_defaults_are_empty_static_scene_data) {
 YR_TEST(asset_material_defaults_include_gltf_pbr_fields) {
     const yr::AssetMaterial material;
 
+    YR_EXPECT_NEAR(material.metallic, 0.0, 1e-6);
+    YR_EXPECT_NEAR(material.roughness, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.specular, 0.04, 1e-6);
     YR_EXPECT_NEAR(material.base_color_alpha, 1.0, 1e-6);
     YR_EXPECT_EQ(material.metallic_roughness_texture, -1);
     YR_EXPECT_EQ(material.normal_texture, -1);
@@ -261,6 +264,9 @@ YR_TEST(obj_loader_imports_basic_mtl_material) {
     YR_EXPECT_NEAR(material.base_color.x, 0.25, 1e-6);
     YR_EXPECT_NEAR(material.base_color.y, 0.5, 1e-6);
     YR_EXPECT_NEAR(material.base_color.z, 0.75, 1e-6);
+    YR_EXPECT_NEAR(material.metallic, 0.0, 1e-6);
+    YR_EXPECT_NEAR(material.roughness, 1.0, 1e-6);
+    YR_EXPECT_NEAR(material.specular, 0.04, 1e-6);
     YR_EXPECT_TRUE(material.base_color_texture >= 0);
     YR_EXPECT_EQ(resource.textures.size(), std::size_t{1});
     YR_EXPECT_EQ(resource.images.size(), std::size_t{1});

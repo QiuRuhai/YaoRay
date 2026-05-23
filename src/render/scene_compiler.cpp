@@ -639,6 +639,16 @@ std::optional<int> CompileMaterialTexture(
     );
 }
 
+MaterialKind LowerAssetMaterialKind(const AssetMaterial& material) {
+    if (material.metallic >= 0.5f) {
+        return MaterialKind::Metal;
+    }
+    if (material.roughness < 0.35f) {
+        return MaterialKind::Plastic;
+    }
+    return MaterialKind::Diffuse;
+}
+
 std::vector<int> CompileAssetMaterials(
     const SceneDescription& scene,
     RenderSceneIR& compiled,
@@ -651,7 +661,7 @@ std::vector<int> CompileAssetMaterials(
 
     for (const AssetMaterial& material : resource.materials) {
         RenderMaterial render_material;
-        render_material.type = material.approximate_type;
+        render_material.type = LowerAssetMaterialKind(material);
         render_material.albedo = material.base_color;
         render_material.albedo_alpha = material.base_color_alpha;
         render_material.emission = material.emission;
