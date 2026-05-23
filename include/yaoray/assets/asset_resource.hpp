@@ -9,7 +9,6 @@
 
 #include <yaoray/core/texture_sampler.hpp>
 #include <yaoray/core/vec.hpp>
-#include <yaoray/scene/scene.hpp>
 
 namespace yr {
 
@@ -66,7 +65,6 @@ struct AssetMesh {
 
 struct AssetMaterial {
     std::string name;
-    MaterialKind approximate_type = MaterialKind::Diffuse;
     Color3f base_color{0.8f, 0.8f, 0.8f};
     float base_color_alpha = 1.0f;
     Color3f emission;

@@ -473,14 +473,6 @@ std::optional<AssetMaterial> ConvertMaterial(
     };
     imported.roughness = static_cast<float>(pbr.roughnessFactor);
     imported.metallic = static_cast<float>(pbr.metallicFactor);
-    if (imported.metallic >= 0.5f) {
-        imported.approximate_type = MaterialKind::Metal;
-    } else if (imported.roughness < 0.35f) {
-        imported.approximate_type = MaterialKind::Plastic;
-        imported.specular = 0.04f;
-    } else {
-        imported.approximate_type = MaterialKind::Diffuse;
-    }
 
     const std::optional<int> base_color_texture =
         ValidateMaterialTextureIndex(model, pbr.baseColorTexture.index, "base color", result);
