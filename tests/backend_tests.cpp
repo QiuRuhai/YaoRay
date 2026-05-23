@@ -4,6 +4,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include <yaoray/backends/backend.hpp>
 #include <yaoray/backends/cpu/cpu_prepared_scene.hpp>
@@ -58,9 +59,11 @@ YR_TEST(cpu_prepare_scene_builds_bvh_from_render_scene_ir) {
     YR_EXPECT_TRUE(prepared.ok);
     YR_EXPECT_TRUE(prepared.error.empty());
     YR_EXPECT_TRUE(prepared.scene.has_value());
-    YR_EXPECT_TRUE(prepared.scene->render_scene == &scene);
-    YR_EXPECT_EQ(&prepared.scene->SourceScene(), &scene);
-    YR_EXPECT_EQ(&prepared.scene->Scene(), &scene);
+    YR_EXPECT_TRUE(&prepared.scene->SourceScene() != &scene);
+    YR_EXPECT_TRUE(&prepared.scene->Scene() != &scene);
+    YR_EXPECT_EQ(prepared.scene->SourceScene().width, scene.width);
+    YR_EXPECT_EQ(prepared.scene->SourceScene().height, scene.height);
+    YR_EXPECT_EQ(prepared.scene->SourceScene().triangles.size(), scene.triangles.size());
     YR_EXPECT_EQ(prepared.scene->Kind(), yr::RenderBackendKind::Cpu);
     YR_EXPECT_EQ(prepared.scene->bvh.nodes.size(), std::size_t{1});
     YR_EXPECT_EQ(prepared.scene->bvh.triangle_indices.size(), std::size_t{1});
@@ -82,10 +85,34 @@ YR_TEST(cpu_backend_prepare_builds_cpu_prepared_scene) {
 
     const auto* cpu_scene = dynamic_cast<const yr::CpuPreparedScene*>(prepared.scene.get());
     YR_EXPECT_TRUE(cpu_scene != nullptr);
-    YR_EXPECT_EQ(&cpu_scene->SourceScene(), &scene);
+    YR_EXPECT_TRUE(&cpu_scene->SourceScene() != &scene);
+    YR_EXPECT_EQ(cpu_scene->SourceScene().width, scene.width);
+    YR_EXPECT_EQ(cpu_scene->SourceScene().height, scene.height);
+    YR_EXPECT_EQ(cpu_scene->SourceScene().triangles.size(), scene.triangles.size());
     YR_EXPECT_EQ(cpu_scene->bvh.nodes.size(), std::size_t{1});
     YR_EXPECT_EQ(cpu_scene->bvh.triangle_indices.size(), std::size_t{1});
     YR_EXPECT_EQ(cpu_scene->bvh.max_depth, 1);
+}
+
+YR_TEST(cpu_backend_prepared_scene_outlives_source_render_scene_ir) {
+    const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cpu);
+    std::unique_ptr<yr::PreparedScene> prepared_scene;
+
+    {
+        yr::RenderSceneIR scene = MakeBackendTriangleScene(4, 3);
+        yr::BackendPrepareResult prepared = backend->Prepare(scene);
+        YR_EXPECT_TRUE(prepared.ok);
+        YR_EXPECT_TRUE(prepared.scene != nullptr);
+        prepared_scene = std::move(prepared.scene);
+    }
+
+    const yr::RenderResult result = backend->Render(*prepared_scene, yr::RenderRequest{});
+
+    YR_EXPECT_TRUE(result.ok);
+    YR_EXPECT_TRUE(result.error.empty());
+    YR_EXPECT_TRUE(result.film.has_value());
+    YR_EXPECT_EQ(result.film->Width(), 4);
+    YR_EXPECT_EQ(result.film->Height(), 3);
 }
 
 YR_TEST(cpu_backend_renders_film_and_stats) {
@@ -173,7 +200,10 @@ YR_TEST(cuda_prepared_scene_exposes_source_scene) {
     const yr::CudaPreparedScene prepared(scene);
 
     YR_EXPECT_EQ(prepared.Kind(), yr::RenderBackendKind::Cuda);
-    YR_EXPECT_EQ(&prepared.SourceScene(), &scene);
+    YR_EXPECT_TRUE(&prepared.SourceScene() != &scene);
+    YR_EXPECT_EQ(prepared.SourceScene().width, scene.width);
+    YR_EXPECT_EQ(prepared.SourceScene().height, scene.height);
+    YR_EXPECT_EQ(prepared.SourceScene().triangles.size(), scene.triangles.size());
 }
 
 YR_TEST(create_render_backend_returns_cuda_stub_backend) {

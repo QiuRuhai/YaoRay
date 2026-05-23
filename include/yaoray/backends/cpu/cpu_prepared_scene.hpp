@@ -9,14 +9,13 @@
 namespace yr {
 
 struct CpuPreparedScene final : public PreparedScene {
-    CpuPreparedScene() = default;
-    CpuPreparedScene(const RenderSceneIR& scene, RenderBvh prepared_bvh);
+    CpuPreparedScene(RenderSceneIR scene, RenderBvh prepared_bvh);
 
     RenderBackendKind Kind() const override;
     const RenderSceneIR& SourceScene() const override;
     const RenderSceneIR& Scene() const;
 
-    const RenderSceneIR* render_scene = nullptr;
+    RenderSceneIR render_scene;
     RenderBvh bvh;
 };
 
@@ -27,6 +26,6 @@ struct CpuPrepareResult {
     double elapsed_seconds = 0.0;
 };
 
-CpuPrepareResult PrepareCpuScene(const RenderSceneIR& scene);
+CpuPrepareResult PrepareCpuScene(RenderSceneIR scene);
 
 } // namespace yr

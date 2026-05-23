@@ -6,13 +6,13 @@ namespace yr {
 
 class CudaPreparedScene final : public PreparedScene {
 public:
-    explicit CudaPreparedScene(const RenderSceneIR& scene);
+    explicit CudaPreparedScene(RenderSceneIR scene);
 
     RenderBackendKind Kind() const override;
     const RenderSceneIR& SourceScene() const override;
 
 private:
-    const RenderSceneIR* render_scene_ = nullptr;
+    RenderSceneIR render_scene_;
 };
 
 } // namespace yr

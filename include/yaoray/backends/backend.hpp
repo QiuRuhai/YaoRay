@@ -74,7 +74,7 @@ public:
     virtual ~RenderBackend() = default;
 
     virtual RenderBackendKind Kind() const = 0;
-    virtual BackendPrepareResult Prepare(const RenderSceneIR& scene) = 0;
+    virtual BackendPrepareResult Prepare(RenderSceneIR scene) = 0;
     virtual RenderResult Render(const PreparedScene& scene, const RenderRequest& request) = 0;
 };
 

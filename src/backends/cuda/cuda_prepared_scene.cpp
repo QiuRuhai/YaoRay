@@ -1,9 +1,11 @@
 #include <yaoray/backends/cuda/cuda_prepared_scene.hpp>
 
+#include <utility>
+
 namespace yr {
 
-CudaPreparedScene::CudaPreparedScene(const RenderSceneIR& scene)
-    : render_scene_(&scene) {
+CudaPreparedScene::CudaPreparedScene(RenderSceneIR scene)
+    : render_scene_(std::move(scene)) {
 }
 
 RenderBackendKind CudaPreparedScene::Kind() const {
@@ -11,7 +13,7 @@ RenderBackendKind CudaPreparedScene::Kind() const {
 }
 
 const RenderSceneIR& CudaPreparedScene::SourceScene() const {
-    return *render_scene_;
+    return render_scene_;
 }
 
 } // namespace yr

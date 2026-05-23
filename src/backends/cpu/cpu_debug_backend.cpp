@@ -53,7 +53,10 @@ BackendPrepareResult ToBackendPrepareResult(CpuPrepareResult prepared) {
 
     CpuPreparedScene& cpu_scene = prepared.scene.value();
     result.ok = true;
-    result.scene = std::make_unique<CpuPreparedScene>(cpu_scene.Scene(), std::move(cpu_scene.bvh));
+    result.scene = std::make_unique<CpuPreparedScene>(
+        std::move(cpu_scene.render_scene),
+        std::move(cpu_scene.bvh)
+    );
     return result;
 }
 
@@ -63,8 +66,8 @@ RenderBackendKind CpuDebugBackend::Kind() const {
     return RenderBackendKind::Cpu;
 }
 
-BackendPrepareResult CpuDebugBackend::Prepare(const RenderSceneIR& scene) {
-    return ToBackendPrepareResult(PrepareCpuScene(scene));
+BackendPrepareResult CpuDebugBackend::Prepare(RenderSceneIR scene) {
+    return ToBackendPrepareResult(PrepareCpuScene(std::move(scene)));
 }
 
 RenderResult CpuDebugBackend::Render(const PreparedScene& scene, const RenderRequest& request) {

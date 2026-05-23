@@ -5,8 +5,8 @@
 
 namespace yr {
 
-CpuPreparedScene::CpuPreparedScene(const RenderSceneIR& scene, RenderBvh prepared_bvh)
-    : render_scene(&scene),
+CpuPreparedScene::CpuPreparedScene(RenderSceneIR scene, RenderBvh prepared_bvh)
+    : render_scene(std::move(scene)),
       bvh(std::move(prepared_bvh)) {
 }
 
@@ -15,14 +15,14 @@ RenderBackendKind CpuPreparedScene::Kind() const {
 }
 
 const RenderSceneIR& CpuPreparedScene::SourceScene() const {
-    return *render_scene;
+    return render_scene;
 }
 
 const RenderSceneIR& CpuPreparedScene::Scene() const {
     return SourceScene();
 }
 
-CpuPrepareResult PrepareCpuScene(const RenderSceneIR& scene) {
+CpuPrepareResult PrepareCpuScene(RenderSceneIR scene) {
     CpuPrepareResult result;
 
     const auto start = std::chrono::steady_clock::now();
@@ -37,7 +37,7 @@ CpuPrepareResult PrepareCpuScene(const RenderSceneIR& scene) {
     }
 
     result.ok = true;
-    result.scene.emplace(scene, std::move(build.bvh));
+    result.scene.emplace(std::move(scene), std::move(build.bvh));
     return result;
 }
 
