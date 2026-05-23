@@ -32,6 +32,10 @@ yr::CpuPathTraceResult RunPathTrace(const yr::RenderSceneIR& scene) {
     return yr::RenderCpuPathTrace(PreparePathScene(scene));
 }
 
+yr::CpuPathTraceResult RunPathTrace(const yr::RenderSceneIR& scene, const yr::RenderRequest& request) {
+    return yr::RenderCpuPathTrace(PreparePathScene(scene), request);
+}
+
 YR_TEST(shading_normal_interpolates_vertex_normals) {
     yr::RenderTriangle triangle;
     triangle.p0 = yr::Point3f{0.0f, 0.0f, 0.0f};
@@ -793,6 +797,88 @@ YR_TEST(cpu_path_tracer_accumulates_spp_samples) {
     YR_EXPECT_EQ(result.film.Height(), 2);
     YR_EXPECT_EQ(result.film.SampleCount(0, 0), 4);
     YR_EXPECT_EQ(result.stats.rays_traced, std::uint64_t{16});
+}
+
+YR_TEST(cpu_path_tracer_reports_progress_after_each_sample_pass) {
+    yr::RenderSceneIR scene = MakeBaseScene(2, 2);
+    scene.spp = 3;
+    std::vector<int> completed;
+
+    yr::RenderRequest request;
+    request.progress_callback = [&](const yr::RenderProgress& progress, const yr::Film& film) {
+        completed.push_back(progress.completed_spp);
+        YR_EXPECT_EQ(progress.target_spp, 3);
+        YR_EXPECT_EQ(progress.target_samples, std::uint64_t{12});
+        YR_EXPECT_EQ(progress.completed_samples, static_cast<std::uint64_t>(progress.completed_spp * 4));
+        YR_EXPECT_EQ(film.SampleCount(0, 0), static_cast<std::uint32_t>(progress.completed_spp));
+        return yr::RenderProgressDecision{};
+    };
+
+    const yr::CpuPathTraceResult result = RunPathTrace(scene, request);
+
+    YR_EXPECT_TRUE(result.ok);
+    YR_EXPECT_EQ(completed.size(), std::size_t{3});
+    YR_EXPECT_EQ(completed[0], 1);
+    YR_EXPECT_EQ(completed[1], 2);
+    YR_EXPECT_EQ(completed[2], 3);
+}
+
+YR_TEST(cpu_path_tracer_resume_matches_uninterrupted_render) {
+    yr::RenderSceneIR full_scene = MakeThreadedDeterminismScene();
+    full_scene.spp = 4;
+    full_scene.threads = 2;
+
+    yr::RenderRequest partial_request;
+    partial_request.progress_callback = [](const yr::RenderProgress& progress, const yr::Film&) {
+        if (progress.completed_spp == 2) {
+            return yr::RenderProgressDecision{true, "checkpoint after two passes"};
+        }
+        return yr::RenderProgressDecision{};
+    };
+    const yr::CpuPathTraceResult partial = RunPathTrace(full_scene, partial_request);
+    yr::RenderRequest resume_request;
+    resume_request.resume_film = &partial.film;
+    resume_request.resume_completed_spp = 2;
+    const yr::CpuPathTraceResult resumed = RunPathTrace(full_scene, resume_request);
+    const yr::CpuPathTraceResult uninterrupted = RunPathTrace(full_scene);
+
+    YR_EXPECT_TRUE(!partial.ok);
+    YR_EXPECT_EQ(partial.film.SampleCount(0, 0), 2);
+    YR_EXPECT_TRUE(resumed.ok);
+    YR_EXPECT_TRUE(uninterrupted.ok);
+    YR_EXPECT_TRUE(FilmsEqual(resumed.film, uninterrupted.film));
+    YR_EXPECT_TRUE(resumed.stats.rays_traced > 0);
+}
+
+YR_TEST(cpu_path_tracer_rejects_invalid_resume_sample_count) {
+    yr::RenderSceneIR scene = MakeBaseScene(2, 2);
+    scene.spp = 4;
+    yr::Film film{2, 2};
+    film.SetPixelForCheckpoint(0, 0, yr::FilmPixel{yr::Color3f{1.0f, 0.0f, 0.0f}, 1});
+
+    yr::RenderRequest request;
+    request.resume_film = &film;
+    request.resume_completed_spp = 2;
+    const yr::CpuPathTraceResult result = RunPathTrace(scene, request);
+
+    YR_EXPECT_TRUE(!result.ok);
+    YR_EXPECT_TRUE(result.error.find("resume") != std::string::npos);
+}
+
+YR_TEST(cpu_path_tracer_progress_callback_can_cancel_render) {
+    yr::RenderSceneIR scene = MakeBaseScene(2, 2);
+    scene.spp = 3;
+
+    yr::RenderRequest request;
+    request.progress_callback = [](const yr::RenderProgress&, const yr::Film&) {
+        return yr::RenderProgressDecision{true, "stop after first pass"};
+    };
+
+    const yr::CpuPathTraceResult result = RunPathTrace(scene, request);
+
+    YR_EXPECT_TRUE(!result.ok);
+    YR_EXPECT_TRUE(result.error.find("stop after first pass") != std::string::npos);
+    YR_EXPECT_EQ(result.film.SampleCount(0, 0), 1);
 }
 
 YR_TEST(cpu_path_tracer_reports_cpu_prepared_bvh_stats) {

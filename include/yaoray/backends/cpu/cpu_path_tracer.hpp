@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+
 #include <yaoray/backends/cpu/cpu_prepared_scene.hpp>
 #include <yaoray/film/film.hpp>
 
@@ -23,8 +25,10 @@ struct CpuPathTraceStats {
 struct CpuPathTraceResult {
     Film film;
     CpuPathTraceStats stats;
+    bool ok = true;
+    std::string error;
 };
 
-CpuPathTraceResult RenderCpuPathTrace(const CpuPreparedScene& prepared_scene);
+CpuPathTraceResult RenderCpuPathTrace(const CpuPreparedScene& prepared_scene, const RenderRequest& request = {});
 
 } // namespace yr

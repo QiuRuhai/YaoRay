@@ -1,16 +1,21 @@
 #include <yaoray/backends/backend.hpp>
 #include <yaoray/core/version.hpp>
+#include <yaoray/film/film_checkpoint.hpp>
 #include <yaoray/film/image_writer.hpp>
 #include <yaoray/film/tone_mapping.hpp>
+#include <yaoray/render/render_scene_hash.hpp>
 #include <yaoray/render/scene_compiler.hpp>
 #include <yaoray/scene/diagnostic.hpp>
 #include <yaoray/scene/scene_parser.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <optional>
+#include <sstream>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -51,6 +56,44 @@ double SafeRate(double numerator, double elapsed_seconds) {
         return 0.0;
     }
     return numerator / elapsed_seconds;
+}
+
+bool OfflineRequested(const yr::SceneDescription& scene) {
+    return scene.offline.progress ||
+           !scene.offline.checkpoint_png.empty() ||
+           !scene.offline.checkpoint_state.empty() ||
+           scene.offline.resume;
+}
+
+std::optional<std::string> ValidateOfflineWorkflow(
+    const yr::SceneDescription& scene,
+    const yr::RenderSceneIR& render_scene
+) {
+    if (!OfflineRequested(scene)) {
+        return std::nullopt;
+    }
+    if (render_scene.requested_backend != yr::RenderBackendKind::Cpu ||
+        render_scene.integrator != yr::RenderIntegratorKind::Path) {
+        return "offline workflow supports only cpu path renders";
+    }
+    return std::nullopt;
+}
+
+double PercentComplete(const yr::RenderProgress& progress) {
+    if (progress.target_samples == 0) {
+        return 100.0;
+    }
+    return 100.0 * static_cast<double>(progress.completed_samples) / static_cast<double>(progress.target_samples);
+}
+
+double SafeEtaSeconds(const yr::RenderProgress& progress) {
+    if (progress.elapsed_seconds <= 0.0 ||
+        progress.completed_samples == 0 ||
+        progress.completed_samples >= progress.target_samples) {
+        return 0.0;
+    }
+    const double samples_per_second = static_cast<double>(progress.completed_samples) / progress.elapsed_seconds;
+    return static_cast<double>(progress.target_samples - progress.completed_samples) / samples_per_second;
 }
 
 std::uint64_t TotalSamples(const yr::Film& film) {
@@ -136,6 +179,11 @@ int RunRender(int argc, char** argv) {
     std::cout << "Compiled textures: " << render_scene.textures.size() << '\n';
     std::cout << "Texture memory MiB: " << BytesToMiB(EstimateTextureMemoryBytes(render_scene)) << '\n';
 
+    if (const std::optional<std::string> offline_error = ValidateOfflineWorkflow(scene, render_scene)) {
+        std::cerr << *offline_error << '\n';
+        return 1;
+    }
+
     const auto backend = yr::CreateRenderBackend(render_scene.requested_backend);
     if (!backend) {
         std::cerr << "Render backend not available: " << yr::RenderBackendName(render_scene.requested_backend) << '\n';
@@ -151,7 +199,93 @@ int RunRender(int argc, char** argv) {
     }
     std::cout << "Prepare seconds: " << prepare_result.elapsed_seconds << '\n';
 
-    const yr::RenderResult render_result = backend->Render(*prepare_result.scene, yr::RenderRequest{});
+    const std::uint64_t settings_hash = yr::ComputeRenderSettingsHash(render_scene);
+    std::optional<yr::Film> resume_film;
+    int resume_completed_spp = 0;
+    if (scene.offline.resume) {
+        yr::FilmCheckpointLoadResult checkpoint = yr::LoadFilmCheckpoint(
+            scene.offline.checkpoint_state,
+            render_scene.width,
+            render_scene.height,
+            render_scene.spp,
+            settings_hash
+        );
+        if (!checkpoint.ok || !checkpoint.film.has_value()) {
+            std::cerr << "Checkpoint load failed: " << checkpoint.error << '\n';
+            return 1;
+        }
+        resume_completed_spp = checkpoint.metadata.completed_spp;
+        resume_film.emplace(std::move(checkpoint.film.value()));
+        std::cout << "Resumed checkpoint: " << scene.offline.checkpoint_state.generic_string()
+                  << " at " << resume_completed_spp << "/" << render_scene.spp << " spp\n";
+    }
+
+    yr::RenderRequest render_request;
+    if (resume_film.has_value()) {
+        render_request.resume_film = &resume_film.value();
+        render_request.resume_completed_spp = resume_completed_spp;
+    }
+
+    const yr::ToneMapSettings tone_map{
+        ToFilmToneMapper(scene.film.tone_mapper),
+        scene.film.exposure
+    };
+
+    auto last_progress = std::chrono::steady_clock::now() - std::chrono::seconds(scene.offline.progress_interval_seconds);
+    auto last_checkpoint_png =
+        std::chrono::steady_clock::now() - std::chrono::seconds(scene.offline.checkpoint_png_interval_seconds);
+    auto last_checkpoint_state =
+        std::chrono::steady_clock::now() - std::chrono::seconds(scene.offline.checkpoint_state_interval_seconds);
+    bool wrote_final_checkpoint_png = false;
+    bool wrote_final_checkpoint_state = false;
+
+    if (OfflineRequested(scene)) {
+        render_request.progress_callback = [&](const yr::RenderProgress& progress, const yr::Film& film) {
+            const auto now = std::chrono::steady_clock::now();
+            const bool final_pass = progress.completed_spp >= progress.target_spp;
+            if (scene.offline.progress &&
+                (final_pass || now - last_progress >= std::chrono::seconds(scene.offline.progress_interval_seconds))) {
+                last_progress = now;
+                std::cout << "Progress: " << progress.completed_spp << "/" << progress.target_spp
+                          << " spp (" << PercentComplete(progress) << "%)"
+                          << " elapsed=" << progress.elapsed_seconds << "s"
+                          << " eta=" << SafeEtaSeconds(progress) << "s"
+                          << " samples/sec=" << SafeRate(static_cast<double>(progress.completed_samples), progress.elapsed_seconds)
+                          << " rays/sec=" << SafeRate(static_cast<double>(progress.rays_traced), progress.elapsed_seconds)
+                          << '\n';
+            }
+            if (!scene.offline.checkpoint_png.empty() &&
+                (final_pass || now - last_checkpoint_png >= std::chrono::seconds(scene.offline.checkpoint_png_interval_seconds))) {
+                last_checkpoint_png = now;
+                const yr::ImageWriteResult image = yr::WriteImage(film, tone_map, scene.offline.checkpoint_png);
+                if (!image.ok) {
+                    return yr::RenderProgressDecision{true, "checkpoint image write failed: " + image.error};
+                }
+                wrote_final_checkpoint_png = final_pass;
+                std::cout << "Checkpoint image: " << scene.offline.checkpoint_png.generic_string() << '\n';
+            }
+            if (!scene.offline.checkpoint_state.empty() &&
+                (final_pass || now - last_checkpoint_state >= std::chrono::seconds(scene.offline.checkpoint_state_interval_seconds))) {
+                last_checkpoint_state = now;
+                const yr::FilmCheckpointMetadata metadata{
+                    render_scene.width,
+                    render_scene.height,
+                    render_scene.spp,
+                    progress.completed_spp,
+                    settings_hash
+                };
+                const yr::FilmCheckpointWriteResult state = yr::WriteFilmCheckpoint(scene.offline.checkpoint_state, film, metadata);
+                if (!state.ok) {
+                    return yr::RenderProgressDecision{true, "checkpoint state write failed: " + state.error};
+                }
+                wrote_final_checkpoint_state = final_pass;
+                std::cout << "Checkpoint state: " << scene.offline.checkpoint_state.generic_string() << '\n';
+            }
+            return yr::RenderProgressDecision{};
+        };
+    }
+
+    const yr::RenderResult render_result = backend->Render(*prepare_result.scene, render_request);
     if (!render_result.ok) {
         std::cerr << render_result.error << '\n';
         return 1;
@@ -161,10 +295,31 @@ int RunRender(int argc, char** argv) {
         return 1;
     }
 
-    const yr::ToneMapSettings tone_map{
-        ToFilmToneMapper(scene.film.tone_mapper),
-        scene.film.exposure
-    };
+    if (!scene.offline.checkpoint_png.empty() && !wrote_final_checkpoint_png) {
+        const yr::ImageWriteResult image = yr::WriteImage(*render_result.film, tone_map, scene.offline.checkpoint_png);
+        if (!image.ok) {
+            std::cerr << "Checkpoint image write failed: " << image.error << '\n';
+            return 1;
+        }
+        std::cout << "Checkpoint image: " << scene.offline.checkpoint_png.generic_string() << '\n';
+    }
+    if (!scene.offline.checkpoint_state.empty() && !wrote_final_checkpoint_state) {
+        const yr::FilmCheckpointMetadata metadata{
+            render_scene.width,
+            render_scene.height,
+            render_scene.spp,
+            render_scene.spp,
+            settings_hash
+        };
+        const yr::FilmCheckpointWriteResult state =
+            yr::WriteFilmCheckpoint(scene.offline.checkpoint_state, *render_result.film, metadata);
+        if (!state.ok) {
+            std::cerr << "Checkpoint state write failed: " << state.error << '\n';
+            return 1;
+        }
+        std::cout << "Checkpoint state: " << scene.offline.checkpoint_state.generic_string() << '\n';
+    }
+
     const yr::ImageWriteResult write_result = yr::WriteImage(*render_result.film, tone_map, scene.film.output);
     if (!write_result.ok) {
         std::cerr << "Image write error: " << write_result.error << '\n';

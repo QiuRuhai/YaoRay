@@ -21,6 +21,7 @@ target_include_directories(yaoray_core PUBLIC include)
 
 add_library(yaoray_film STATIC
     src/film/film.cpp
+    src/film/film_checkpoint.cpp
     src/film/image_writer.cpp
     src/film/tone_mapping.cpp
 )
@@ -63,6 +64,7 @@ add_library(yaoray_render STATIC
     src/render/light_sampling.cpp
     src/render/mis.cpp
     src/render/scene_compiler.cpp
+    src/render/render_scene_hash.cpp
     src/render/shading.cpp
     src/render/texture.cpp
 )
@@ -124,7 +126,7 @@ if(BUILD_TESTING)
     function(add_yaoray_cli_render_test name)
         set(options EXPECT_FAILURE RUN_IMAGE_SANITY)
         set(oneValueArgs SCENE OUTPUT BACKEND)
-        set(multiValueArgs EXPECT_REGEX)
+        set(multiValueArgs EXPECT_REGEX EXPECT_FILE)
         cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
         if(NOT ARG_SCENE)
@@ -150,6 +152,16 @@ if(BUILD_TESTING)
             foreach(index RANGE 0 ${last_regex_index})
                 list(GET ARG_EXPECT_REGEX ${index} regex)
                 list(APPEND test_args "-DEXPECT_REGEX_${index}=${regex}")
+            endforeach()
+        endif()
+
+        list(LENGTH ARG_EXPECT_FILE expected_file_count)
+        list(APPEND test_args "-DEXPECT_FILE_COUNT=${expected_file_count}")
+        if(expected_file_count GREATER 0)
+            math(EXPR last_expected_file_index "${expected_file_count} - 1")
+            foreach(index RANGE 0 ${last_expected_file_index})
+                list(GET ARG_EXPECT_FILE ${index} expected_file)
+                list(APPEND test_args "-DEXPECT_FILE_${index}=${expected_file}")
             endforeach()
         endif()
 
@@ -275,6 +287,36 @@ if(BUILD_TESTING)
         EXPECT_REGEX
             "Integrator: path"
             "Rendered image:"
+    )
+    add_yaoray_cli_render_test(yaoray_cli_render_offline_checkpoint
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/offline_checkpoint.toml"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/out/offline_checkpoint.png"
+        BACKEND cpu
+        EXPECT_FILE
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/out/offline_checkpoint.preview.png"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/out/offline_checkpoint.yrcheckpoint"
+        EXPECT_REGEX
+            "Progress:"
+            "Checkpoint image:"
+            "Checkpoint state:"
+            "Rendered image:"
+    )
+    add_yaoray_cli_render_test(yaoray_cli_render_offline_resume
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/offline_resume.toml"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/out/offline_resume.png"
+        BACKEND cpu
+        EXPECT_FILE
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/out/offline_resume.preview.png"
+        EXPECT_REGEX
+            "Resumed checkpoint:"
+            "Rendered image:"
+    )
+    set_tests_properties(yaoray_cli_render_offline_resume PROPERTIES DEPENDS yaoray_cli_render_offline_checkpoint)
+    add_yaoray_cli_render_test(yaoray_cli_render_offline_unsupported_cuda
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/offline_checkpoint.toml"
+        BACKEND cuda
+        EXPECT_FAILURE
+        EXPECT_REGEX "offline workflow supports only cpu path renders"
     )
     add_yaoray_cli_render_test(yaoray_cli_render_cuda
         SCENE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/builtin_triangle.toml"

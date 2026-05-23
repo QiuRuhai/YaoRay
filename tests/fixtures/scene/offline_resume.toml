@@ -1,0 +1,43 @@
+[render]
+backend = "cpu"
+integrator = "path"
+width = 4
+height = 3
+spp = 2
+max_depth = 1
+seed = 17
+sampler = "independent"
+threads = 1
+light_samples = 1
+
+[film]
+output = "out/offline_resume.png"
+tone_mapper = "aces"
+exposure = 0.0
+
+[offline]
+progress = true
+progress_interval_seconds = 1
+checkpoint_png = "out/offline_resume.preview.png"
+checkpoint_png_interval_seconds = 1
+checkpoint_state = "out/offline_checkpoint.yrcheckpoint"
+checkpoint_state_interval_seconds = 1
+resume = true
+
+[camera]
+type = "perspective"
+position = [0.0, 0.0, 3.0]
+target = [0.0, 0.0, 0.0]
+fov_y = 45.0
+
+[[assets]]
+name = "triangle"
+path = "builtin:triangle"
+
+[[instances]]
+asset = "triangle"
+
+[environment]
+type = "constant"
+radiance = [0.02, 0.03, 0.04]
+strength = 1.0

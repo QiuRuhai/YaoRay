@@ -50,6 +50,13 @@ std::uint32_t Film::SampleCount(int x, int y) const {
     return pixels_[Index(x, y)].samples;
 }
 
+void Film::SetPixelForCheckpoint(int x, int y, FilmPixel pixel) {
+    if (!InBounds(x, y)) {
+        return;
+    }
+    pixels_[Index(x, y)] = pixel;
+}
+
 std::size_t Film::Index(int x, int y) const {
     return static_cast<std::size_t>(y) * static_cast<std::size_t>(width_) + static_cast<std::size_t>(x);
 }

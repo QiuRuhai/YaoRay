@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <yaoray/render/render_scene.hpp>
+#include <yaoray/render/render_scene_hash.hpp>
 #include <yaoray/render/scene_compiler.hpp>
 #include <yaoray/scene/diagnostic.hpp>
 #include <yaoray/scene/scene.hpp>
@@ -108,6 +109,57 @@ YR_TEST(render_scene_ir_defaults_are_backend_friendly) {
     YR_EXPECT_NEAR(material.absorption_color.y, 1.0, 1e-6);
     YR_EXPECT_NEAR(material.absorption_color.z, 1.0, 1e-6);
     YR_EXPECT_NEAR(material.absorption_distance, 1.0, 1e-6);
+}
+
+YR_TEST(render_settings_hash_is_stable_for_identical_scene) {
+    const yr::SceneCompileResult first_result = yr::CompileScene(MakeBaseScene());
+    const yr::SceneCompileResult second_result = yr::CompileScene(MakeBaseScene());
+
+    YR_EXPECT_TRUE(first_result.scene.has_value());
+    YR_EXPECT_TRUE(second_result.scene.has_value());
+    YR_EXPECT_EQ(
+        yr::ComputeRenderSettingsHash(first_result.scene.value()),
+        yr::ComputeRenderSettingsHash(second_result.scene.value())
+    );
+}
+
+YR_TEST(render_settings_hash_changes_for_render_affecting_settings) {
+    yr::SceneDescription base = MakeBaseScene();
+    yr::SceneDescription changed_seed = base;
+    changed_seed.render.seed = 999;
+    yr::SceneDescription changed_spp = base;
+    changed_spp.render.spp = 8;
+
+    const yr::SceneCompileResult base_result = yr::CompileScene(base);
+    const yr::SceneCompileResult seed_result = yr::CompileScene(changed_seed);
+    const yr::SceneCompileResult spp_result = yr::CompileScene(changed_spp);
+
+    YR_EXPECT_TRUE(base_result.scene.has_value());
+    YR_EXPECT_TRUE(seed_result.scene.has_value());
+    YR_EXPECT_TRUE(spp_result.scene.has_value());
+    const std::uint64_t base_hash = yr::ComputeRenderSettingsHash(base_result.scene.value());
+    YR_EXPECT_TRUE(base_hash != yr::ComputeRenderSettingsHash(seed_result.scene.value()));
+    YR_EXPECT_TRUE(base_hash != yr::ComputeRenderSettingsHash(spp_result.scene.value()));
+}
+
+YR_TEST(render_settings_hash_changes_for_camera_and_resource_counts) {
+    yr::SceneDescription base = MakeBaseScene();
+    yr::SceneDescription changed_camera = base;
+    changed_camera.camera->fov_y = 35.0f;
+    yr::SceneDescription changed_resources = base;
+    changed_resources.assets.push_back(yr::AssetDescription{"triangle", "builtin:triangle"});
+    changed_resources.instances.push_back(yr::InstanceDescription{"triangle", {}});
+
+    const yr::SceneCompileResult base_result = yr::CompileScene(base);
+    const yr::SceneCompileResult camera_result = yr::CompileScene(changed_camera);
+    const yr::SceneCompileResult resources_result = yr::CompileScene(changed_resources);
+
+    YR_EXPECT_TRUE(base_result.scene.has_value());
+    YR_EXPECT_TRUE(camera_result.scene.has_value());
+    YR_EXPECT_TRUE(resources_result.scene.has_value());
+    const std::uint64_t base_hash = yr::ComputeRenderSettingsHash(base_result.scene.value());
+    YR_EXPECT_TRUE(base_hash != yr::ComputeRenderSettingsHash(camera_result.scene.value()));
+    YR_EXPECT_TRUE(base_hash != yr::ComputeRenderSettingsHash(resources_result.scene.value()));
 }
 
 YR_TEST(scene_compiler_copies_render_settings) {

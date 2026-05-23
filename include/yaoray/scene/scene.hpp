@@ -77,6 +77,16 @@ struct FilmSettings {
     std::filesystem::path checkpoint_path;
 };
 
+struct OfflineSettings {
+    bool progress = false;
+    int progress_interval_seconds = 5;
+    std::filesystem::path checkpoint_png;
+    int checkpoint_png_interval_seconds = 60;
+    std::filesystem::path checkpoint_state;
+    int checkpoint_state_interval_seconds = 60;
+    bool resume = false;
+};
+
 struct CameraDescription {
     CameraKind type = CameraKind::Perspective;
     Point3f position;
@@ -147,6 +157,7 @@ struct SceneDescription {
     std::filesystem::path source_path;
     RenderSettings render;
     FilmSettings film;
+    OfflineSettings offline;
     std::optional<CameraDescription> camera;
     std::vector<AssetDescription> assets;
     std::vector<MaterialDescription> materials;

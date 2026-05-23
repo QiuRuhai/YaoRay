@@ -68,8 +68,6 @@ BackendPrepareResult CpuDebugBackend::Prepare(const RenderSceneIR& scene) {
 }
 
 RenderResult CpuDebugBackend::Render(const PreparedScene& scene, const RenderRequest& request) {
-    (void)request;
-
     RenderResult result;
     const auto* cpu_scene = dynamic_cast<const CpuPreparedScene*>(&scene);
     if (scene.Kind() != RenderBackendKind::Cpu || cpu_scene == nullptr) {
@@ -81,7 +79,16 @@ RenderResult CpuDebugBackend::Render(const PreparedScene& scene, const RenderReq
     const RenderSceneIR& render_scene = cpu_scene->Scene();
     result.ok = true;
     if (render_scene.integrator == RenderIntegratorKind::Path) {
-        CpuPathTraceResult path_result = RenderCpuPathTrace(*cpu_scene);
+        CpuPathTraceResult path_result = RenderCpuPathTrace(*cpu_scene, request);
+        if (!path_result.ok) {
+            result.ok = false;
+            result.error = path_result.error.empty() ? "CPU path tracing failed" : path_result.error;
+            result.stats = ToRenderStats(path_result.stats);
+            if (path_result.film.Width() > 0 && path_result.film.Height() > 0) {
+                result.film.emplace(std::move(path_result.film));
+            }
+            return result;
+        }
         result.film.emplace(std::move(path_result.film));
         result.stats = ToRenderStats(path_result.stats);
         return result;
