@@ -85,6 +85,9 @@ YR_TEST(render_scene_ir_defaults_are_backend_friendly) {
     YR_EXPECT_EQ(scene.light_samples, 1);
     YR_EXPECT_NEAR(scene.radiance_clamp, 0.0, 1e-6);
     YR_EXPECT_TRUE(scene.triangles.empty());
+    YR_EXPECT_TRUE(scene.vertices.empty());
+    YR_EXPECT_TRUE(scene.indices.empty());
+    YR_EXPECT_TRUE(scene.primitives.empty());
     YR_EXPECT_TRUE(scene.materials.empty());
     YR_EXPECT_TRUE(scene.area_lights.empty());
 
@@ -160,6 +163,16 @@ YR_TEST(render_settings_hash_changes_for_camera_and_resource_counts) {
     const std::uint64_t base_hash = yr::ComputeRenderSettingsHash(base_result.scene.value());
     YR_EXPECT_TRUE(base_hash != yr::ComputeRenderSettingsHash(camera_result.scene.value()));
     YR_EXPECT_TRUE(base_hash != yr::ComputeRenderSettingsHash(resources_result.scene.value()));
+}
+
+YR_TEST(render_settings_hash_changes_for_geometry_table_counts) {
+    yr::SceneCompileResult base_result = yr::CompileScene(MakeBaseScene());
+    YR_EXPECT_TRUE(base_result.scene.has_value());
+
+    yr::RenderSceneIR changed = base_result.scene.value();
+    changed.vertices.push_back(yr::RenderVertex{});
+
+    YR_EXPECT_TRUE(yr::ComputeRenderSettingsHash(base_result.scene.value()) != yr::ComputeRenderSettingsHash(changed));
 }
 
 YR_TEST(scene_compiler_copies_render_settings) {
@@ -590,6 +603,9 @@ YR_TEST(scene_compiler_expands_gltf_asset) {
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
     YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().vertices.size(), std::size_t{3});
+    YR_EXPECT_EQ(result.scene.value().indices.size(), std::size_t{3});
+    YR_EXPECT_EQ(result.scene.value().primitives.size(), std::size_t{1});
     YR_EXPECT_EQ(result.scene.value().materials.size(), std::size_t{1});
 }
 
@@ -807,6 +823,9 @@ YR_TEST(scene_compiler_compiles_flight_helmet_pbr_fields) {
 
     const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_TRUE(!compiled.triangles.empty());
+    YR_EXPECT_EQ(compiled.vertices.size(), compiled.triangles.size() * std::size_t{3});
+    YR_EXPECT_EQ(compiled.indices.size(), compiled.triangles.size() * std::size_t{3});
+    YR_EXPECT_EQ(compiled.primitives.size(), compiled.triangles.size());
     YR_EXPECT_TRUE(!compiled.materials.empty());
     YR_EXPECT_TRUE(!compiled.textures.empty());
 
@@ -1089,6 +1108,11 @@ YR_TEST(scene_compiler_expands_inline_quad_asset) {
     const yr::RenderSceneIR& compiled = result.scene.value();
     YR_EXPECT_EQ(compiled.materials.size(), std::size_t{1});
     YR_EXPECT_EQ(compiled.triangles.size(), std::size_t{2});
+    YR_EXPECT_EQ(compiled.vertices.size(), std::size_t{6});
+    YR_EXPECT_EQ(compiled.indices.size(), std::size_t{6});
+    YR_EXPECT_EQ(compiled.primitives.size(), std::size_t{2});
+    YR_EXPECT_EQ(compiled.primitives[0].material_index, 0);
+    YR_EXPECT_EQ(compiled.primitives[1].material_index, 0);
     YR_EXPECT_EQ(compiled.triangles[0].material_index, 0);
     YR_EXPECT_EQ(compiled.triangles[1].material_index, 0);
     YR_EXPECT_NEAR(compiled.triangles[0].p0.x, 0.0, 1e-6);
@@ -1248,6 +1272,15 @@ YR_TEST(scene_compiler_outputs_backend_neutral_triangles_for_builtin_triangle) {
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
     YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().vertices.size(), std::size_t{3});
+    YR_EXPECT_EQ(result.scene.value().indices.size(), std::size_t{3});
+    YR_EXPECT_EQ(result.scene.value().primitives.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().indices[0], std::uint32_t{0});
+    YR_EXPECT_EQ(result.scene.value().indices[1], std::uint32_t{1});
+    YR_EXPECT_EQ(result.scene.value().indices[2], std::uint32_t{2});
+    YR_EXPECT_EQ(result.scene.value().primitives[0].first_index, std::uint32_t{0});
+    YR_EXPECT_EQ(result.scene.value().primitives[0].index_count, std::uint32_t{3});
+    YR_EXPECT_EQ(result.scene.value().primitives[0].material_index, 0);
 }
 
 YR_TEST(scene_compiler_outputs_backend_neutral_triangles_for_obj_quad) {
@@ -1260,4 +1293,11 @@ YR_TEST(scene_compiler_outputs_backend_neutral_triangles_for_obj_quad) {
     YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
     YR_EXPECT_TRUE(result.scene.has_value());
     YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{2});
+    YR_EXPECT_EQ(result.scene.value().vertices.size(), std::size_t{6});
+    YR_EXPECT_EQ(result.scene.value().indices.size(), std::size_t{6});
+    YR_EXPECT_EQ(result.scene.value().primitives.size(), std::size_t{2});
+    YR_EXPECT_EQ(result.scene.value().primitives[0].first_index, std::uint32_t{0});
+    YR_EXPECT_EQ(result.scene.value().primitives[1].first_index, std::uint32_t{3});
+    YR_EXPECT_EQ(result.scene.value().primitives[0].index_count, std::uint32_t{3});
+    YR_EXPECT_EQ(result.scene.value().primitives[1].index_count, std::uint32_t{3});
 }

@@ -404,6 +404,66 @@ std::string TextureUsageName(TextureUsage usage) {
     return usage == TextureUsage::Color ? "color" : "data";
 }
 
+RenderVertex VertexFromTriangleCorner(
+    const RenderTriangle& triangle,
+    Point3f position,
+    Vec2f uv,
+    Vec3f normal,
+    Vec3f tangent,
+    float tangent_handedness
+) {
+    RenderVertex vertex;
+    vertex.position = position;
+    vertex.normal = normal;
+    vertex.uv = uv;
+    vertex.tangent = tangent;
+    vertex.tangent_handedness = tangent_handedness;
+    vertex.has_uv = triangle.has_uv;
+    vertex.has_normal = triangle.has_vertex_normals;
+    vertex.has_tangent = triangle.has_tangents;
+    return vertex;
+}
+
+void AppendRenderTriangle(RenderSceneIR& compiled, RenderTriangle triangle) {
+    const std::uint32_t first_vertex = static_cast<std::uint32_t>(compiled.vertices.size());
+    const std::uint32_t first_index = static_cast<std::uint32_t>(compiled.indices.size());
+
+    const Vec3f n0 = triangle.has_vertex_normals ? triangle.n0 : triangle.normal;
+    const Vec3f n1 = triangle.has_vertex_normals ? triangle.n1 : triangle.normal;
+    const Vec3f n2 = triangle.has_vertex_normals ? triangle.n2 : triangle.normal;
+
+    compiled.vertices.push_back(VertexFromTriangleCorner(
+        triangle,
+        triangle.p0,
+        triangle.uv0,
+        n0,
+        triangle.t0,
+        triangle.tangent_handedness0
+    ));
+    compiled.vertices.push_back(VertexFromTriangleCorner(
+        triangle,
+        triangle.p1,
+        triangle.uv1,
+        n1,
+        triangle.t1,
+        triangle.tangent_handedness1
+    ));
+    compiled.vertices.push_back(VertexFromTriangleCorner(
+        triangle,
+        triangle.p2,
+        triangle.uv2,
+        n2,
+        triangle.t2,
+        triangle.tangent_handedness2
+    ));
+
+    compiled.indices.push_back(first_vertex + 0);
+    compiled.indices.push_back(first_vertex + 1);
+    compiled.indices.push_back(first_vertex + 2);
+    compiled.primitives.push_back(RenderPrimitive{first_index, 3, triangle.material_index});
+    compiled.triangles.push_back(triangle);
+}
+
 bool AppendTriangle(
     const SceneDescription& scene,
     RenderSceneIR& compiled,
@@ -419,7 +479,7 @@ bool AppendTriangle(
         return false;
     }
 
-    compiled.triangles.push_back(RenderTriangle{
+    AppendRenderTriangle(compiled, RenderTriangle{
         p0,
         p1,
         p2,
@@ -708,7 +768,7 @@ void AppendBuiltinTriangle(RenderSceneIR& compiled, const TransformDescription& 
     const Point3f world_p1 = ApplyTransform(p1, transform);
     const Point3f world_p2 = ApplyTransform(p2, transform);
 
-    compiled.triangles.push_back(RenderTriangle{
+    AppendRenderTriangle(compiled, RenderTriangle{
         world_p0,
         world_p1,
         world_p2,
@@ -838,7 +898,7 @@ bool AppendAssetPrimitive(
                 LengthSquared(render_triangle.t1) > 0.0f &&
                 LengthSquared(render_triangle.t2) > 0.0f;
         }
-        compiled.triangles.push_back(render_triangle);
+        AppendRenderTriangle(compiled, render_triangle);
     }
     return true;
 }

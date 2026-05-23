@@ -92,6 +92,23 @@ struct RenderTriangle {
     bool has_tangents = false;
 };
 
+struct RenderVertex {
+    Point3f position;
+    Vec3f normal{0.0f, 0.0f, 1.0f};
+    Vec2f uv;
+    Vec3f tangent;
+    float tangent_handedness = 1.0f;
+    bool has_uv = false;
+    bool has_normal = false;
+    bool has_tangent = false;
+};
+
+struct RenderPrimitive {
+    std::uint32_t first_index = 0;
+    std::uint32_t index_count = 0;
+    int material_index = 0;
+};
+
 struct RenderAreaLight {
     Point3f position;
     float width = 1.0f;
@@ -116,6 +133,9 @@ struct RenderSceneIR {
     std::vector<RenderMaterial> materials;
     std::vector<RenderTexture> textures;
     std::vector<RenderEnvironmentDistribution> environment_distributions;
+    std::vector<RenderVertex> vertices;
+    std::vector<std::uint32_t> indices;
+    std::vector<RenderPrimitive> primitives;
     std::vector<RenderTriangle> triangles;
     std::vector<RenderAreaLight> area_lights;
 };

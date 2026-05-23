@@ -65,6 +65,9 @@ std::uint64_t ComputeRenderSettingsHash(const RenderSceneIR& scene) {
     HashColor(hash, scene.environment.radiance);
     HashValue(hash, scene.environment.strength);
     HashValue(hash, scene.environment.rotation_radians);
+    HashValue(hash, scene.vertices.size());
+    HashValue(hash, scene.indices.size());
+    HashValue(hash, scene.primitives.size());
     HashValue(hash, scene.triangles.size());
     HashValue(hash, scene.materials.size());
     HashValue(hash, scene.textures.size());
