@@ -258,7 +258,7 @@ Expected: build succeeds. Tests that only check default empty table fields pass.
 
 - [ ] **Step 1: Add table append helper functions**
 
-In `src/render/scene_compiler.cpp`, after `std::optional<int> ResolveMaterialIndex(...)`, add:
+In `src/render/scene_compiler.cpp`, before `bool AppendTriangle(...)`, add:
 
 ```cpp
 RenderVertex VertexFromTriangleCorner(
