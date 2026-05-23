@@ -5,6 +5,7 @@
 #include <yaoray/backends/cpu/cpu_prepared_scene.hpp>
 
 #include <memory>
+#include <string>
 #include <utility>
 
 namespace yr {
@@ -66,7 +67,26 @@ RenderBackendKind CpuDebugBackend::Kind() const {
     return RenderBackendKind::Cpu;
 }
 
+RenderBackendCapabilities CpuDebugBackend::Capabilities() const {
+    return RenderBackendCapabilities{
+        RenderBackendKind::Cpu,
+        true,
+        true,
+        true,
+        true,
+        true
+    };
+}
+
 BackendPrepareResult CpuDebugBackend::Prepare(RenderSceneIR scene) {
+    if (scene.requested_backend != RenderBackendKind::Cpu) {
+        BackendPrepareResult result;
+        result.ok = false;
+        result.error = "CPU backend cannot prepare a scene requested for " +
+            std::string{RenderBackendName(scene.requested_backend)};
+        return result;
+    }
+
     return ToBackendPrepareResult(PrepareCpuScene(std::move(scene)));
 }
 

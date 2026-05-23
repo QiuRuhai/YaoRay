@@ -51,6 +51,19 @@ YR_TEST(create_render_backend_returns_cpu_backend) {
     YR_EXPECT_EQ(backend->Kind(), yr::RenderBackendKind::Cpu);
 }
 
+YR_TEST(cpu_backend_capabilities_describe_current_support) {
+    const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cpu);
+
+    const yr::RenderBackendCapabilities capabilities = backend->Capabilities();
+
+    YR_EXPECT_EQ(capabilities.kind, yr::RenderBackendKind::Cpu);
+    YR_EXPECT_TRUE(capabilities.runnable);
+    YR_EXPECT_TRUE(capabilities.supports_debug_direct);
+    YR_EXPECT_TRUE(capabilities.supports_path);
+    YR_EXPECT_TRUE(capabilities.supports_offline_progress);
+    YR_EXPECT_TRUE(capabilities.supports_texture_materials);
+}
+
 YR_TEST(cpu_prepare_scene_builds_bvh_from_render_scene_ir) {
     const yr::RenderSceneIR scene = MakeBackendTriangleScene(4, 3);
 
@@ -92,6 +105,18 @@ YR_TEST(cpu_backend_prepare_builds_cpu_prepared_scene) {
     YR_EXPECT_EQ(cpu_scene->bvh.nodes.size(), std::size_t{1});
     YR_EXPECT_EQ(cpu_scene->bvh.triangle_indices.size(), std::size_t{1});
     YR_EXPECT_EQ(cpu_scene->bvh.max_depth, 1);
+}
+
+YR_TEST(cpu_backend_prepare_rejects_scene_requested_for_cuda) {
+    const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cpu);
+    yr::RenderSceneIR scene = MakeBackendTriangleScene(4, 3);
+    scene.requested_backend = yr::RenderBackendKind::Cuda;
+
+    const yr::BackendPrepareResult prepared = backend->Prepare(scene);
+
+    YR_EXPECT_TRUE(!prepared.ok);
+    YR_EXPECT_TRUE(prepared.scene == nullptr);
+    YR_EXPECT_TRUE(prepared.error.find("CPU backend cannot prepare a scene requested for cuda") != std::string::npos);
 }
 
 YR_TEST(cpu_backend_prepared_scene_outlives_source_render_scene_ir) {
@@ -211,6 +236,19 @@ YR_TEST(create_render_backend_returns_cuda_stub_backend) {
 
     YR_EXPECT_TRUE(backend != nullptr);
     YR_EXPECT_EQ(backend->Kind(), yr::RenderBackendKind::Cuda);
+}
+
+YR_TEST(cuda_backend_capabilities_describe_controlled_stub) {
+    const std::unique_ptr<yr::RenderBackend> backend = yr::CreateRenderBackend(yr::RenderBackendKind::Cuda);
+
+    const yr::RenderBackendCapabilities capabilities = backend->Capabilities();
+
+    YR_EXPECT_EQ(capabilities.kind, yr::RenderBackendKind::Cuda);
+    YR_EXPECT_TRUE(!capabilities.runnable);
+    YR_EXPECT_TRUE(!capabilities.supports_debug_direct);
+    YR_EXPECT_TRUE(!capabilities.supports_path);
+    YR_EXPECT_TRUE(!capabilities.supports_offline_progress);
+    YR_EXPECT_TRUE(!capabilities.supports_texture_materials);
 }
 
 YR_TEST(cuda_backend_prepare_returns_not_implemented_failure) {

@@ -69,11 +69,21 @@ struct BackendPrepareResult {
     double elapsed_seconds = 0.0;
 };
 
+struct RenderBackendCapabilities {
+    RenderBackendKind kind = RenderBackendKind::Cpu;
+    bool runnable = false;
+    bool supports_debug_direct = false;
+    bool supports_path = false;
+    bool supports_offline_progress = false;
+    bool supports_texture_materials = false;
+};
+
 class RenderBackend {
 public:
     virtual ~RenderBackend() = default;
 
     virtual RenderBackendKind Kind() const = 0;
+    virtual RenderBackendCapabilities Capabilities() const = 0;
     virtual BackendPrepareResult Prepare(RenderSceneIR scene) = 0;
     virtual RenderResult Render(const PreparedScene& scene, const RenderRequest& request) = 0;
 };

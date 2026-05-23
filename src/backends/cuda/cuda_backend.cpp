@@ -6,6 +6,17 @@ RenderBackendKind CudaBackend::Kind() const {
     return RenderBackendKind::Cuda;
 }
 
+RenderBackendCapabilities CudaBackend::Capabilities() const {
+    return RenderBackendCapabilities{
+        RenderBackendKind::Cuda,
+        false,
+        false,
+        false,
+        false,
+        false
+    };
+}
+
 BackendPrepareResult CudaBackend::Prepare(RenderSceneIR scene) {
     (void)scene;
 
