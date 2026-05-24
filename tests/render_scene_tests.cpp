@@ -12,6 +12,7 @@
 #include <yaoray/render/scene_compiler.hpp>
 #include <yaoray/scene/diagnostic.hpp>
 #include <yaoray/scene/scene.hpp>
+#include <yaoray/scene/scene_world.hpp>
 
 namespace {
 
@@ -1301,4 +1302,58 @@ YR_TEST(scene_compiler_outputs_backend_neutral_triangles_for_obj_quad) {
     YR_EXPECT_EQ(result.scene.value().primitives[1].first_index, std::uint32_t{3});
     YR_EXPECT_EQ(result.scene.value().primitives[0].index_count, std::uint32_t{3});
     YR_EXPECT_EQ(result.scene.value().primitives[1].index_count, std::uint32_t{3});
+}
+
+YR_TEST(scene_compiler_accepts_scene_world_directly) {
+    yr::SceneDescription scene = MakeBaseScene();
+    scene.assets.push_back(yr::AssetDescription{"triangle", "builtin:triangle"});
+    scene.instances.push_back(yr::InstanceDescription{"triangle", {}});
+    const yr::SceneWorld world = yr::BuildSceneWorld(scene);
+
+    const yr::SceneCompileResult result = yr::CompileSceneWorld(world);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().vertices.size(), std::size_t{3});
+    YR_EXPECT_EQ(result.scene.value().indices.size(), std::size_t{3});
+    YR_EXPECT_EQ(result.scene.value().primitives.size(), std::size_t{1});
+}
+
+YR_TEST(scene_compiler_expands_scene_world_inline_mesh) {
+    yr::SceneWorld world;
+    world.source_path = "tests/fixtures/pbrt/generated.pbrt";
+    world.render.width = 64;
+    world.render.height = 32;
+    world.camera = yr::CameraDescription{};
+    world.camera->position = yr::Point3f{0.0f, 0.0f, 3.0f};
+    world.camera->target = yr::Point3f{0.0f, 0.0f, 0.0f};
+    world.materials.push_back(yr::MaterialDescription{
+        "white",
+        yr::MaterialKind::Diffuse,
+        yr::Color3f{0.7f, 0.7f, 0.7f},
+        yr::Color3f{}
+    });
+    yr::SceneWorldMesh mesh;
+    mesh.material = "white";
+    mesh.positions = {
+        yr::Point3f{-0.5f, 0.0f, 0.0f},
+        yr::Point3f{0.5f, 0.0f, 0.0f},
+        yr::Point3f{0.0f, 1.0f, 0.0f}
+    };
+    mesh.indices = {0, 1, 2};
+    yr::SceneWorldAsset asset;
+    asset.name = "mesh";
+    asset.meshes.push_back(mesh);
+    world.assets.push_back(asset);
+    world.instances.push_back(yr::SceneWorldInstance{"mesh", {}, ""});
+
+    const yr::SceneCompileResult result = yr::CompileSceneWorld(world);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene.value().materials.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().triangles.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.scene.value().triangles[0].material_index, 0);
+    YR_EXPECT_TRUE(!result.scene.value().triangles[0].has_uv);
 }

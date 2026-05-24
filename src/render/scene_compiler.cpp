@@ -24,11 +24,11 @@ float DegreesToRadians(float degrees) {
     return degrees * Pi / 180.0f;
 }
 
-SceneDiagnostic Error(const SceneDescription& scene, std::string field, std::string message) {
+SceneDiagnostic Error(const SceneWorld& scene, std::string field, std::string message) {
     return SceneDiagnostic{DiagnosticSeverity::Error, scene.source_path, std::move(field), std::move(message)};
 }
 
-SceneDiagnostic Warning(const SceneDescription& scene, std::string field, std::string message) {
+SceneDiagnostic Warning(const SceneWorld& scene, std::string field, std::string message) {
     return SceneDiagnostic{DiagnosticSeverity::Warning, scene.source_path, std::move(field), std::move(message)};
 }
 
@@ -198,7 +198,7 @@ RenderCamera CompileCamera(const CameraDescription& camera) {
     return compiled;
 }
 
-void CopyAreaLights(const SceneDescription& scene, RenderSceneIR& compiled) {
+void CopyAreaLights(const SceneWorld& scene, RenderSceneIR& compiled) {
     for (const LightDescription& light : scene.lights) {
         if (light.type != LightKind::Area) {
             continue;
@@ -213,7 +213,7 @@ void CopyAreaLights(const SceneDescription& scene, RenderSceneIR& compiled) {
 }
 
 void CompileEnvironment(
-    const SceneDescription& scene,
+    const SceneWorld& scene,
     RenderSceneIR& compiled,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
@@ -465,7 +465,7 @@ void AppendRenderTriangle(RenderSceneIR& compiled, RenderTriangle triangle) {
 }
 
 bool AppendTriangle(
-    const SceneDescription& scene,
+    const SceneWorld& scene,
     RenderSceneIR& compiled,
     Point3f p0,
     Point3f p1,
@@ -489,15 +489,15 @@ bool AppendTriangle(
     return true;
 }
 
-std::unordered_map<std::string, const AssetDescription*> BuildAssetMap(const SceneDescription& scene) {
-    std::unordered_map<std::string, const AssetDescription*> assets;
-    for (const AssetDescription& asset : scene.assets) {
+std::unordered_map<std::string, const SceneWorldAsset*> BuildAssetMap(const SceneWorld& scene) {
+    std::unordered_map<std::string, const SceneWorldAsset*> assets;
+    for (const SceneWorldAsset& asset : scene.assets) {
         assets.emplace(asset.name, &asset);
     }
     return assets;
 }
 
-std::unordered_map<std::string, int> BuildMaterialMap(const SceneDescription& scene, RenderSceneIR& compiled) {
+std::unordered_map<std::string, int> BuildMaterialMap(const SceneWorld& scene, RenderSceneIR& compiled) {
     std::unordered_map<std::string, int> materials;
     for (const MaterialDescription& material : scene.materials) {
         const int material_index = static_cast<int>(compiled.materials.size());
@@ -548,7 +548,7 @@ std::string CanonicalTextureKey(
 }
 
 std::optional<int> LoadTextureIndex(
-    const SceneDescription& scene,
+    const SceneWorld& scene,
     RenderSceneIR& compiled,
     const std::filesystem::path& path,
     TextureWrap wrap_s,
@@ -591,7 +591,7 @@ RenderAlphaMode ConvertAssetAlphaMode(AssetAlphaMode mode) {
 }
 
 std::optional<int> CompileMaterialTexture(
-    const SceneDescription& scene,
+    const SceneWorld& scene,
     RenderSceneIR& compiled,
     const AssetResource& resource,
     int asset_texture_index,
@@ -650,7 +650,7 @@ MaterialKind LowerAssetMaterialKind(const AssetMaterial& material) {
 }
 
 std::vector<int> CompileAssetMaterials(
-    const SceneDescription& scene,
+    const SceneWorld& scene,
     RenderSceneIR& compiled,
     const AssetResource& resource,
     TextureCache& texture_cache,
@@ -751,8 +751,8 @@ std::vector<int> CompileAssetMaterials(
 }
 
 std::optional<int> ResolveMaterialIndex(
-    const SceneDescription& scene,
-    const InstanceDescription& instance,
+    const SceneWorld& scene,
+    const SceneWorldInstance& instance,
     const std::unordered_map<std::string, int>& materials,
     RenderSceneIR& compiled,
     std::vector<SceneDiagnostic>& diagnostics
@@ -788,7 +788,7 @@ void AppendBuiltinTriangle(RenderSceneIR& compiled, const TransformDescription& 
 }
 
 bool AppendAssetPrimitive(
-    const SceneDescription& scene,
+    const SceneWorld& scene,
     RenderSceneIR& compiled,
     const AssetPrimitive& primitive,
     Mat4 transform,
@@ -914,7 +914,7 @@ bool AppendAssetPrimitive(
 }
 
 bool AppendAssetNode(
-    const SceneDescription& scene,
+    const SceneWorld& scene,
     RenderSceneIR& compiled,
     const AssetResource& resource,
     int node_index,
@@ -995,10 +995,95 @@ bool AppendAssetNode(
     return true;
 }
 
-void AppendInlineQuadAsset(
-    const SceneDescription& scene,
+bool AppendSceneWorldMesh(
+    const SceneWorld& scene,
     RenderSceneIR& compiled,
-    const AssetDescription& asset,
+    const SceneWorldMesh& mesh,
+    const TransformDescription& transform,
+    std::optional<int> override_material_index,
+    const std::unordered_map<std::string, int>& materials,
+    int& fallback_material_index,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    if (mesh.indices.size() % 3 != 0) {
+        diagnostics.push_back(Error(scene, "assets.meshes.indices", "mesh index count is not divisible by three"));
+        return false;
+    }
+    if (!mesh.normals.empty() && mesh.normals.size() != mesh.positions.size()) {
+        diagnostics.push_back(Error(scene, "assets.meshes.normals", "mesh normal count does not match positions"));
+        return false;
+    }
+    if (!mesh.texcoords0.empty() && mesh.texcoords0.size() != mesh.positions.size()) {
+        diagnostics.push_back(Error(scene, "assets.meshes.texcoords0", "mesh texcoord count does not match positions"));
+        return false;
+    }
+
+    std::optional<int> mesh_material_index = override_material_index;
+    if (!mesh_material_index.has_value() && !mesh.material.empty()) {
+        const auto found = materials.find(mesh.material);
+        if (found == materials.end()) {
+            diagnostics.push_back(Error(scene, "assets.meshes.material", "references unknown material"));
+            return false;
+        }
+        mesh_material_index = found->second;
+    }
+    if (!mesh_material_index.has_value()) {
+        if (fallback_material_index < 0) {
+            fallback_material_index = AddDefaultMaterial(compiled);
+        }
+        mesh_material_index = fallback_material_index;
+    }
+
+    const bool has_normals = mesh.normals.size() == mesh.positions.size();
+    const bool has_uv = mesh.texcoords0.size() == mesh.positions.size();
+    for (std::size_t offset = 0; offset < mesh.indices.size(); offset += 3) {
+        const std::uint32_t i0 = mesh.indices[offset + 0];
+        const std::uint32_t i1 = mesh.indices[offset + 1];
+        const std::uint32_t i2 = mesh.indices[offset + 2];
+        if (i0 >= mesh.positions.size() || i1 >= mesh.positions.size() || i2 >= mesh.positions.size()) {
+            diagnostics.push_back(Error(scene, "assets.meshes.indices", "mesh triangle index references an invalid position"));
+            return false;
+        }
+
+        const Point3f p0 = ApplyTransform(mesh.positions[i0], transform);
+        const Point3f p1 = ApplyTransform(mesh.positions[i1], transform);
+        const Point3f p2 = ApplyTransform(mesh.positions[i2], transform);
+        const Vec3f face_normal = Cross(p1 - p0, p2 - p0);
+        if (LengthSquared(face_normal) <= DegenerateTriangleEpsilon) {
+            diagnostics.push_back(Warning(scene, "assets.meshes", "skipping degenerate scene world mesh triangle"));
+            continue;
+        }
+
+        RenderTriangle triangle;
+        triangle.p0 = p0;
+        triangle.p1 = p1;
+        triangle.p2 = p2;
+        triangle.normal = Normalize(face_normal);
+        triangle.material_index = *mesh_material_index;
+        if (has_uv) {
+            triangle.uv0 = mesh.texcoords0[i0];
+            triangle.uv1 = mesh.texcoords0[i1];
+            triangle.uv2 = mesh.texcoords0[i2];
+            triangle.has_uv = true;
+        }
+        if (has_normals) {
+            triangle.n0 = ApplyNormalTransform(mesh.normals[i0], transform);
+            triangle.n1 = ApplyNormalTransform(mesh.normals[i1], transform);
+            triangle.n2 = ApplyNormalTransform(mesh.normals[i2], transform);
+            triangle.has_vertex_normals =
+                LengthSquared(triangle.n0) > 0.0f &&
+                LengthSquared(triangle.n1) > 0.0f &&
+                LengthSquared(triangle.n2) > 0.0f;
+        }
+        AppendRenderTriangle(compiled, triangle);
+    }
+    return true;
+}
+
+void AppendInlineQuadAsset(
+    const SceneWorld& scene,
+    RenderSceneIR& compiled,
+    const SceneWorldAsset& asset,
     const TransformDescription& transform,
     int material_index,
     std::vector<SceneDiagnostic>& diagnostics
@@ -1020,11 +1105,11 @@ enum class AssetFileKind {
 };
 
 void AppendImportedAssetResource(
-    const SceneDescription& scene,
+    const SceneWorld& scene,
     RenderSceneIR& compiled,
     const std::filesystem::path& asset_path,
     AssetFileKind kind,
-    const InstanceDescription& instance,
+    const SceneWorldInstance& instance,
     std::optional<int> override_material_index,
     std::unordered_map<std::string, AssetResource>& asset_cache,
     TextureCache& texture_cache,
@@ -1090,7 +1175,7 @@ void AppendImportedAssetResource(
 
 } // namespace
 
-SceneCompileResult CompileScene(const SceneDescription& scene) {
+SceneCompileResult CompileSceneWorld(const SceneWorld& scene) {
     SceneCompileResult result;
     RenderSceneIR compiled;
     compiled.requested_backend = scene.render.backend;
@@ -1115,18 +1200,18 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
 
     CopyAreaLights(scene, compiled);
 
-    const std::unordered_map<std::string, const AssetDescription*> assets = BuildAssetMap(scene);
+    const std::unordered_map<std::string, const SceneWorldAsset*> assets = BuildAssetMap(scene);
     const std::unordered_map<std::string, int> materials = BuildMaterialMap(scene, compiled);
     std::unordered_map<std::string, AssetResource> asset_cache;
     TextureCache texture_cache;
-    for (const InstanceDescription& instance : scene.instances) {
+    for (const SceneWorldInstance& instance : scene.instances) {
         const auto asset = assets.find(instance.asset);
         if (asset == assets.end()) {
             result.diagnostics.push_back(Error(scene, "instances.asset", "references unknown asset"));
             continue;
         }
 
-        const AssetDescription& asset_description = *asset->second;
+        const SceneWorldAsset& asset_description = *asset->second;
         const std::filesystem::path& asset_path = asset_description.path;
         const std::string asset_path_string = asset_path.generic_string();
         std::optional<int> material_index;
@@ -1137,7 +1222,23 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
             }
         }
 
-        if (!asset_description.quads.empty()) {
+        if (!asset_description.meshes.empty()) {
+            int fallback_material_index = -1;
+            for (const SceneWorldMesh& mesh : asset_description.meshes) {
+                if (!AppendSceneWorldMesh(
+                        scene,
+                        compiled,
+                        mesh,
+                        instance.transform,
+                        material_index,
+                        materials,
+                        fallback_material_index,
+                        result.diagnostics
+                    )) {
+                    break;
+                }
+            }
+        } else if (!asset_description.quads.empty()) {
             if (!material_index.has_value()) {
                 material_index = ResolveMaterialIndex(scene, instance, materials, compiled, result.diagnostics);
                 if (!material_index.has_value()) {
@@ -1188,6 +1289,10 @@ SceneCompileResult CompileScene(const SceneDescription& scene) {
 
     result.scene = std::move(compiled);
     return result;
+}
+
+SceneCompileResult CompileScene(const SceneDescription& scene) {
+    return CompileSceneWorld(BuildSceneWorld(scene));
 }
 
 } // namespace yr
