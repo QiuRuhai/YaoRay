@@ -59,6 +59,12 @@ target_include_directories(yaoray_assets PUBLIC include)
 target_link_libraries(yaoray_assets PUBLIC yaoray_core yaoray_scene PRIVATE tinygltf tinyobjloader)
 target_compile_options(yaoray_assets PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
 
+add_library(yaoray_pbrt STATIC
+    src/pbrt/pbrt_scene.cpp
+)
+target_include_directories(yaoray_pbrt PUBLIC include)
+target_link_libraries(yaoray_pbrt PUBLIC yaoray_core yaoray_scene PRIVATE yaoray_assets)
+
 add_library(yaoray_render STATIC
     src/render/bvh.cpp
     src/render/bsdf.cpp
@@ -99,6 +105,7 @@ add_executable(yaoray_tests
     tests/scene_tests.cpp
     tests/scene_world_tests.cpp
     tests/render_scene_tests.cpp
+    tests/pbrt_tests.cpp
     tests/bsdf_tests.cpp
     tests/environment_tests.cpp
     tests/mis_tests.cpp
@@ -112,7 +119,7 @@ add_executable(yaoray_tests
     tests/cpu_sampler_tests.cpp
     tests/cpu_path_tracer_tests.cpp
 )
-target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_scene yaoray_render yaoray_assets yaoray_backends)
+target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_scene yaoray_render yaoray_assets yaoray_pbrt yaoray_backends)
 target_compile_definitions(yaoray_tests PRIVATE YAORAY_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 
 add_executable(yaoray

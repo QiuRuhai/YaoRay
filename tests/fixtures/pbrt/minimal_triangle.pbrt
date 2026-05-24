@@ -1,0 +1,8 @@
+Film "rgb" "integer xresolution" [64] "integer yresolution" [32] "string filename" ["out/minimal_pbrt.png"]
+Camera "perspective" "float fov" [45]
+LookAt 0 0 3  0 0 0  0 1 0
+WorldBegin
+MakeNamedMaterial "white" "string type" ["matte"] "rgb reflectance" [0.7 0.7 0.7]
+NamedMaterial "white"
+Shape "trianglemesh" "point3 P" [-0.5 0 0 0.5 0 0 0 1 0] "integer indices" [0 1 2]
+WorldEnd
