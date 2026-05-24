@@ -1,0 +1,8 @@
+Film "rgb" "integer xresolution" [32] "integer yresolution" [32]
+Camera "perspective" "float fov" [45]
+LookAt 0 0 3  0 0 0  0 1 0
+WorldBegin
+MakeNamedMaterial "plymat" "string type" ["matte"] "rgb reflectance" [0.2 0.4 0.8]
+NamedMaterial "plymat"
+Shape "plymesh" "string filename" ["../assets/ply/triangle_ascii.ply"]
+WorldEnd

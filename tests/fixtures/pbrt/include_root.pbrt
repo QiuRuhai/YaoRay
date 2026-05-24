@@ -1,0 +1,11 @@
+Film "rgb" "integer xresolution" [32] "integer yresolution" [32]
+Camera "perspective" "float fov" [45]
+LookAt 0 0 4  1 0 0  0 1 0
+WorldBegin
+MakeNamedMaterial "red" "string type" ["matte"] "rgb reflectance" [1 0.2 0.2]
+AttributeBegin
+NamedMaterial "red"
+Translate 1 0 0
+Include "included_shape.pbrt"
+AttributeEnd
+WorldEnd

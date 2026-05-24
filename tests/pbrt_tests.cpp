@@ -78,3 +78,64 @@ YR_TEST(pbrt_frontend_reports_missing_file) {
     YR_EXPECT_TRUE(!result.scene.has_value());
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, "", "PBRT file not found"));
 }
+
+YR_TEST(pbrt_frontend_resolves_include_with_transform_and_material_scope) {
+    const yr::SceneWorldLoadResult load =
+        yr::LoadPbrtSceneFile(FixturePath("pbrt/include_root.pbrt"));
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(load.diagnostics));
+    YR_EXPECT_TRUE(load.scene.has_value());
+    if (!load.scene.has_value()) {
+        return;
+    }
+
+    const yr::SceneWorld& world = load.scene.value();
+    YR_EXPECT_EQ(world.assets.size(), std::size_t{1});
+    YR_EXPECT_EQ(world.assets[0].meshes.size(), std::size_t{1});
+    YR_EXPECT_EQ(world.assets[0].meshes[0].material, std::string{"red"});
+    YR_EXPECT_NEAR(world.assets[0].meshes[0].positions[0].x, 1.0, 1e-6);
+
+    const yr::SceneCompileResult compiled = yr::CompileSceneWorld(world);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(compiled.diagnostics));
+    YR_EXPECT_TRUE(compiled.scene.has_value());
+    if (!compiled.scene.has_value()) {
+        return;
+    }
+    const yr::RenderSceneIR& scene = compiled.scene.value();
+    YR_EXPECT_EQ(scene.triangles.size(), std::size_t{1});
+    YR_EXPECT_NEAR(scene.triangles[0].p0.x, 1.0, 1e-6);
+    YR_EXPECT_NEAR(scene.materials[scene.triangles[0].material_index].albedo.x, 1.0, 1e-6);
+}
+
+YR_TEST(pbrt_frontend_loads_plymesh_shape) {
+    const yr::SceneWorldLoadResult load =
+        yr::LoadPbrtSceneFile(FixturePath("pbrt/ply_scene.pbrt"));
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(load.diagnostics));
+    YR_EXPECT_TRUE(load.scene.has_value());
+    if (!load.scene.has_value()) {
+        return;
+    }
+
+    const yr::SceneWorld& world = load.scene.value();
+    YR_EXPECT_EQ(world.assets.size(), std::size_t{1});
+    YR_EXPECT_EQ(world.assets[0].meshes.size(), std::size_t{1});
+    const yr::SceneWorldMesh& mesh = world.assets[0].meshes[0];
+    YR_EXPECT_EQ(mesh.material, std::string{"plymat"});
+    YR_EXPECT_EQ(mesh.positions.size(), std::size_t{3});
+    YR_EXPECT_EQ(mesh.normals.size(), std::size_t{3});
+    YR_EXPECT_EQ(mesh.texcoords0.size(), std::size_t{3});
+    YR_EXPECT_EQ(mesh.indices.size(), std::size_t{3});
+
+    const yr::SceneCompileResult compiled = yr::CompileSceneWorld(world);
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(compiled.diagnostics));
+    YR_EXPECT_TRUE(compiled.scene.has_value());
+    if (!compiled.scene.has_value()) {
+        return;
+    }
+    const yr::RenderTriangle& triangle = compiled.scene->triangles[0];
+    YR_EXPECT_TRUE(triangle.has_uv);
+    YR_EXPECT_TRUE(triangle.has_vertex_normals);
+}
