@@ -139,3 +139,25 @@ YR_TEST(pbrt_frontend_loads_plymesh_shape) {
     YR_EXPECT_TRUE(triangle.has_uv);
     YR_EXPECT_TRUE(triangle.has_vertex_normals);
 }
+
+YR_TEST(pbrt_frontend_builds_camera_from_active_transform_and_resets_world_transform) {
+    const yr::SceneWorldLoadResult load =
+        yr::LoadPbrtSceneFile(FixturePath("pbrt/camera_transform.pbrt"));
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(load.diagnostics));
+    YR_EXPECT_TRUE(load.scene.has_value());
+    if (!load.scene.has_value()) {
+        return;
+    }
+
+    const yr::SceneWorld& world = load.scene.value();
+    YR_EXPECT_TRUE(world.camera.has_value());
+    YR_EXPECT_NEAR(world.camera->position.y, 2.0, 1e-6);
+    YR_EXPECT_NEAR(world.camera->position.z, 5.0, 1e-6);
+    YR_EXPECT_NEAR(world.camera->target.z, 6.0, 1e-6);
+    YR_EXPECT_NEAR(world.camera->fov_y, 30.0, 1e-6);
+    YR_EXPECT_EQ(world.assets.size(), std::size_t{1});
+    YR_EXPECT_NEAR(world.assets[0].meshes[0].positions[0].x, 0.0, 1e-6);
+    YR_EXPECT_NEAR(world.assets[0].meshes[0].positions[0].y, 0.0, 1e-6);
+    YR_EXPECT_NEAR(world.assets[0].meshes[0].positions[0].z, 0.0, 1e-6);
+}

@@ -1,0 +1,5 @@
+Transform [1 0 0 0  0 1 0 0  0 0 1 0  0 2 5 1]
+Camera "perspective" "float fov" [30]
+WorldBegin
+Shape "trianglemesh" "point3 P" [0 0 0  1 0 0  0 1 0] "integer indices" [0 1 2]
+WorldEnd

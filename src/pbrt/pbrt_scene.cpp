@@ -149,11 +149,8 @@ Mat4 RotationAxisMatrix(float degrees, Vec3f axis) {
 
 Mat4 MatrixFromPbrtValues(const std::vector<float>& values) {
     Mat4 result;
-    for (int row = 0; row < 4; ++row) {
-        for (int column = 0; column < 4; ++column) {
-            result.m[static_cast<std::size_t>(column * 4 + row)] =
-                values[static_cast<std::size_t>(row * 4 + column)];
-        }
+    for (std::size_t i = 0; i < result.m.size(); ++i) {
+        result.m[i] = values[i];
     }
     return result;
 }
@@ -707,6 +704,14 @@ bool ParseTokens(
                     state.world.camera->fov_y = state.current_fov;
                 }
             }
+            if (!state.world.camera.has_value()) {
+                CameraDescription camera;
+                camera.type = CameraKind::Perspective;
+                camera.position = TransformPoint(state.current_transform, Point3f{0.0f, 0.0f, 0.0f});
+                camera.target = TransformPoint(state.current_transform, Point3f{0.0f, 0.0f, 1.0f});
+                camera.fov_y = state.current_fov;
+                state.world.camera = camera;
+            }
         } else if (command == "LookAt") {
             std::vector<float> values;
             if (!ReadFloatSequence(tokens, index, 9, path, "LookAt", state.diagnostics, values)) {
@@ -718,7 +723,11 @@ bool ParseTokens(
             camera.target = Point3f{values[3], values[4], values[5]};
             camera.fov_y = state.current_fov;
             state.world.camera = camera;
-        } else if (command == "WorldBegin" || command == "WorldEnd") {
+        } else if (command == "WorldBegin") {
+            state.current_transform = Mat4{};
+            state.attribute_stack.clear();
+            state.transform_stack.clear();
+        } else if (command == "WorldEnd") {
             continue;
         } else if (command == "AttributeBegin") {
             state.attribute_stack.push_back(ScopedPbrtState{state.current_material, state.current_transform});
