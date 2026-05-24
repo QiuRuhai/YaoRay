@@ -1,14 +1,18 @@
 #include "yr_test.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <yaoray/assets/asset_resource.hpp>
 #include <yaoray/assets/gltf_loader.hpp>
 #include <yaoray/assets/obj_loader.hpp>
+#include <yaoray/assets/ply_loader.hpp>
 
 #ifndef YAORAY_TEST_DATA_DIR
 #error "YAORAY_TEST_DATA_DIR must be defined"
@@ -279,6 +283,81 @@ YR_TEST(obj_loader_rejects_duplicate_mtl_material_names) {
 
     YR_EXPECT_TRUE(!result.resource.has_value());
     YR_EXPECT_TRUE(ErrorContains(result, "duplicate OBJ material"));
+}
+
+YR_TEST(ply_loader_loads_ascii_triangle_with_normals_and_uvs) {
+    const yr::AssetLoadResult result = yr::LoadPlyResource(FixturePath("assets/ply/triangle_ascii.ply"));
+
+    YR_EXPECT_TRUE(result.resource.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    const yr::AssetResource& resource = ResourceValue(result);
+    const yr::AssetPrimitive& primitive = FirstPrimitive(resource);
+    YR_EXPECT_EQ(resource.scenes.size(), std::size_t{1});
+    YR_EXPECT_EQ(resource.nodes.size(), std::size_t{1});
+    YR_EXPECT_EQ(resource.meshes.size(), std::size_t{1});
+    YR_EXPECT_EQ(primitive.positions.size(), std::size_t{3});
+    YR_EXPECT_EQ(primitive.normals.size(), std::size_t{3});
+    YR_EXPECT_EQ(primitive.texcoords0.size(), std::size_t{3});
+    YR_EXPECT_EQ(primitive.indices.size(), std::size_t{3});
+    YR_EXPECT_NEAR(primitive.positions[0].x, -0.5, 1e-6);
+    YR_EXPECT_NEAR(primitive.normals[0].z, 1.0, 1e-6);
+    YR_EXPECT_NEAR(primitive.texcoords0[1].x, 1.0, 1e-6);
+}
+
+YR_TEST(ply_loader_triangulates_ascii_quad_face) {
+    const yr::AssetLoadResult result = yr::LoadPlyResource(FixturePath("assets/ply/quad_ascii.ply"));
+
+    YR_EXPECT_TRUE(result.resource.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    const yr::AssetPrimitive& primitive = FirstPrimitive(ResourceValue(result));
+    YR_EXPECT_EQ(primitive.positions.size(), std::size_t{4});
+    YR_EXPECT_EQ(primitive.indices.size(), std::size_t{6});
+    YR_EXPECT_EQ(primitive.indices[0], std::uint32_t{0});
+    YR_EXPECT_EQ(primitive.indices[1], std::uint32_t{1});
+    YR_EXPECT_EQ(primitive.indices[2], std::uint32_t{2});
+    YR_EXPECT_EQ(primitive.indices[3], std::uint32_t{0});
+    YR_EXPECT_EQ(primitive.indices[4], std::uint32_t{2});
+    YR_EXPECT_EQ(primitive.indices[5], std::uint32_t{3});
+}
+
+YR_TEST(ply_loader_rejects_non_triangle_or_quad_face) {
+    const yr::AssetLoadResult result = yr::LoadPlyResource(FixturePath("assets/ply/bad_face.ply"));
+
+    YR_EXPECT_TRUE(!result.resource.has_value());
+    YR_EXPECT_TRUE(ErrorContains(result, "only triangle and quad faces are supported"));
+}
+
+YR_TEST(ply_loader_loads_binary_little_endian_triangle) {
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "yaoray_ply_tests";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "triangle_binary.ply";
+    {
+        std::ofstream out{path, std::ios::binary};
+        out << "ply\n";
+        out << "format binary_little_endian 1.0\n";
+        out << "element vertex 3\n";
+        out << "property float x\n";
+        out << "property float y\n";
+        out << "property float z\n";
+        out << "element face 1\n";
+        out << "property list uchar int vertex_indices\n";
+        out << "end_header\n";
+        const float values[] = {-0.5f, 0.0f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
+        out.write(reinterpret_cast<const char*>(values), sizeof(values));
+        const unsigned char count = 3;
+        const std::int32_t indices[] = {0, 1, 2};
+        out.write(reinterpret_cast<const char*>(&count), sizeof(count));
+        out.write(reinterpret_cast<const char*>(indices), sizeof(indices));
+    }
+
+    const yr::AssetLoadResult result = yr::LoadPlyResource(path);
+
+    YR_EXPECT_TRUE(result.resource.has_value());
+    YR_EXPECT_TRUE(result.errors.empty());
+    const yr::AssetPrimitive& primitive = FirstPrimitive(ResourceValue(result));
+    YR_EXPECT_EQ(primitive.positions.size(), std::size_t{3});
+    YR_EXPECT_EQ(primitive.indices.size(), std::size_t{3});
+    YR_EXPECT_NEAR(primitive.positions[2].y, 1.0, 1e-6);
 }
 
 YR_TEST(gltf_loader_rejects_non_gltf_extension) {

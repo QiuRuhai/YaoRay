@@ -53,6 +53,7 @@ target_link_libraries(yaoray_scene PUBLIC yaoray_core PRIVATE tomlplusplus)
 add_library(yaoray_assets STATIC
     src/assets/gltf_loader.cpp
     src/assets/obj_loader.cpp
+    src/assets/ply_loader.cpp
 )
 target_include_directories(yaoray_assets PUBLIC include)
 target_link_libraries(yaoray_assets PUBLIC yaoray_core yaoray_scene PRIVATE tinygltf tinyobjloader)
