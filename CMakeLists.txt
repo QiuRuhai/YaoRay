@@ -45,6 +45,7 @@ add_library(yaoray_scene STATIC
     src/scene/diagnostic.cpp
     src/scene/scene.cpp
     src/scene/scene_parser.cpp
+    src/scene/scene_world.cpp
 )
 target_include_directories(yaoray_scene PUBLIC include)
 target_link_libraries(yaoray_scene PUBLIC yaoray_core PRIVATE tomlplusplus)
@@ -95,6 +96,7 @@ add_executable(yaoray_tests
     tests/bvh_tests.cpp
     tests/film_tests.cpp
     tests/scene_tests.cpp
+    tests/scene_world_tests.cpp
     tests/render_scene_tests.cpp
     tests/bsdf_tests.cpp
     tests/environment_tests.cpp
