@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <yaoray/core/vec.hpp>
+#include <yaoray/scene/diagnostic.hpp>
 #include <yaoray/scene/scene.hpp>
 
 namespace yr {
@@ -44,6 +45,11 @@ struct SceneWorld {
     std::vector<SceneWorldInstance> instances;
     std::vector<LightDescription> lights;
     EnvironmentDescription environment;
+};
+
+struct SceneWorldLoadResult {
+    std::optional<SceneWorld> scene;
+    std::vector<SceneDiagnostic> diagnostics;
 };
 
 SceneWorld BuildSceneWorld(const SceneDescription& scene);

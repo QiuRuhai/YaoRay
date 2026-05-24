@@ -3,10 +3,10 @@
 #include <yaoray/film/film_checkpoint.hpp>
 #include <yaoray/film/image_writer.hpp>
 #include <yaoray/film/tone_mapping.hpp>
+#include <yaoray/frontends/scene_frontend.hpp>
 #include <yaoray/render/render_scene_hash.hpp>
 #include <yaoray/render/scene_compiler.hpp>
 #include <yaoray/scene/diagnostic.hpp>
-#include <yaoray/scene/scene_parser.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -28,13 +28,13 @@ void PrintHelp() {
         << "Usage:\n"
         << "  yaoray --help\n"
         << "  yaoray --version\n"
-        << "  yaoray render <scene.toml> [--backend cpu|cuda]\n";
+        << "  yaoray render <scene.toml|scene.pbrt> [--backend cpu|cuda]\n";
 }
 
 void PrintRenderHelp() {
     std::cout
         << "Usage:\n"
-        << "  yaoray render <scene.toml> [--backend cpu|cuda]\n"
+        << "  yaoray render <scene.toml|scene.pbrt> [--backend cpu|cuda]\n"
         << '\n'
         << "The render command parses, compiles, and renders scenes with scene-selected CPU integrators.\n";
 }
@@ -58,7 +58,7 @@ double SafeRate(double numerator, double elapsed_seconds) {
     return numerator / elapsed_seconds;
 }
 
-bool OfflineRequested(const yr::SceneDescription& scene) {
+bool OfflineRequested(const yr::SceneWorld& scene) {
     return scene.offline.progress ||
            !scene.offline.checkpoint_png.empty() ||
            !scene.offline.checkpoint_state.empty() ||
@@ -66,7 +66,7 @@ bool OfflineRequested(const yr::SceneDescription& scene) {
 }
 
 std::optional<std::string> ValidateOfflineWorkflow(
-    const yr::SceneDescription& scene,
+    const yr::SceneWorld& scene,
     const yr::RenderSceneIR& render_scene
 ) {
     if (!OfflineRequested(scene)) {
@@ -152,18 +152,18 @@ int RunRender(int argc, char** argv) {
         }
     }
 
-    yr::SceneLoadResult result = yr::LoadSceneFile(scene_path);
+    yr::SceneWorldLoadResult result = yr::LoadSceneWorldFile(scene_path);
     if (yr::HasSceneErrors(result.diagnostics) || !result.scene.has_value()) {
         std::cerr << yr::FormatSceneDiagnostics(result.diagnostics) << '\n';
         return 1;
     }
 
-    yr::SceneDescription scene = std::move(result.scene.value());
+    yr::SceneWorld scene = std::move(result.scene.value());
     if (backend_override) {
         yr::ApplyBackendOverride(scene, *backend_override);
     }
 
-    const yr::SceneCompileResult compile_result = yr::CompileScene(scene);
+    const yr::SceneCompileResult compile_result = yr::CompileSceneWorld(scene);
     if (yr::HasSceneErrors(compile_result.diagnostics) || !compile_result.scene.has_value()) {
         std::cerr << yr::FormatSceneDiagnostics(compile_result.diagnostics) << '\n';
         return 1;

@@ -65,6 +65,12 @@ add_library(yaoray_pbrt STATIC
 target_include_directories(yaoray_pbrt PUBLIC include)
 target_link_libraries(yaoray_pbrt PUBLIC yaoray_core yaoray_scene PRIVATE yaoray_assets)
 
+add_library(yaoray_frontends STATIC
+    src/frontends/scene_frontend.cpp
+)
+target_include_directories(yaoray_frontends PUBLIC include)
+target_link_libraries(yaoray_frontends PUBLIC yaoray_scene PRIVATE yaoray_pbrt)
+
 add_library(yaoray_render STATIC
     src/render/bvh.cpp
     src/render/bsdf.cpp
@@ -104,6 +110,7 @@ add_executable(yaoray_tests
     tests/film_tests.cpp
     tests/scene_tests.cpp
     tests/scene_world_tests.cpp
+    tests/frontends_tests.cpp
     tests/render_scene_tests.cpp
     tests/pbrt_tests.cpp
     tests/bsdf_tests.cpp
@@ -119,13 +126,13 @@ add_executable(yaoray_tests
     tests/cpu_sampler_tests.cpp
     tests/cpu_path_tracer_tests.cpp
 )
-target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_scene yaoray_render yaoray_assets yaoray_pbrt yaoray_backends)
+target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_scene yaoray_frontends yaoray_render yaoray_assets yaoray_pbrt yaoray_backends)
 target_compile_definitions(yaoray_tests PRIVATE YAORAY_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 
 add_executable(yaoray
     src/app/main.cpp
 )
-target_link_libraries(yaoray PRIVATE yaoray_core yaoray_film yaoray_scene yaoray_render yaoray_backends)
+target_link_libraries(yaoray PRIVATE yaoray_core yaoray_film yaoray_scene yaoray_frontends yaoray_render yaoray_backends)
 
 if(BUILD_TESTING)
     add_executable(yaoray_glass_showcase_visual_sanity
@@ -240,6 +247,15 @@ if(BUILD_TESTING)
         EXPECT_REGEX
             "Integrator: path"
             "Compiled triangles: 2"
+            "Rendered image:"
+    )
+    add_yaoray_cli_render_test(yaoray_cli_render_pbrt_minimal
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/pbrt/minimal_triangle.pbrt"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scene/out/minimal_pbrt.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: path"
+            "Compiled triangles: 1"
             "Rendered image:"
     )
     add_yaoray_cli_render_test(yaoray_cli_render_cornell_box

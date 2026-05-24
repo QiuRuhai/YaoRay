@@ -1,4 +1,4 @@
-Film "rgb" "integer xresolution" [64] "integer yresolution" [32] "string filename" ["out/minimal_pbrt.png"]
+Film "rgb" "integer xresolution" [64] "integer yresolution" [32] "string filename" ["../scene/out/minimal_pbrt.png"]
 Camera "perspective" "float fov" [45]
 LookAt 0 0 3  0 0 0  0 1 0
 WorldBegin
