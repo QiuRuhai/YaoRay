@@ -1,6 +1,7 @@
 #include <yaoray/render/scene_compiler.hpp>
 
 #include <yaoray/assets/ply_loader.hpp>
+#include <yaoray/render/environment.hpp>
 #include <yaoray/render/texture.hpp>
 
 #include <algorithm>
@@ -726,6 +727,63 @@ bool CompileInstances(
 // Analytic light compilation
 // ---------------------------------------------------------------------------
 
+bool CompileEnvironmentLight(
+    const PbrtLightRecord& record,
+    const PbrtScene& scene,
+    RenderSceneIR& ir,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    // Filename: PBRT v4 accepts "filename"; PBRT v3 used "mapname". Honor both.
+    const PbrtParam* fname = FindParam(record.light.params, "filename");
+    if (fname == nullptr || fname->strings.empty()) {
+        fname = FindParam(record.light.params, "mapname");
+    }
+    if (fname == nullptr || fname->strings.empty()) {
+        diagnostics.push_back(Error(scene, "LightSource.infinite",
+            "infinite light requires a filename (or mapname)"));
+        return false;
+    }
+
+    const std::filesystem::path resolved = scene.source_root / fname->strings[0];
+    TextureLoadResult load = LoadHdrTexture(resolved);
+    if (!load.ok) {
+        diagnostics.push_back(Error(scene, "LightSource.infinite", load.error));
+        return false;
+    }
+
+    const int texture_index = static_cast<int>(ir.textures.size());
+    ir.textures.push_back(std::move(load.texture));
+
+    RenderEnvironmentDistribution dist = BuildEnvironmentDistribution(ir.textures[texture_index]);
+    const int dist_index = static_cast<int>(ir.environment_distributions.size());
+    ir.environment_distributions.push_back(std::move(dist));
+
+    const Color3f L = RgbParam(FindParam(record.light.params, "L"), Color3f{1.0f, 1.0f, 1.0f});
+    Color3f scale{1.0f, 1.0f, 1.0f};
+    const PbrtParam* scale_param = FindParam(record.light.params, "scale");
+    if (scale_param != nullptr) {
+        if (scale_param->floats.size() >= 3) {
+            scale = Color3f{scale_param->floats[0], scale_param->floats[1], scale_param->floats[2]};
+        } else if (!scale_param->floats.empty()) {
+            const float s = scale_param->floats[0];
+            scale = Color3f{s, s, s};
+        }
+    }
+
+    ir.environment.active = true;
+    ir.environment.radiance = Color3f{L.x * scale.x, L.y * scale.y, L.z * scale.z};
+    ir.environment.strength = 1.0f;
+    ir.environment.rotation_radians = 0.0f;
+    ir.environment.texture_index = texture_index;
+    ir.environment.distribution_index = dist_index;
+
+    if (FindParam(record.light.params, "portals") != nullptr) {
+        diagnostics.push_back(Warning(scene, "LightSource.infinite",
+            "portal sampling is not supported in M1; portals parameter ignored"));
+    }
+    return true;
+}
+
 void CompileAnalyticLights(const PbrtScene& scene, RenderSceneIR& ir, std::vector<SceneDiagnostic>& diagnostics) {
     for (const PbrtLightRecord& record : scene.lights) {
         if (record.light.type == "point") {
@@ -749,11 +807,12 @@ void CompileAnalyticLights(const PbrtScene& scene, RenderSceneIR& ir, std::vecto
             al.cone_angle = 0.0f;
 
             ir.analytic_lights.push_back(al);
+        } else if (record.light.type == "infinite") {
+            CompileEnvironmentLight(record, scene, ir, diagnostics);
         } else if (record.light.type == "distant" ||
-                   record.light.type == "spot" ||
-                   record.light.type == "infinite") {
+                   record.light.type == "spot") {
             diagnostics.push_back(Warning(scene, "LightSource",
-                "LightSource type '" + record.light.type + "' is not yet supported in M1 Slice 1 and was ignored"));
+                "LightSource type '" + record.light.type + "' is not yet supported in M1 Slice 2 and was ignored"));
         } else {
             diagnostics.push_back(Warning(scene, "LightSource",
                 "unsupported LightSource type: " + record.light.type));
