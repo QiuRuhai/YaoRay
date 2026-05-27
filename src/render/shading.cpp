@@ -134,9 +134,12 @@ Bounds3f SphereBounds(Point3f center, float radius) {
 }
 
 Vec3f SphereNormal(Point3f center, float radius, Point3f surface_point) {
-    const Vec3f d{surface_point.x - center.x, surface_point.y - center.y, surface_point.z - center.z};
-    const float inv_r = radius > 0.0f ? 1.0f / radius : 0.0f;
-    return Vec3f{d.x * inv_r, d.y * inv_r, d.z * inv_r};
+    (void)radius;  // accepted for caller convenience; not required for correctness.
+    return Normalize(Vec3f{
+        surface_point.x - center.x,
+        surface_point.y - center.y,
+        surface_point.z - center.z
+    });
 }
 
 Vec2f SphereUv(Vec3f outward_normal) {

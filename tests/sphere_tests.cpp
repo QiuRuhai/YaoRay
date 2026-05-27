@@ -61,3 +61,11 @@ YR_TEST(sphere_uv_front_seam_is_u_half) {
     const yr::Vec2f uv = yr::SphereUv(yr::Vec3f{0.0f, 0.0f, 1.0f});
     YR_EXPECT_NEAR(uv.x, 0.5f, 1.0e-5);
 }
+
+YR_TEST(sphere_intersect_respects_t_min) {
+    // Ray from inside-but-near-origin hits unit sphere at t=1, but t_min above
+    // that root must reject the hit.
+    const yr::Ray3f ray{yr::Point3f{0.0f, 0.0f, 0.0f}, yr::Vec3f{0.0f, 0.0f, 1.0f}};
+    const yr::SphereHit hit = yr::IntersectSphere(yr::Point3f{0.0f, 0.0f, 0.0f}, 1.0f, ray, 2.0f, 1.0e6f);
+    YR_EXPECT_TRUE(!hit.hit);
+}
