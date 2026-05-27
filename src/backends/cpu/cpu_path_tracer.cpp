@@ -465,6 +465,42 @@ Color3f EstimateDirectLight(
         radiance = radiance * inverse_light_sample_count;
     }
 
+    // Analytic (non-area, non-environment) lights — deltas, no MIS vs BSDF.
+    for (const AnalyticLight& light : scene.analytic_lights) {
+        AnalyticLightSample sample;
+        if (light.kind == AnalyticLightKind::Point) {
+            sample = SampleAnalyticPoint(light, hit_point);
+        } else {
+            // Slice 1 only handles Point. Distant/Spot land in later slices.
+            continue;
+        }
+        if (!sample.valid || IsNearBlack(sample.radiance)) {
+            continue;
+        }
+        const float cos_surface = std::max(0.0f, Dot(normal, sample.wi));
+        if (cos_surface <= 0.0f) {
+            continue;
+        }
+        const Color3f bsdf = EvaluateBsdf(material, wo, sample.wi, normal);
+        if (IsNearBlack(bsdf)) {
+            continue;
+        }
+        const Point3f shadow_origin = hit_point + normal * SurfaceBias(hit_point);
+        ++stats.shadow_rays;
+        const ShadowVisibility visibility = TraceShadowVisibility(
+            prepared_scene,
+            Ray3f{shadow_origin, sample.wi},
+            sample.distance - SurfaceBias(hit_point),
+            stats
+        );
+        if (!visibility.visible) {
+            ++stats.occluded_shadow_rays;
+            continue;
+        }
+        const Color3f visible_radiance = Multiply(visibility.transmittance, sample.radiance);
+        radiance = radiance + Multiply(bsdf, visible_radiance) * cos_surface;
+    }
+
     radiance = radiance + EstimateDirectEnvironmentLight(prepared_scene, material, hit_point, normal, wo, sampler, stats);
     return radiance;
 }
