@@ -138,3 +138,58 @@ YR_TEST(cpu_path_tracer_emissive_surface_contributes_radiance) {
     YR_EXPECT_NEAR(center.y, 0.5, 1e-6);
     YR_EXPECT_NEAR(center.z, 0.75, 1e-6);
 }
+
+YR_TEST(cpu_path_tracer_renders_sphere_in_an_emissive_room) {
+    yr::RenderSceneIR scene;
+    scene.width = 32;
+    scene.height = 32;
+    scene.spp = 8;
+    scene.max_depth = 3;
+    scene.camera.origin = yr::Point3f{0.0f, 0.0f, 3.0f};
+    scene.camera.forward = yr::Vec3f{0.0f, 0.0f, -1.0f};
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Vec3f{0.0f, 1.0f, 0.0f};
+    scene.camera.fov_y_radians = 1.04719758f;
+
+    // Diffuse sphere material.
+    yr::RenderMaterial diffuse;
+    diffuse.kind = yr::RenderMaterialKind::Diffuse;
+    diffuse.reflectance.value = yr::Color3f{0.8f, 0.4f, 0.2f};
+    scene.materials.push_back(diffuse);
+
+    // Emissive material for a ceiling quad.
+    yr::RenderMaterial emissive;
+    emissive.kind = yr::RenderMaterialKind::Diffuse;
+    emissive.emission = yr::Color3f{5.0f, 5.0f, 5.0f};
+    scene.materials.push_back(emissive);
+
+    yr::RenderSphere sphere;
+    sphere.center = yr::Point3f{0.0f, 0.0f, 0.0f};
+    sphere.radius = 0.5f;
+    sphere.material_index = 0;
+    scene.spheres.push_back(sphere);
+
+    // Big emissive ceiling at y = 2.
+    scene.vertices = {
+        yr::RenderVertex{yr::Point3f{-2.0f, 2.0f, -2.0f}, yr::Vec3f{0.0f, -1.0f, 0.0f}, {}, {}, 1.0f},
+        yr::RenderVertex{yr::Point3f{ 2.0f, 2.0f, -2.0f}, yr::Vec3f{0.0f, -1.0f, 0.0f}, {}, {}, 1.0f},
+        yr::RenderVertex{yr::Point3f{ 2.0f, 2.0f,  2.0f}, yr::Vec3f{0.0f, -1.0f, 0.0f}, {}, {}, 1.0f},
+        yr::RenderVertex{yr::Point3f{-2.0f, 2.0f,  2.0f}, yr::Vec3f{0.0f, -1.0f, 0.0f}, {}, {}, 1.0f},
+    };
+    scene.indices = {0, 1, 2,  0, 2, 3};
+    scene.primitives.push_back(yr::RenderPrimitive{0, 6, 1, true, false, false});
+
+    yr::EmissivePrimitive ep;
+    ep.primitive_index = 0;
+    ep.radiance = yr::Color3f{5.0f, 5.0f, 5.0f};
+    ep.area = 16.0f;
+    scene.emissive_primitives.push_back(ep);
+
+    const yr::CpuPathTraceResult result = RunPathTrace(std::move(scene));
+    YR_EXPECT_TRUE(result.ok);
+    YR_EXPECT_TRUE(result.stats.hits > 0);
+
+    // The center pixel must see the sphere (not the ceiling and not a miss).
+    const yr::Color3f center = result.film.LinearPixel(16, 16);
+    YR_EXPECT_TRUE(center.x > 0.0f);
+}

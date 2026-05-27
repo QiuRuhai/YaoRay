@@ -229,7 +229,9 @@ ShadowVisibility TraceShadowVisibility(
         if (surface_hit.exhausted) {
             return ShadowVisibility{false, Color3f{}};
         }
-        if (!surface_hit.hit || surface_hit.geometry_hit.triangle_index < 0) {
+        const bool is_miss = !surface_hit.hit ||
+            (surface_hit.geometry_hit.triangle_index < 0 && surface_hit.geometry_hit.sphere_index < 0);
+        if (is_miss) {
             if (medium.active) {
                 if (!finite_segment) {
                     return ShadowVisibility{false, Color3f{}};
@@ -253,7 +255,10 @@ ShadowVisibility TraceShadowVisibility(
             }
         }
 
-        if (!IsValidMaterialIndex(scene, scene.primitives[surface_hit.geometry_hit.primitive_index].material_index)) {
+        // For sphere hits, the material was already resolved in the surface layer; validate
+        // the triangle primitive material only for triangle hits.
+        if (surface_hit.geometry_hit.primitive_index >= 0 &&
+            !IsValidMaterialIndex(scene, scene.primitives[surface_hit.geometry_hit.primitive_index].material_index)) {
             return ShadowVisibility{false, Color3f{}};
         }
 
@@ -484,7 +489,9 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
             &trace_stats
         );
         AccumulateTraceStats(stats, trace_stats);
-        if (!surface_hit.hit || surface_hit.geometry_hit.triangle_index < 0 || surface_hit.exhausted) {
+        const bool is_miss = !surface_hit.hit ||
+            (surface_hit.geometry_hit.triangle_index < 0 && surface_hit.geometry_hit.sphere_index < 0);
+        if (is_miss || surface_hit.exhausted) {
             ++stats.misses;
             const float environment_weight = EnvironmentHitMisWeight(scene, previous_bounce, ray.direction);
             radiance = radiance + Multiply(throughput, EnvironmentColor(scene, ray.direction)) * environment_weight;
@@ -497,7 +504,10 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
             break;
         }
 
-        if (!IsValidMaterialIndex(scene, scene.primitives[surface_hit.geometry_hit.primitive_index].material_index)) {
+        // For sphere hits, the surface layer already resolved the material; for triangle hits
+        // validate via the primitive table. Either way, surface_hit.sample.material is correct.
+        if (surface_hit.geometry_hit.primitive_index >= 0 &&
+            !IsValidMaterialIndex(scene, scene.primitives[surface_hit.geometry_hit.primitive_index].material_index)) {
             radiance = radiance + Multiply(throughput, Color3f{1.0f, 0.0f, 1.0f});
             break;
         }
@@ -507,7 +517,9 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
         const RenderMaterial& material = surface_hit.sample.material;
         const Vec3f normal = surface_hit.sample.shading_normal;
 
-        if (!IsNearBlack(material.emission)) {
+        // Emissive contribution. For sphere hits, sphere emission is out of M1 Slice 1 scope,
+        // so we guard LocateTriangle with triangle_index >= 0.
+        if (!IsNearBlack(material.emission) && surface_hit.geometry_hit.triangle_index >= 0) {
             const TriangleRef hit_tri = LocateTriangle(scene, surface_hit.geometry_hit.triangle_index);
             const Vec3f light_geo_normal = GeometricNormal(scene, hit_tri);
             const float emission_weight = EmissiveHitMisWeight(scene, previous_bounce, hit_point, light_geo_normal);

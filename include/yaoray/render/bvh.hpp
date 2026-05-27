@@ -45,8 +45,9 @@ struct BvhHit {
     float t = std::numeric_limits<float>::infinity();
     int triangle_index = -1;
     int primitive_index = -1;
-    float bary_u = 0.0f;
-    float bary_v = 0.0f;
+    int sphere_index = -1;       // -1 for triangle hits; >= 0 for sphere hits
+    float bary_u = 0.0f;         // For sphere hits, this is the U on the sphere (azimuth).
+    float bary_v = 0.0f;         // For sphere hits, this is the V on the sphere (zenith).
 };
 
 struct BvhBuildResult {
