@@ -28,6 +28,13 @@ SceneDiagnostic Warning(const PbrtScene& scene, std::string field, std::string m
     return SceneDiagnostic{DiagnosticSeverity::Warning, scene.source_path, std::move(field), std::move(message)};
 }
 
+SceneDiagnostic MaterialFallbackWarning(const PbrtScene& scene, const std::string& declared_kind) {
+    return Warning(scene,
+        "Material",
+        "material kind '" + declared_kind + "' is not supported in M1 Slice 1; falling back to 'diffuse'. "
+        "(Slice 4 will replace this catch-all with a per-kind substitution table.)");
+}
+
 const PbrtParam* FindParam(const std::vector<PbrtParam>& params, const std::string& name) {
     for (const PbrtParam& param : params) {
         if (param.name == name) return &param;
@@ -176,7 +183,7 @@ int CompileMaterial(
         material.reflectance.value = RgbParam(FindParam(params, "Kd"), Color3f{0.5f, 0.5f, 0.5f});
         material.reflectance.value = RgbParam(FindParam(params, "reflectance"), material.reflectance.value);
     } else {
-        diagnostics.push_back(Warning(scene, "Material", "unknown material type '" + type + "', defaulting to diffuse"));
+        diagnostics.push_back(MaterialFallbackWarning(scene, type));
         material.kind = RenderMaterialKind::Diffuse;
         material.reflectance.value = RgbParam(FindParam(params, "reflectance"), Color3f{0.5f, 0.5f, 0.5f});
         material.reflectance.value = RgbParam(FindParam(params, "Kd"), material.reflectance.value);
