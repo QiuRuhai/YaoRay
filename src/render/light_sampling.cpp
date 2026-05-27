@@ -117,10 +117,8 @@ AnalyticLightSample SampleAnalyticPoint(const AnalyticLight& light, Point3f shad
     if (dist_sq <= 0.0f) {
         return s;
     }
-    const float dist = std::sqrt(dist_sq);
-    const float inv_dist = 1.0f / dist;
-    s.wi = Vec3f{delta.x * inv_dist, delta.y * inv_dist, delta.z * inv_dist};
-    s.distance = dist;
+    s.distance = std::sqrt(dist_sq);
+    s.wi = Normalize(delta);
     s.radiance = Color3f{
         light.intensity.x / dist_sq,
         light.intensity.y / dist_sq,

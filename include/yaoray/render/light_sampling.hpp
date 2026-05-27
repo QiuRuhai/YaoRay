@@ -38,7 +38,7 @@ struct AnalyticLightSample {
     Vec3f wi{0.0f, 0.0f, 0.0f};         // Direction from shading point to light.
     float distance = 0.0f;              // Shadow ray segment length.
     Color3f radiance{0.0f, 0.0f, 0.0f}; // Radiance reaching the shading point.
-    bool is_delta = true;               // Point/Distant/Spot are deltas; no MIS vs BSDF.
+    bool is_delta = false;   // Only true on valid samples; meaningless when valid == false.
     bool valid = false;
 };
 
