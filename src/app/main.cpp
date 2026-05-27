@@ -113,6 +113,11 @@ int RunRender(int argc, char** argv) {
 
     yr::RenderSceneIR render_scene = std::move(compile_result.scene.value());
 
+    // --- Print compile warnings (non-fatal) ---
+    if (!compile_result.diagnostics.empty()) {
+        std::cerr << yr::FormatSceneDiagnostics(compile_result.diagnostics) << '\n';
+    }
+
     // --- Apply backend override ---
     if (backend_override) {
         render_scene.requested_backend = *backend_override;
