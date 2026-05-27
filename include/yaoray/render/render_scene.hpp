@@ -1,13 +1,34 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
+#include <string>
+#include <string_view>
+#include <optional>
 #include <vector>
 
 #include <yaoray/core/vec.hpp>
 #include <yaoray/render/texture.hpp>
-#include <yaoray/scene/scene.hpp>
 
 namespace yr {
+
+// --- Render enums (migrated from scene/scene.hpp) ---
+
+enum class RenderBackendKind { Cpu, Cuda };
+enum class RenderIntegratorKind { DebugDirect, Path };
+enum class RenderSamplerKind { Independent, Stratified };
+enum class ToneMapperKind { None, Reinhard, Aces };
+
+std::string_view RenderBackendName(RenderBackendKind backend);
+std::optional<RenderBackendKind> ParseRenderBackendName(std::string_view name);
+std::string_view RenderIntegratorName(RenderIntegratorKind integrator);
+std::optional<RenderIntegratorKind> ParseRenderIntegratorName(std::string_view name);
+std::string_view RenderSamplerName(RenderSamplerKind sampler);
+std::optional<RenderSamplerKind> ParseRenderSamplerName(std::string_view name);
+std::string_view ToneMapperName(ToneMapperKind mapper);
+std::optional<ToneMapperKind> ParseToneMapperName(std::string_view name);
+
+// --- Camera ---
 
 struct RenderCamera {
     Point3f origin;
@@ -15,13 +36,13 @@ struct RenderCamera {
     Vec3f right{1.0f, 0.0f, 0.0f};
     Vec3f up{0.0f, 1.0f, 0.0f};
     float fov_y_radians = 0.785398185f;
-    float aperture = 0.0f;
-    float focus_distance = 1.0f;
 };
 
+// --- Environment ---
+
 struct RenderEnvironment {
-    EnvironmentKind type = EnvironmentKind::None;
-    Color3f radiance;
+    bool active = false;
+    Color3f radiance{0.0f, 0.0f, 0.0f};
     float strength = 1.0f;
     float rotation_radians = 0.0f;
     int texture_index = -1;
@@ -39,86 +60,111 @@ struct RenderEnvironmentDistribution {
     bool uniform = false;
 };
 
-enum class RenderAlphaMode {
-    Opaque,
-    Mask,
-    Blend,
+// --- Materials ---
+
+enum class RenderMaterialKind {
+    Diffuse,
+    Conductor,
+    Dielectric,
+    ThinDielectric,
+    CoatedDiffuse,
+    CoatedConductor,
+    DiffuseTransmission,
+    Mix,
+};
+
+struct TexParam1f {
+    float value = 0.0f;
+    int texture = -1;
+};
+
+struct TexParam3f {
+    Color3f value{0.0f, 0.0f, 0.0f};
+    int texture = -1;
 };
 
 struct RenderMaterial {
-    MaterialKind type = MaterialKind::Diffuse;
-    Color3f albedo{0.8f, 0.8f, 0.8f};
-    Color3f emission;
-    float roughness = 0.0f;
-    float specular = 0.04f;
-    int albedo_texture = -1;
+    RenderMaterialKind kind = RenderMaterialKind::Diffuse;
+
+    TexParam3f reflectance{{0.5f, 0.5f, 0.5f}};
+
+    TexParam3f eta;
+    TexParam3f k;
+
     float ior = 1.5f;
-    bool thin = false;
+
+    TexParam1f uroughness{0.0f};
+    TexParam1f vroughness{0.0f};
+    bool remap_roughness = true;
+
+    int mix_material_a = -1;
+    int mix_material_b = -1;
+    TexParam1f mix_amount{0.5f};
+
+    float coating_ior = 1.5f;
+    TexParam1f coating_roughness{0.0f};
+
+    int normal_map = -1;
+    float normal_scale = 1.0f;
+
+    Color3f emission{0.0f, 0.0f, 0.0f};
+
+    TexParam1f alpha{1.0f};
+
     Color3f absorption_color{1.0f, 1.0f, 1.0f};
     float absorption_distance = 1.0f;
-    float albedo_alpha = 1.0f;
-    float metallic = 0.0f;
-    int metallic_roughness_texture = -1;
-    int normal_texture = -1;
-    int emissive_texture = -1;
-    int occlusion_texture = -1;
-    float normal_scale = 1.0f;
-    float occlusion_strength = 1.0f;
-    RenderAlphaMode alpha_mode = RenderAlphaMode::Opaque;
-    float alpha_cutoff = 0.5f;
-    bool double_sided = false;
 };
 
-struct RenderTriangle {
-    Point3f p0;
-    Point3f p1;
-    Point3f p2;
-    Vec3f normal{0.0f, 0.0f, 1.0f};
-    int material_index = 0;
-    Vec2f uv0;
-    Vec2f uv1;
-    Vec2f uv2;
-    bool has_uv = false;
-    Vec3f n0;
-    Vec3f n1;
-    Vec3f n2;
-    bool has_vertex_normals = false;
-    Vec3f t0;
-    Vec3f t1;
-    Vec3f t2;
-    float tangent_handedness0 = 1.0f;
-    float tangent_handedness1 = 1.0f;
-    float tangent_handedness2 = 1.0f;
-    bool has_tangents = false;
-};
+// --- Geometry ---
 
 struct RenderVertex {
     Point3f position;
-    Vec3f normal{0.0f, 0.0f, 1.0f};
+    Vec3f normal;
     Vec2f uv;
     Vec3f tangent;
     float tangent_handedness = 1.0f;
-    bool has_uv = false;
-    bool has_normal = false;
-    bool has_tangent = false;
 };
 
 struct RenderPrimitive {
     std::uint32_t first_index = 0;
     std::uint32_t index_count = 0;
     int material_index = 0;
+    bool has_normals = false;
+    bool has_uvs = false;
+    bool has_tangents = false;
 };
 
-struct RenderAreaLight {
-    Point3f position;
-    float width = 1.0f;
-    float height = 1.0f;
-    Color3f radiance{1.0f, 1.0f, 1.0f};
+// --- Lights ---
+
+struct EmissivePrimitive {
+    int primitive_index = 0;
+    Color3f radiance{0.0f, 0.0f, 0.0f};
+    float area = 0.0f;
 };
+
+enum class AnalyticLightKind { Point, Spot, Distant };
+
+struct AnalyticLight {
+    AnalyticLightKind kind = AnalyticLightKind::Point;
+    Point3f position;
+    Vec3f direction;
+    Color3f intensity;
+    float cone_angle = 0.0f;
+};
+
+// --- Film settings ---
+
+struct FilmSettings {
+    std::filesystem::path output;
+    ToneMapperKind tone_mapper = ToneMapperKind::Aces;
+    float exposure = 0.0f;
+};
+
+// --- Complete Render Scene IR ---
 
 struct RenderSceneIR {
     RenderBackendKind requested_backend = RenderBackendKind::Cpu;
-    RenderIntegratorKind integrator = RenderIntegratorKind::DebugDirect;
+    RenderIntegratorKind integrator = RenderIntegratorKind::Path;
     RenderSamplerKind sampler = RenderSamplerKind::Independent;
     int width = 0;
     int height = 0;
@@ -126,18 +172,23 @@ struct RenderSceneIR {
     int max_depth = 5;
     std::uint64_t seed = 0;
     int threads = 0;
-    int light_samples = 1;
     float radiance_clamp = 0.0f;
+
     RenderCamera camera;
-    RenderEnvironment environment;
-    std::vector<RenderMaterial> materials;
-    std::vector<RenderTexture> textures;
-    std::vector<RenderEnvironmentDistribution> environment_distributions;
+
     std::vector<RenderVertex> vertices;
     std::vector<std::uint32_t> indices;
     std::vector<RenderPrimitive> primitives;
-    std::vector<RenderTriangle> triangles;
-    std::vector<RenderAreaLight> area_lights;
+
+    std::vector<RenderMaterial> materials;
+    std::vector<RenderTexture> textures;
+
+    std::vector<EmissivePrimitive> emissive_primitives;
+    RenderEnvironment environment;
+    std::vector<RenderEnvironmentDistribution> environment_distributions;
+    std::vector<AnalyticLight> analytic_lights;
+
+    FilmSettings film;
 };
 
 } // namespace yr

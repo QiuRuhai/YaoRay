@@ -14,10 +14,19 @@ enum class TextureColorSpace {
     Linear,
 };
 
+enum class RenderTextureKind {
+    Image,
+    Constant,
+    Scale,
+    Checkerboard,
+};
+
 struct RenderTexture {
+    RenderTextureKind kind = RenderTextureKind::Image;
     int width = 0;
     int height = 0;
     std::vector<Color4f> texels;
+    Color4f constant_value;
     TextureFilter filter = TextureFilter::Bilinear;
     TextureWrap wrap_s = TextureWrap::Repeat;
     TextureWrap wrap_t = TextureWrap::Repeat;
