@@ -1,92 +1,109 @@
 #include <yaoray/render/light_sampling.hpp>
 
-#include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace yr {
-namespace {
 
-constexpr float MinPdfDistanceSquared = 1.0e-12f;
-constexpr float AreaLightPointTolerance = 1.0e-3f;
-
-float Area(const RenderAreaLight& light) {
-    return light.width * light.height;
-}
-
-Vec3f AreaLightNormal() {
-    return Vec3f{0.0f, -1.0f, 0.0f};
-}
-
-bool IsPointOnCurrentAreaLightRectangle(const RenderAreaLight& light, Point3f point) {
-    const float half_width = light.width * 0.5f;
-    const float half_height = light.height * 0.5f;
-    return std::fabs(point.y - light.position.y) <= AreaLightPointTolerance &&
-           point.x >= light.position.x - half_width - AreaLightPointTolerance &&
-           point.x <= light.position.x + half_width + AreaLightPointTolerance &&
-           point.z >= light.position.z - half_height - AreaLightPointTolerance &&
-           point.z <= light.position.z + half_height + AreaLightPointTolerance;
-}
-
-} // namespace
-
-std::optional<AreaLightSample> SampleAreaLight(const RenderAreaLight& light, Vec2f uv) {
-    const float area = Area(light);
-    if (area <= 0.0f) {
+std::optional<EmissiveSample> SampleEmissivePrimitive(
+    const RenderSceneIR& scene,
+    int emissive_index,
+    Vec2f sample_triangle,
+    Vec2f sample_select
+) {
+    if (emissive_index < 0 || emissive_index >= static_cast<int>(scene.emissive_primitives.size())) {
         return std::nullopt;
     }
 
-    const float u = std::clamp(uv.x, 0.0f, 1.0f);
-    const float v = std::clamp(uv.y, 0.0f, 1.0f);
-    const float offset_x = (u - 0.5f) * light.width;
-    const float offset_z = (v - 0.5f) * light.height;
+    const EmissivePrimitive& ep = scene.emissive_primitives[emissive_index];
+    const RenderPrimitive& prim = scene.primitives[ep.primitive_index];
+    int tri_count = static_cast<int>(prim.index_count / 3);
+    if (tri_count == 0) return std::nullopt;
 
-    return AreaLightSample{
-        light.position + Vec3f{offset_x, 0.0f, offset_z},
-        AreaLightNormal(),
-        light.radiance,
-        area,
-        1.0f / area
-    };
+    // Select a triangle within the primitive uniformly
+    int selected_tri = static_cast<int>(sample_select.x * static_cast<float>(tri_count));
+    if (selected_tri >= tri_count) selected_tri = tri_count - 1;
+
+    std::uint32_t base = prim.first_index + static_cast<std::uint32_t>(selected_tri) * 3;
+    Point3f p0 = scene.vertices[scene.indices[base + 0]].position;
+    Point3f p1 = scene.vertices[scene.indices[base + 1]].position;
+    Point3f p2 = scene.vertices[scene.indices[base + 2]].position;
+
+    // Square-to-triangle mapping
+    float su = std::sqrt(sample_triangle.x);
+    float u = 1.0f - su;
+    float v = sample_triangle.y * su;
+    Point3f point = p0 * (1.0f - u - v) + p1 * u + p2 * v;
+
+    Vec3f e1 = p1 - p0;
+    Vec3f e2 = p2 - p0;
+    Vec3f normal = Normalize(Cross(e1, e2));
+    float tri_area = Length(Cross(e1, e2)) * 0.5f;
+
+    if (tri_area <= 0.0f || LengthSquared(normal) == 0.0f) {
+        return std::nullopt;
+    }
+
+    // PDF = 1/area for uniform triangle sampling, times 1/tri_count for triangle selection
+    float pdf = 1.0f / (tri_area * static_cast<float>(tri_count));
+
+    EmissiveSample sample;
+    sample.point = point;
+    sample.normal = normal;
+    sample.radiance = ep.radiance;
+    sample.pdf = pdf;
+    sample.emissive_index = emissive_index;
+    return sample;
 }
 
-float PdfAreaLightSampleSolidAngle(
-    const RenderAreaLight& light,
-    Point3f shading_point,
-    Point3f light_point
+std::optional<EmissiveSample> SampleEmissiveLights(
+    const RenderSceneIR& scene,
+    float select_sample,
+    Vec2f triangle_sample
 ) {
-    const float area = Area(light);
-    if (area <= 0.0f) {
-        return 0.0f;
-    }
+    int n = static_cast<int>(scene.emissive_primitives.size());
+    if (n == 0) return std::nullopt;
 
-    const Vec3f to_light = light_point - shading_point;
-    const float distance_squared = LengthSquared(to_light);
-    if (distance_squared <= MinPdfDistanceSquared) {
-        return 0.0f;
-    }
+    // Uniform selection among emissive primitives
+    int selected = static_cast<int>(select_sample * static_cast<float>(n));
+    if (selected >= n) selected = n - 1;
 
-    const Vec3f wi = to_light / std::sqrt(distance_squared);
-    const float cos_light = std::max(0.0f, Dot(AreaLightNormal(), -wi));
-    if (cos_light <= 0.0f) {
-        return 0.0f;
+    auto result = SampleEmissivePrimitive(scene, selected, triangle_sample, Vec2f{select_sample, 0.0f});
+    if (result.has_value()) {
+        // Include 1/N selection probability
+        result->pdf /= static_cast<float>(n);
     }
-
-    return distance_squared / (cos_light * area);
+    return result;
 }
 
-float PdfAreaLightsForPointSolidAngle(
+float PdfEmissiveLightSolidAngle(
     const RenderSceneIR& scene,
     Point3f shading_point,
-    Point3f light_point
+    Point3f light_point,
+    Vec3f light_normal
 ) {
-    float pdf = 0.0f;
-    for (const RenderAreaLight& light : scene.area_lights) {
-        if (!IsPointOnCurrentAreaLightRectangle(light, light_point)) {
-            continue;
-        }
-        pdf += PdfAreaLightSampleSolidAngle(light, shading_point, light_point);
+    int n = static_cast<int>(scene.emissive_primitives.size());
+    if (n == 0) return 0.0f;
+
+    // Total area of all emissive primitives
+    float total_area = 0.0f;
+    for (const EmissivePrimitive& ep : scene.emissive_primitives) {
+        total_area += ep.area;
     }
-    return pdf;
+    if (total_area <= 0.0f) return 0.0f;
+
+    // Area PDF = 1 / total_area
+    float area_pdf = 1.0f / total_area;
+
+    // Convert to solid angle PDF: pdf_solid = pdf_area * dist^2 / cos_theta
+    Vec3f dir = light_point - shading_point;
+    float dist_sq = LengthSquared(dir);
+    if (dist_sq <= 0.0f) return 0.0f;
+
+    float cos_theta = std::fabs(Dot(light_normal, Normalize(shading_point - light_point)));
+    if (cos_theta <= 0.0f) return 0.0f;
+
+    return area_pdf * dist_sq / cos_theta;
 }
 
 } // namespace yr

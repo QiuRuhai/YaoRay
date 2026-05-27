@@ -10,6 +10,7 @@
 #include <yaoray/render/environment.hpp>
 #include <yaoray/render/light_sampling.hpp>
 #include <yaoray/render/mis.hpp>
+#include <yaoray/render/shading.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -117,11 +118,11 @@ Color3f ClampTransmittance(Color3f value) {
 }
 
 bool IsShadowTransparentMaterial(const RenderMaterial& material) {
-    return material.type == MaterialKind::Dielectric;
+    return material.kind == RenderMaterialKind::Dielectric || material.kind == RenderMaterialKind::ThinDielectric;
 }
 
 Color3f ThinGlassShadowTransmittance(const RenderMaterial& material) {
-    return ClampTransmittance(material.albedo);
+    return ClampTransmittance(material.reflectance.value);
 }
 
 void ToggleShadowMedium(PathMediumState& medium, const RenderMaterial& material) {
@@ -135,7 +136,7 @@ void ToggleShadowMedium(PathMediumState& medium, const RenderMaterial& material)
 }
 
 bool IsThickDielectricTransmission(const RenderMaterial& material, Vec3f normal, Vec3f wi) {
-    return material.type == MaterialKind::Dielectric && !material.thin && Dot(wi, normal) < 0.0f;
+    return material.kind == RenderMaterialKind::Dielectric && Dot(wi, normal) < 0.0f;
 }
 
 void UpdateMediumStateAfterBsdf(PathMediumState& medium, const RenderMaterial& material, Vec3f normal, Vec3f wi) {
@@ -174,12 +175,12 @@ Color3f EnvironmentColor(const RenderSceneIR& scene, Vec3f direction) {
     return EvaluateEnvironment(scene, direction);
 }
 
-float EmissiveHitMisWeight(const RenderSceneIR& scene, const PreviousBounce& previous, Point3f hit_point) {
+float EmissiveHitMisWeight(const RenderSceneIR& scene, const PreviousBounce& previous, Point3f hit_point, Vec3f light_normal) {
     if (!previous.valid || previous.delta) {
         return 1.0f;
     }
 
-    const float pdf_light = PdfAreaLightsForPointSolidAngle(scene, previous.origin, hit_point);
+    const float pdf_light = PdfEmissiveLightSolidAngle(scene, previous.origin, hit_point, light_normal);
     return PowerHeuristic(1, previous.bsdf_pdf, previous.light_sample_count, pdf_light);
 }
 
@@ -198,8 +199,8 @@ bool IsValidMaterialIndex(const RenderSceneIR& scene, int material_index) {
 
 void AccumulateTraceStats(CpuPathTraceStats& stats, const BvhTraceStats& trace_stats);
 
-int DirectLightSampleCount(const RenderSceneIR& scene) {
-    return std::max(1, scene.light_samples);
+int DirectLightSampleCount(const RenderSceneIR& /*scene*/) {
+    return 1;
 }
 
 ShadowVisibility TraceShadowVisibility(
@@ -228,7 +229,7 @@ ShadowVisibility TraceShadowVisibility(
         if (surface_hit.exhausted) {
             return ShadowVisibility{false, Color3f{}};
         }
-        if (!surface_hit.hit || surface_hit.geometry_hit.triangle == nullptr) {
+        if (!surface_hit.hit || surface_hit.geometry_hit.triangle_index < 0) {
             if (medium.active) {
                 if (!finite_segment) {
                     return ShadowVisibility{false, Color3f{}};
@@ -252,7 +253,7 @@ ShadowVisibility TraceShadowVisibility(
             }
         }
 
-        if (!IsValidMaterialIndex(scene, surface_hit.geometry_hit.triangle->material_index)) {
+        if (!IsValidMaterialIndex(scene, scene.primitives[surface_hit.geometry_hit.primitive_index].material_index)) {
             return ShadowVisibility{false, Color3f{}};
         }
 
@@ -262,7 +263,7 @@ ShadowVisibility TraceShadowVisibility(
             return ShadowVisibility{false, Color3f{}};
         }
 
-        if (material.thin) {
+        if (material.kind == RenderMaterialKind::ThinDielectric) {
             visibility.transmittance = Multiply(visibility.transmittance, ThinGlassShadowTransmittance(material));
             if (IsShadowTransmittanceBlack(visibility.transmittance)) {
                 return ShadowVisibility{false, Color3f{}};
@@ -399,11 +400,10 @@ Color3f EstimateDirectLight(
     const int light_sample_count = DirectLightSampleCount(scene);
     const float inverse_light_sample_count = 1.0f / static_cast<float>(light_sample_count);
 
-    for (const RenderAreaLight& light : scene.area_lights) {
-        Color3f light_radiance;
+    if (!scene.emissive_primitives.empty()) {
         for (int sample_index = 0; sample_index < light_sample_count; ++sample_index) {
-            const std::optional<AreaLightSample> sample = SampleAreaLight(light, sampler.NextLight2D(sample_index));
-            if (!sample.has_value()) {
+            const auto sample = SampleEmissiveLights(scene, sampler.Next1D(), sampler.NextLight2D(sample_index));
+            if (!sample.has_value() || sample->pdf <= 0.0f || IsNearBlack(sample->radiance)) {
                 continue;
             }
 
@@ -433,7 +433,7 @@ Color3f EstimateDirectLight(
                 continue;
             }
 
-            const float pdf_light = PdfAreaLightSampleSolidAngle(light, hit_point, sample->point);
+            const float pdf_light = PdfEmissiveLightSolidAngle(scene, hit_point, sample->point, sample->normal);
             if (pdf_light <= 0.0f) {
                 continue;
             }
@@ -455,11 +455,11 @@ Color3f EstimateDirectLight(
             const float pdf_bsdf = PdfBsdf(material, wo, wi, normal);
             const float mis_weight = PowerHeuristic(light_sample_count, pdf_light, 1, pdf_bsdf);
             const Color3f visible_radiance = Multiply(visibility.transmittance, sample->radiance);
-            light_radiance = light_radiance + Multiply(bsdf, visible_radiance) * (cos_surface * mis_weight / pdf_light);
+            radiance = radiance + Multiply(bsdf, visible_radiance) * (cos_surface * mis_weight / pdf_light);
         }
-
-        radiance = radiance + light_radiance * inverse_light_sample_count;
+        radiance = radiance * inverse_light_sample_count;
     }
+
     radiance = radiance + EstimateDirectEnvironmentLight(prepared_scene, material, hit_point, normal, wo, sampler, stats);
     return radiance;
 }
@@ -484,7 +484,7 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
             &trace_stats
         );
         AccumulateTraceStats(stats, trace_stats);
-        if (!surface_hit.hit || surface_hit.geometry_hit.triangle == nullptr || surface_hit.exhausted) {
+        if (!surface_hit.hit || surface_hit.geometry_hit.triangle_index < 0 || surface_hit.exhausted) {
             ++stats.misses;
             const float environment_weight = EnvironmentHitMisWeight(scene, previous_bounce, ray.direction);
             radiance = radiance + Multiply(throughput, EnvironmentColor(scene, ray.direction)) * environment_weight;
@@ -497,7 +497,7 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
             break;
         }
 
-        if (!IsValidMaterialIndex(scene, surface_hit.geometry_hit.triangle->material_index)) {
+        if (!IsValidMaterialIndex(scene, scene.primitives[surface_hit.geometry_hit.primitive_index].material_index)) {
             radiance = radiance + Multiply(throughput, Color3f{1.0f, 0.0f, 1.0f});
             break;
         }
@@ -508,7 +508,9 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
         const Vec3f normal = surface_hit.sample.shading_normal;
 
         if (!IsNearBlack(material.emission)) {
-            const float emission_weight = EmissiveHitMisWeight(scene, previous_bounce, hit_point);
+            const TriangleRef hit_tri = LocateTriangle(scene, surface_hit.geometry_hit.triangle_index);
+            const Vec3f light_geo_normal = GeometricNormal(scene, hit_tri);
+            const float emission_weight = EmissiveHitMisWeight(scene, previous_bounce, hit_point, light_geo_normal);
             radiance = radiance + Multiply(throughput, material.emission) * emission_weight;
         }
 

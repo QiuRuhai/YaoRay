@@ -26,7 +26,7 @@ CpuPrepareResult PrepareCpuScene(RenderSceneIR scene) {
     CpuPrepareResult result;
 
     const auto start = std::chrono::steady_clock::now();
-    BvhBuildResult build = BuildBvh(scene.triangles);
+    BvhBuildResult build = BuildBvh(scene);
     const auto end = std::chrono::steady_clock::now();
     result.elapsed_seconds = std::chrono::duration<double>(end - start).count();
 

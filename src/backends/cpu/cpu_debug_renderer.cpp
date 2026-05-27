@@ -2,10 +2,12 @@
 
 #include <yaoray/backends/cpu/cpu_surface.hpp>
 #include <yaoray/core/ray.hpp>
+#include <yaoray/render/shading.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 
 namespace yr {
@@ -27,7 +29,7 @@ Ray3f MakeCameraRay(const RenderSceneIR& scene, int x, int y) {
 }
 
 Color3f EnvironmentColor(const RenderSceneIR& scene) {
-    if (scene.environment.type == EnvironmentKind::Constant) {
+    if (scene.environment.active) {
         return scene.environment.radiance * scene.environment.strength;
     }
     return Color3f{};
@@ -72,48 +74,43 @@ Color3f ShadeHit(
     CpuDebugRenderStats& stats
 ) {
     const RenderSceneIR& scene = prepared_scene.Scene();
-    if (hit.geometry_hit.triangle == nullptr ||
-        !IsValidMaterialIndex(scene, hit.geometry_hit.triangle->material_index)) {
+    if (hit.geometry_hit.triangle_index < 0 ||
+        !IsValidMaterialIndex(scene, scene.primitives[hit.geometry_hit.primitive_index].material_index)) {
         return Color3f{1.0f, 0.0f, 1.0f};
     }
 
-    const RenderTriangle& triangle = *hit.geometry_hit.triangle;
     const RenderMaterial& material = hit.sample.material;
     const Point3f hit_point = ray.origin + ray.direction * hit.geometry_hit.t;
-    const Vec3f normal = FaceForward(Normalize(triangle.normal), -ray.direction);
+    const TriangleRef tri_ref = LocateTriangle(scene, hit.geometry_hit.triangle_index);
+    const Vec3f raw_normal = GeometricNormal(scene, tri_ref);
+    const Vec3f normal = FaceForward(raw_normal, -ray.direction);
 
     Color3f radiance = material.emission;
-    for (const RenderAreaLight& light : scene.area_lights) {
-        const float area = light.width * light.height;
-        if (area <= 0.0f) {
-            continue;
-        }
+    for (const EmissivePrimitive& emissive : scene.emissive_primitives) {
+        const RenderPrimitive& light_prim = scene.primitives[emissive.primitive_index];
+        if (light_prim.index_count < 3) continue;
+        const std::uint32_t i0 = scene.indices[light_prim.first_index];
+        const std::uint32_t i1 = scene.indices[light_prim.first_index + 1];
+        const std::uint32_t i2 = scene.indices[light_prim.first_index + 2];
+        const Point3f light_pos = (scene.vertices[i0].position + scene.vertices[i1].position + scene.vertices[i2].position) * (1.0f / 3.0f);
 
-        const Vec3f to_light = light.position - hit_point;
+        const Vec3f to_light = light_pos - hit_point;
         const float distance_squared = LengthSquared(to_light);
-        if (distance_squared <= MinShadowBias * MinShadowBias) {
-            continue;
-        }
+        if (distance_squared <= MinShadowBias * MinShadowBias) continue;
 
         const float distance = std::sqrt(distance_squared);
-        const float shadow_bias = ShadowBias(hit_point, light.position, distance);
-        if (distance <= shadow_bias) {
-            continue;
-        }
+        const float shadow_bias = ShadowBias(hit_point, light_pos, distance);
+        if (distance <= shadow_bias) continue;
 
         const Point3f shadow_origin = hit_point + normal * shadow_bias;
-        const Vec3f shadow_to_light = light.position - shadow_origin;
+        const Vec3f shadow_to_light = light_pos - shadow_origin;
         const float shadow_distance_squared = LengthSquared(shadow_to_light);
-        if (shadow_distance_squared <= MinShadowBias * MinShadowBias) {
-            continue;
-        }
+        if (shadow_distance_squared <= MinShadowBias * MinShadowBias) continue;
 
         const float shadow_distance = std::sqrt(shadow_distance_squared);
         const Vec3f wi = shadow_to_light / shadow_distance;
         const float n_dot_l = std::max(0.0f, Dot(normal, wi));
-        if (n_dot_l <= 0.0f) {
-            continue;
-        }
+        if (n_dot_l <= 0.0f) continue;
 
         ++stats.shadow_rays;
         BvhTraceStats shadow_trace;
@@ -131,8 +128,8 @@ Color3f ShadeHit(
             continue;
         }
 
-        const float scale = area * n_dot_l / distance_squared;
-        radiance = radiance + Multiply(material.albedo, light.radiance) * scale;
+        const float scale = emissive.area * n_dot_l / distance_squared;
+        radiance = radiance + Multiply(material.reflectance.value, emissive.radiance) * scale;
     }
 
     return radiance;
@@ -161,7 +158,7 @@ CpuDebugRenderResult RenderCpuDebug(const CpuPreparedScene& prepared_scene) {
                 &trace_stats
             );
             AccumulateTraceStats(result.stats, trace_stats);
-            if (hit.hit && hit.geometry_hit.triangle != nullptr) {
+            if (hit.hit && hit.geometry_hit.triangle_index >= 0) {
                 ++result.stats.hits;
                 result.film.AddSample(x, y, ShadeHit(prepared_scene, ray, hit, result.stats));
             } else {

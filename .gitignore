@@ -6,7 +6,7 @@ cmake-build-*/
 out/
 .cache/
 .worktrees/
-external/assets/
+.claude/worktrees/
 
 # Local IDE state
 .vs/

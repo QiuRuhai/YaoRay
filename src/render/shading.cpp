@@ -1,47 +1,98 @@
 #include <yaoray/render/shading.hpp>
 
-#include <cmath>
-
 namespace yr {
 
-Vec3f BarycentricCoordinates(Point3f point, const RenderTriangle& triangle) {
-    const Vec3f v0 = triangle.p1 - triangle.p0;
-    const Vec3f v1 = triangle.p2 - triangle.p0;
-    const Vec3f v2 = point - triangle.p0;
-    const float d00 = Dot(v0, v0);
-    const float d01 = Dot(v0, v1);
-    const float d11 = Dot(v1, v1);
-    const float d20 = Dot(v2, v0);
-    const float d21 = Dot(v2, v1);
-    const float denom = d00 * d11 - d01 * d01;
-    if (std::fabs(denom) <= 1.0e-12f) {
-        return Vec3f{1.0f, 0.0f, 0.0f};
+TriangleRef LocateTriangle(const RenderSceneIR& scene, int flat_triangle_index) {
+    int flat = 0;
+    for (int pi = 0; pi < static_cast<int>(scene.primitives.size()); ++pi) {
+        int tri_count = static_cast<int>(scene.primitives[pi].index_count / 3);
+        if (flat_triangle_index < flat + tri_count) {
+            return TriangleRef{pi, flat_triangle_index - flat};
+        }
+        flat += tri_count;
     }
-    const float v = (d11 * d20 - d01 * d21) / denom;
-    const float w = (d00 * d21 - d01 * d20) / denom;
-    return Vec3f{1.0f - v - w, v, w};
+    return TriangleRef{};
 }
 
-Vec2f InterpolateUv(const RenderTriangle& triangle, Vec3f barycentric) {
+Vec2f InterpolateUv(const RenderSceneIR& scene, TriangleRef tri, float bary_u, float bary_v) {
+    const auto& prim = scene.primitives[tri.primitive_index];
+    if (!prim.has_uvs) return Vec2f{};
+    std::uint32_t base = prim.first_index + static_cast<std::uint32_t>(tri.local_triangle) * 3;
+    const auto& v0 = scene.vertices[scene.indices[base + 0]];
+    const auto& v1 = scene.vertices[scene.indices[base + 1]];
+    const auto& v2 = scene.vertices[scene.indices[base + 2]];
+    float w = 1.0f - bary_u - bary_v;
     return Vec2f{
-        triangle.uv0.x * barycentric.x + triangle.uv1.x * barycentric.y + triangle.uv2.x * barycentric.z,
-        triangle.uv0.y * barycentric.x + triangle.uv1.y * barycentric.y + triangle.uv2.y * barycentric.z
+        v0.uv.x * w + v1.uv.x * bary_u + v2.uv.x * bary_v,
+        v0.uv.y * w + v1.uv.y * bary_u + v2.uv.y * bary_v
     };
 }
 
-Vec3f ResolveShadingNormal(const RenderTriangle& triangle, Vec3f barycentric, Vec3f geometric_normal) {
+Vec3f InterpolateNormal(const RenderSceneIR& scene, TriangleRef tri, float bary_u, float bary_v) {
+    const auto& prim = scene.primitives[tri.primitive_index];
+    if (!prim.has_normals) return Vec3f{};
+    std::uint32_t base = prim.first_index + static_cast<std::uint32_t>(tri.local_triangle) * 3;
+    const auto& v0 = scene.vertices[scene.indices[base + 0]];
+    const auto& v1 = scene.vertices[scene.indices[base + 1]];
+    const auto& v2 = scene.vertices[scene.indices[base + 2]];
+    float w = 1.0f - bary_u - bary_v;
+    return Normalize(Vec3f{
+        v0.normal.x * w + v1.normal.x * bary_u + v2.normal.x * bary_v,
+        v0.normal.y * w + v1.normal.y * bary_u + v2.normal.y * bary_v,
+        v0.normal.z * w + v1.normal.z * bary_u + v2.normal.z * bary_v
+    });
+}
+
+Vec3f InterpolateTangent(const RenderSceneIR& scene, TriangleRef tri, float bary_u, float bary_v) {
+    const auto& prim = scene.primitives[tri.primitive_index];
+    if (!prim.has_tangents) return Vec3f{};
+    std::uint32_t base = prim.first_index + static_cast<std::uint32_t>(tri.local_triangle) * 3;
+    const auto& v0 = scene.vertices[scene.indices[base + 0]];
+    const auto& v1 = scene.vertices[scene.indices[base + 1]];
+    const auto& v2 = scene.vertices[scene.indices[base + 2]];
+    float w = 1.0f - bary_u - bary_v;
+    return Normalize(Vec3f{
+        v0.tangent.x * w + v1.tangent.x * bary_u + v2.tangent.x * bary_v,
+        v0.tangent.y * w + v1.tangent.y * bary_u + v2.tangent.y * bary_v,
+        v0.tangent.z * w + v1.tangent.z * bary_u + v2.tangent.z * bary_v
+    });
+}
+
+float InterpolateHandedness(const RenderSceneIR& scene, TriangleRef tri, float bary_u, float bary_v) {
+    const auto& prim = scene.primitives[tri.primitive_index];
+    if (!prim.has_tangents) return 1.0f;
+    std::uint32_t base = prim.first_index + static_cast<std::uint32_t>(tri.local_triangle) * 3;
+    const auto& v0 = scene.vertices[scene.indices[base + 0]];
+    const auto& v1 = scene.vertices[scene.indices[base + 1]];
+    const auto& v2 = scene.vertices[scene.indices[base + 2]];
+    float w = 1.0f - bary_u - bary_v;
+    return v0.tangent_handedness * w + v1.tangent_handedness * bary_u + v2.tangent_handedness * bary_v;
+}
+
+Vec3f GeometricNormal(const RenderSceneIR& scene, TriangleRef tri) {
+    const auto& prim = scene.primitives[tri.primitive_index];
+    std::uint32_t base = prim.first_index + static_cast<std::uint32_t>(tri.local_triangle) * 3;
+    Point3f p0 = scene.vertices[scene.indices[base + 0]].position;
+    Point3f p1 = scene.vertices[scene.indices[base + 1]].position;
+    Point3f p2 = scene.vertices[scene.indices[base + 2]].position;
+    return Normalize(Cross(p1 - p0, p2 - p0));
+}
+
+Vec3f ResolveShadingNormal(
+    const RenderSceneIR& scene,
+    TriangleRef tri,
+    float bary_u,
+    float bary_v,
+    Vec3f geometric_normal
+) {
     Vec3f normal = Normalize(geometric_normal);
-    if (triangle.has_vertex_normals) {
-        const Vec3f interpolated = Normalize(
-            triangle.n0 * barycentric.x +
-            triangle.n1 * barycentric.y +
-            triangle.n2 * barycentric.z
-        );
+    const auto& prim = scene.primitives[tri.primitive_index];
+    if (prim.has_normals) {
+        const Vec3f interpolated = InterpolateNormal(scene, tri, bary_u, bary_v);
         if (LengthSquared(interpolated) > 0.0f) {
             normal = interpolated;
         }
     }
-
     if (Dot(normal, geometric_normal) < 0.0f) {
         normal = -normal;
     }

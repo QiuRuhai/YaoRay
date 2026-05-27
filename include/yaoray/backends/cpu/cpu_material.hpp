@@ -2,6 +2,7 @@
 
 #include <yaoray/core/vec.hpp>
 #include <yaoray/render/render_scene.hpp>
+#include <yaoray/render/shading.hpp>
 
 namespace yr {
 
@@ -14,9 +15,10 @@ struct ResolvedMaterialSample {
 
 ResolvedMaterialSample ResolveCpuMaterialSample(
     const RenderSceneIR& scene,
-    const RenderTriangle& triangle,
+    TriangleRef tri,
     const RenderMaterial& base_material,
-    Vec3f barycentric,
+    float bary_u,
+    float bary_v,
     Vec3f geometric_normal,
     Vec3f wo);
 

@@ -6,7 +6,6 @@
 #include <cmath>
 #include <cstddef>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace yr {
@@ -14,8 +13,10 @@ namespace {
 
 constexpr float ParallelEpsilon = 1.0e-8f;
 
-struct BvhPrimitive {
-    int triangle_index = -1;
+struct BvhPrimRef {
+    int flat_index = -1;
+    int primitive_index = -1;
+    int local_triangle = -1;
     Bounds3f bounds;
     Point3f centroid;
 };
@@ -44,22 +45,6 @@ Bounds3f UnionBounds(const Bounds3f& a, const Bounds3f& b) {
             std::max(a.max.y, b.max.y),
             std::max(a.max.z, b.max.z),
         },
-    };
-}
-
-Bounds3f TriangleBounds(const RenderTriangle& triangle) {
-    Bounds3f bounds;
-    bounds = Union(bounds, triangle.p0);
-    bounds = Union(bounds, triangle.p1);
-    bounds = Union(bounds, triangle.p2);
-    return bounds;
-}
-
-Point3f TriangleCentroid(const RenderTriangle& triangle) {
-    return Point3f{
-        (triangle.p0.x + triangle.p1.x + triangle.p2.x) / 3.0f,
-        (triangle.p0.y + triangle.p1.y + triangle.p2.y) / 3.0f,
-        (triangle.p0.z + triangle.p1.z + triangle.p2.z) / 3.0f
     };
 }
 
@@ -93,7 +78,7 @@ int LongestAxis(const Bounds3f& bounds) {
 }
 
 int BuildRecursive(
-    std::vector<BvhPrimitive>& primitives,
+    std::vector<BvhPrimRef>& prims,
     int begin,
     int end,
     int depth,
@@ -112,8 +97,8 @@ int BuildRecursive(
     Bounds3f node_bounds;
     Bounds3f centroid_bounds;
     for (int i = begin; i < end; ++i) {
-        node_bounds = UnionBounds(node_bounds, primitives[static_cast<std::size_t>(i)].bounds);
-        centroid_bounds = Union(centroid_bounds, primitives[static_cast<std::size_t>(i)].centroid);
+        node_bounds = UnionBounds(node_bounds, prims[static_cast<std::size_t>(i)].bounds);
+        centroid_bounds = Union(centroid_bounds, prims[static_cast<std::size_t>(i)].centroid);
     }
 
     if (!IsFinite(node_bounds) || !IsFinite(centroid_bounds)) {
@@ -125,7 +110,7 @@ int BuildRecursive(
     if (primitive_count <= max_leaf_triangles) {
         const int first_triangle = static_cast<int>(bvh.triangle_indices.size());
         for (int i = begin; i < end; ++i) {
-            bvh.triangle_indices.push_back(primitives[static_cast<std::size_t>(i)].triangle_index);
+            bvh.triangle_indices.push_back(prims[static_cast<std::size_t>(i)].flat_index);
         }
         bvh.nodes[static_cast<std::size_t>(node_index)] = RenderBvhNode{
             node_bounds,
@@ -141,10 +126,10 @@ int BuildRecursive(
     const int axis = LongestAxis(centroid_bounds);
     const int mid = begin + primitive_count / 2;
     std::nth_element(
-        primitives.begin() + begin,
-        primitives.begin() + mid,
-        primitives.begin() + end,
-        [axis](const BvhPrimitive& a, const BvhPrimitive& b) {
+        prims.begin() + begin,
+        prims.begin() + mid,
+        prims.begin() + end,
+        [axis](const BvhPrimRef& a, const BvhPrimRef& b) {
             return AxisValue(a.centroid, axis) < AxisValue(b.centroid, axis);
         }
     );
@@ -154,8 +139,8 @@ int BuildRecursive(
         return -1;
     }
 
-    const int left_child = BuildRecursive(primitives, begin, mid, depth + 1, max_leaf_triangles, bvh, errors);
-    const int right_child = BuildRecursive(primitives, mid, end, depth + 1, max_leaf_triangles, bvh, errors);
+    const int left_child = BuildRecursive(prims, begin, mid, depth + 1, max_leaf_triangles, bvh, errors);
+    const int right_child = BuildRecursive(prims, mid, end, depth + 1, max_leaf_triangles, bvh, errors);
     if (left_child < 0 || right_child < 0) {
         return -1;
     }
@@ -171,40 +156,9 @@ int BuildRecursive(
     return node_index;
 }
 
-bool IntersectTriangle(const Ray3f& ray, const RenderTriangle& triangle, float t_min, float t_max, float& t_out) {
-    const Vec3f edge1 = triangle.p1 - triangle.p0;
-    const Vec3f edge2 = triangle.p2 - triangle.p0;
-    const Vec3f pvec = Cross(ray.direction, edge2);
-    const float det = Dot(edge1, pvec);
-    if (std::fabs(det) < ParallelEpsilon) {
-        return false;
-    }
-
-    const float inv_det = 1.0f / det;
-    const Vec3f tvec = ray.origin - triangle.p0;
-    const float u = Dot(tvec, pvec) * inv_det;
-    if (u < 0.0f || u > 1.0f) {
-        return false;
-    }
-
-    const Vec3f qvec = Cross(tvec, edge1);
-    const float v = Dot(ray.direction, qvec) * inv_det;
-    if (v < 0.0f || u + v > 1.0f) {
-        return false;
-    }
-
-    const float t = Dot(edge2, qvec) * inv_det;
-    if (t <= t_min || t >= t_max) {
-        return false;
-    }
-
-    t_out = t;
-    return true;
-}
-
 } // namespace
 
-BvhBuildResult BuildBvh(const std::vector<RenderTriangle>& triangles, const BvhBuildOptions& options) {
+BvhBuildResult BuildBvh(const RenderSceneIR& scene, const BvhBuildOptions& options) {
     BvhBuildResult result;
 
     if (options.max_leaf_triangles < 1) {
@@ -212,27 +166,58 @@ BvhBuildResult BuildBvh(const std::vector<RenderTriangle>& triangles, const BvhB
         return result;
     }
 
-    if (triangles.empty()) {
+    // Build flat triangle list from table geometry
+    std::vector<BvhPrimRef> prims;
+    int flat_tri = 0;
+    for (int pi = 0; pi < static_cast<int>(scene.primitives.size()); ++pi) {
+        const auto& prim = scene.primitives[pi];
+        const int tri_count = static_cast<int>(prim.index_count / 3);
+        for (int ti = 0; ti < tri_count; ++ti) {
+            std::uint32_t i0 = scene.indices[prim.first_index + static_cast<std::uint32_t>(ti) * 3 + 0];
+            std::uint32_t i1 = scene.indices[prim.first_index + static_cast<std::uint32_t>(ti) * 3 + 1];
+            std::uint32_t i2 = scene.indices[prim.first_index + static_cast<std::uint32_t>(ti) * 3 + 2];
+            Point3f p0 = scene.vertices[i0].position;
+            Point3f p1 = scene.vertices[i1].position;
+            Point3f p2 = scene.vertices[i2].position;
+
+            Bounds3f tri_bounds = Union(Union(Bounds3f{p0, p0}, p1), p2);
+            Point3f centroid{
+                (p0.x + p1.x + p2.x) * (1.0f / 3.0f),
+                (p0.y + p1.y + p2.y) * (1.0f / 3.0f),
+                (p0.z + p1.z + p2.z) * (1.0f / 3.0f)
+            };
+
+            if (!IsFinite(tri_bounds) || !IsFinite(centroid)) {
+                result.errors.push_back("BVH build encountered non-finite triangle data");
+                return result;
+            }
+
+            BvhPrimRef ref;
+            ref.flat_index = flat_tri;
+            ref.primitive_index = pi;
+            ref.local_triangle = ti;
+            ref.bounds = tri_bounds;
+            ref.centroid = centroid;
+            prims.push_back(ref);
+            ++flat_tri;
+        }
+    }
+
+    if (prims.empty()) {
         return result;
     }
 
-    std::vector<BvhPrimitive> primitives;
-    primitives.reserve(triangles.size());
-    for (std::size_t i = 0; i < triangles.size(); ++i) {
-        const RenderTriangle& triangle = triangles[i];
-        const Bounds3f bounds = TriangleBounds(triangle);
-        const Point3f centroid = TriangleCentroid(triangle);
-        if (!IsFinite(bounds) || !IsFinite(centroid)) {
-            result.errors.push_back("BVH build encountered non-finite triangle data");
-            return result;
-        }
-        primitives.push_back(BvhPrimitive{static_cast<int>(i), bounds, centroid});
+    // Build triangle_to_primitive lookup table
+    result.bvh.triangle_to_primitive.resize(static_cast<std::size_t>(flat_tri));
+    for (const auto& ref : prims) {
+        result.bvh.triangle_to_primitive[static_cast<std::size_t>(ref.flat_index)] = {ref.primitive_index, ref.local_triangle};
     }
+    result.bvh.total_triangles = flat_tri;
 
     const int root = BuildRecursive(
-        primitives,
+        prims,
         0,
-        static_cast<int>(primitives.size()),
+        static_cast<int>(prims.size()),
         1,
         options.max_leaf_triangles,
         result.bvh,
@@ -275,28 +260,61 @@ BvhHit IntersectBvh(
         }
 
         if (node.triangle_count > 0) {
-            for (int i = 0; i < node.triangle_count; ++i) {
-                const int index_position = node.first_triangle + i;
-                if (index_position < 0 ||
-                    static_cast<std::size_t>(index_position) >= bvh.triangle_indices.size()) {
-                    continue;
-                }
-
-                const int triangle_index = bvh.triangle_indices[static_cast<std::size_t>(index_position)];
-                if (triangle_index < 0 ||
-                    static_cast<std::size_t>(triangle_index) >= scene.triangles.size()) {
+            for (int ti = node.first_triangle; ti < node.first_triangle + node.triangle_count; ++ti) {
+                if (ti < 0 || static_cast<std::size_t>(ti) >= bvh.triangle_indices.size()) {
                     continue;
                 }
 
                 ++stats.triangle_tests;
-                float t = 0.0f;
-                const RenderTriangle& triangle = scene.triangles[static_cast<std::size_t>(triangle_index)];
-                if (IntersectTriangle(ray, triangle, t_min, nearest.t, t) && t < nearest.t) {
-                    nearest.hit = true;
-                    nearest.t = t;
-                    nearest.triangle = &triangle;
-                    nearest.triangle_index = triangle_index;
+                const int flat_idx = bvh.triangle_indices[static_cast<std::size_t>(ti)];
+                if (flat_idx < 0 || static_cast<std::size_t>(flat_idx) >= bvh.triangle_to_primitive.size()) {
+                    continue;
                 }
+
+                auto [prim_idx, local_tri] = bvh.triangle_to_primitive[static_cast<std::size_t>(flat_idx)];
+                if (prim_idx < 0 || static_cast<std::size_t>(prim_idx) >= scene.primitives.size()) {
+                    continue;
+                }
+
+                const auto& prim = scene.primitives[static_cast<std::size_t>(prim_idx)];
+                std::uint32_t base = prim.first_index + static_cast<std::uint32_t>(local_tri) * 3;
+                Point3f p0 = scene.vertices[scene.indices[base + 0]].position;
+                Point3f p1 = scene.vertices[scene.indices[base + 1]].position;
+                Point3f p2 = scene.vertices[scene.indices[base + 2]].position;
+
+                // Moller-Trumbore intersection
+                const Vec3f edge1 = p1 - p0;
+                const Vec3f edge2 = p2 - p0;
+                const Vec3f pvec = Cross(ray.direction, edge2);
+                const float det = Dot(edge1, pvec);
+                if (std::fabs(det) < ParallelEpsilon) {
+                    continue;
+                }
+
+                const float inv_det = 1.0f / det;
+                const Vec3f tvec = ray.origin - p0;
+                const float u = Dot(tvec, pvec) * inv_det;
+                if (u < 0.0f || u > 1.0f) {
+                    continue;
+                }
+
+                const Vec3f qvec = Cross(tvec, edge1);
+                const float v = Dot(ray.direction, qvec) * inv_det;
+                if (v < 0.0f || u + v > 1.0f) {
+                    continue;
+                }
+
+                const float t = Dot(edge2, qvec) * inv_det;
+                if (t <= t_min || t >= nearest.t) {
+                    continue;
+                }
+
+                nearest.hit = true;
+                nearest.t = t;
+                nearest.triangle_index = flat_idx;
+                nearest.primitive_index = prim_idx;
+                nearest.bary_u = u;
+                nearest.bary_v = v;
             }
         } else {
             if (node.right_child >= 0) {

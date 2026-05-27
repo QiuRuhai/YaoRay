@@ -295,7 +295,7 @@ YR_TEST(texture_loader_rejects_non_png_extension) {
 }
 
 YR_TEST(texture_loader_preserves_png_alpha_channel) {
-    const yr::TextureLoadResult result = yr::LoadPngTexture(TextureFixturePath("assets/gltf/SimpleTexture/glTF/testTexture.png"));
+    const yr::TextureLoadResult result = yr::LoadPngTexture(TextureFixturePath("assets/test_texture_with_alpha.png"));
 
     YR_EXPECT_TRUE(result.ok);
     YR_EXPECT_TRUE(result.error.empty());
@@ -307,7 +307,7 @@ YR_TEST(texture_loader_preserves_png_alpha_channel) {
 }
 
 YR_TEST(texture_loader_uses_requested_color_space) {
-    const std::filesystem::path path = TextureFixturePath("assets/gltf/SimpleTexture/glTF/testTexture.png");
+    const std::filesystem::path path = TextureFixturePath("assets/test_texture_with_alpha.png");
     const yr::TextureLoadResult srgb = yr::LoadPngTexture(path, yr::TextureColorSpace::Srgb);
     const yr::TextureLoadResult linear = yr::LoadPngTexture(path, yr::TextureColorSpace::Linear);
 

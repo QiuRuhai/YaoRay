@@ -1,7 +1,5 @@
 #include <yaoray/pbrt/pbrt_scene.hpp>
 
-#include <yaoray/assets/ply_loader.hpp>
-
 #include <array>
 #include <cmath>
 #include <cctype>
@@ -19,12 +17,7 @@
 namespace yr {
 namespace {
 
-constexpr float Pi = 3.14159265358979323846f;
 constexpr int MaxIncludeDepth = 32;
-
-float DegreesToRadians(float degrees) {
-    return degrees * Pi / 180.0f;
-}
 
 SceneDiagnostic PbrtError(const std::filesystem::path& file, std::string field, std::string message) {
     return SceneDiagnostic{DiagnosticSeverity::Error, file, std::move(field), std::move(message)};
@@ -34,149 +27,34 @@ SceneDiagnostic PbrtWarning(const std::filesystem::path& file, std::string field
     return SceneDiagnostic{DiagnosticSeverity::Warning, file, std::move(field), std::move(message)};
 }
 
-struct Mat4 {
-    std::array<float, 16> m{
-        1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f
-    };
-};
-
-Mat4 Multiply(Mat4 a, Mat4 b) {
-    Mat4 result;
-    result.m.fill(0.0f);
-    for (int column = 0; column < 4; ++column) {
-        for (int row = 0; row < 4; ++row) {
-            for (int k = 0; k < 4; ++k) {
-                result.m[static_cast<std::size_t>(column * 4 + row)] +=
-                    a.m[static_cast<std::size_t>(k * 4 + row)] *
-                    b.m[static_cast<std::size_t>(column * 4 + k)];
-            }
-        }
-    }
-    return result;
-}
-
-Point3f TransformPoint(Mat4 transform, Point3f point) {
-    return Point3f{
-        transform.m[0] * point.x + transform.m[4] * point.y + transform.m[8] * point.z + transform.m[12],
-        transform.m[1] * point.x + transform.m[5] * point.y + transform.m[9] * point.z + transform.m[13],
-        transform.m[2] * point.x + transform.m[6] * point.y + transform.m[10] * point.z + transform.m[14]
-    };
-}
-
-Vec3f TransformVector(Mat4 transform, Vec3f value) {
-    return Vec3f{
-        transform.m[0] * value.x + transform.m[4] * value.y + transform.m[8] * value.z,
-        transform.m[1] * value.x + transform.m[5] * value.y + transform.m[9] * value.z,
-        transform.m[2] * value.x + transform.m[6] * value.y + transform.m[10] * value.z
-    };
-}
-
-Vec3f TransformNormal(Mat4 transform, Vec3f normal) {
-    const float a = transform.m[0];
-    const float b = transform.m[4];
-    const float c = transform.m[8];
-    const float d = transform.m[1];
-    const float e = transform.m[5];
-    const float f = transform.m[9];
-    const float g = transform.m[2];
-    const float h = transform.m[6];
-    const float i = transform.m[10];
-
-    const float determinant =
-        a * (e * i - f * h) -
-        b * (d * i - f * g) +
-        c * (d * h - e * g);
-    if (std::fabs(determinant) <= 1.0e-12f) {
-        const Vec3f fallback = Normalize(TransformVector(transform, normal));
-        return LengthSquared(fallback) > 0.0f ? fallback : Normalize(normal);
-    }
-
-    const float inv_det = 1.0f / determinant;
-    return Normalize(Vec3f{
-        ((e * i - f * h) * normal.x + (f * g - d * i) * normal.y + (d * h - e * g) * normal.z) * inv_det,
-        ((c * h - b * i) * normal.x + (a * i - c * g) * normal.y + (b * g - a * h) * normal.z) * inv_det,
-        ((b * f - c * e) * normal.x + (c * d - a * f) * normal.y + (a * e - b * d) * normal.z) * inv_det
-    });
-}
-
-Mat4 TranslationMatrix(Vec3f translation) {
-    Mat4 result;
-    result.m[12] = translation.x;
-    result.m[13] = translation.y;
-    result.m[14] = translation.z;
-    return result;
-}
-
-Mat4 ScaleMatrix(Vec3f scale) {
-    Mat4 result;
-    result.m[0] = scale.x;
-    result.m[5] = scale.y;
-    result.m[10] = scale.z;
-    return result;
-}
-
-Mat4 RotationAxisMatrix(float degrees, Vec3f axis) {
-    const Vec3f unit_axis = Normalize(axis);
-    if (LengthSquared(unit_axis) == 0.0f) {
-        return Mat4{};
-    }
-
-    const float radians = DegreesToRadians(degrees);
-    const float c = std::cos(radians);
-    const float s = std::sin(radians);
-    const float t = 1.0f - c;
-    const float x = unit_axis.x;
-    const float y = unit_axis.y;
-    const float z = unit_axis.z;
-
-    Mat4 result;
-    result.m[0] = t * x * x + c;
-    result.m[1] = t * x * y + s * z;
-    result.m[2] = t * x * z - s * y;
-
-    result.m[4] = t * x * y - s * z;
-    result.m[5] = t * y * y + c;
-    result.m[6] = t * y * z + s * x;
-
-    result.m[8] = t * x * z + s * y;
-    result.m[9] = t * y * z - s * x;
-    result.m[10] = t * z * z + c;
-    return result;
-}
-
-Mat4 MatrixFromPbrtValues(const std::vector<float>& values) {
-    Mat4 result;
+Mat4f MatrixFromPbrtValues(const std::vector<float>& values) {
+    Mat4f result;
     for (std::size_t i = 0; i < result.m.size(); ++i) {
         result.m[i] = values[i];
     }
     return result;
 }
 
-struct PbrtParam {
-    std::string type;
-    std::string name;
-    std::vector<std::string> values;
-};
-
 struct ScopedPbrtState {
-    std::string material;
-    Mat4 transform;
+    std::string material_name;
+    std::optional<PbrtEntity> inline_material;
+    std::optional<PbrtEntity> current_area_light;
+    Mat4f transform;
 };
 
 struct PbrtParserState {
-    SceneWorld world;
+    PbrtScene scene;
     std::vector<SceneDiagnostic> diagnostics;
-    std::string current_material;
-    Mat4 current_transform;
+    std::string current_material_name;
+    std::optional<PbrtEntity> current_inline_material;
+    std::optional<PbrtEntity> current_area_light;
+    Mat4f current_transform;
     std::vector<ScopedPbrtState> attribute_stack;
-    std::vector<Mat4> transform_stack;
+    std::vector<Mat4f> transform_stack;
     std::vector<std::filesystem::path> include_stack;
-    float current_fov = 45.0f;
-    int next_asset_index = 0;
-    int next_material_index = 0;
+    // For ObjectBegin/End tracking
+    std::string current_object_name;
+    bool inside_object = false;
 };
 
 std::vector<std::string> TokenizePbrt(std::string_view text) {
@@ -250,33 +128,6 @@ std::vector<std::string> ReadValueList(const std::vector<std::string>& tokens, s
     return values;
 }
 
-std::vector<PbrtParam> ReadParams(const std::vector<std::string>& tokens, std::size_t& index) {
-    std::vector<PbrtParam> params;
-    while (index < tokens.size()) {
-        std::string type;
-        std::string name;
-        if (!SplitParamName(tokens[index], type, name)) {
-            break;
-        }
-        ++index;
-        PbrtParam param;
-        param.type = std::move(type);
-        param.name = std::move(name);
-        param.values = ReadValueList(tokens, index);
-        params.push_back(std::move(param));
-    }
-    return params;
-}
-
-const PbrtParam* FindParam(const std::vector<PbrtParam>& params, std::string_view name) {
-    for (const PbrtParam& param : params) {
-        if (param.name == name) {
-            return &param;
-        }
-    }
-    return nullptr;
-}
-
 std::optional<float> ParseFloatToken(std::string_view token) {
     try {
         const std::string value{token};
@@ -319,102 +170,64 @@ std::optional<std::uint32_t> ParseUintToken(std::string_view token) {
     }
 }
 
-float FloatAt(const std::vector<std::string>& values, std::size_t index, float fallback = 0.0f) {
-    if (index >= values.size()) {
-        return fallback;
+std::vector<PbrtParam> ReadParams(const std::vector<std::string>& tokens, std::size_t& index) {
+    std::vector<PbrtParam> params;
+    while (index < tokens.size()) {
+        std::string type;
+        std::string name;
+        if (!SplitParamName(tokens[index], type, name)) {
+            break;
+        }
+        ++index;
+        std::vector<std::string> raw_values = ReadValueList(tokens, index);
+
+        PbrtParam param;
+        param.type = type;
+        param.name = name;
+
+        // Populate typed fields based on type
+        if (type == "float" || type == "rgb" || type == "color" || type == "point3" ||
+            type == "point2" || type == "vector3" || type == "normal" || type == "spectrum" ||
+            type == "blackbody") {
+            param.floats.reserve(raw_values.size());
+            for (const std::string& v : raw_values) {
+                param.floats.push_back(ParseFloatToken(v).value_or(0.0f));
+            }
+        } else if (type == "integer") {
+            param.ints.reserve(raw_values.size());
+            for (const std::string& v : raw_values) {
+                param.ints.push_back(ParseIntToken(v).value_or(0));
+            }
+        } else if (type == "bool") {
+            param.bools.reserve(raw_values.size());
+            for (const std::string& v : raw_values) {
+                param.bools.push_back(v == "true" || v == "1");
+            }
+        } else {
+            // string, texture, or unknown type
+            param.strings = std::move(raw_values);
+        }
+
+        params.push_back(std::move(param));
     }
-    return ParseFloatToken(values[index]).value_or(fallback);
+    return params;
 }
 
-int IntAt(const std::vector<std::string>& values, std::size_t index, int fallback = 0) {
-    if (index >= values.size()) {
-        return fallback;
+const PbrtParam* FindParam(const std::vector<PbrtParam>& params, std::string_view name) {
+    for (const PbrtParam& param : params) {
+        if (param.name == name) {
+            return &param;
+        }
     }
-    return ParseIntToken(values[index]).value_or(fallback);
+    return nullptr;
 }
 
-std::optional<float> FloatParam(const std::vector<PbrtParam>& params, std::string_view name) {
+std::string StringParam(const std::vector<PbrtParam>& params, std::string_view name, const std::string& fallback = "") {
     const PbrtParam* param = FindParam(params, name);
-    if (param == nullptr || param->values.empty()) {
-        return std::nullopt;
-    }
-    return ParseFloatToken(param->values[0]);
-}
-
-Color3f ColorParam(const std::vector<PbrtParam>& params, std::string_view name, Color3f fallback) {
-    const PbrtParam* param = FindParam(params, name);
-    if (param == nullptr || param->values.size() < 3) {
+    if (param == nullptr || param->strings.empty()) {
         return fallback;
     }
-    return Color3f{
-        FloatAt(param->values, 0, fallback.x),
-        FloatAt(param->values, 1, fallback.y),
-        FloatAt(param->values, 2, fallback.z)
-    };
-}
-
-float Average(Color3f color) {
-    return (color.x + color.y + color.z) / 3.0f;
-}
-
-MaterialKind MaterialKindFromPbrt(std::string_view type) {
-    if (type == "plastic" || type == "uber" || type == "substrate") {
-        return MaterialKind::Plastic;
-    }
-    if (type == "metal" || type == "conductor") {
-        return MaterialKind::Metal;
-    }
-    if (type == "glass" || type == "dielectric" || type == "thindielectric" || type == "roughdielectric") {
-        return MaterialKind::Dielectric;
-    }
-    return MaterialKind::Diffuse;
-}
-
-std::string MaterialTypeParam(const std::vector<PbrtParam>& params, std::string_view fallback) {
-    const PbrtParam* type = FindParam(params, "type");
-    if (type == nullptr || type->values.empty()) {
-        return std::string{fallback};
-    }
-    return type->values[0];
-}
-
-void PopulateMaterialFromPbrt(
-    MaterialDescription& material,
-    std::string_view pbrt_type,
-    const std::vector<PbrtParam>& params
-) {
-    material.type = MaterialKindFromPbrt(pbrt_type);
-    material.albedo = ColorParam(params, "reflectance", material.albedo);
-    material.albedo = ColorParam(params, "Kd", material.albedo);
-    material.albedo = ColorParam(params, "color", material.albedo);
-    if (const PbrtParam* kr = FindParam(params, "Kr");
-        kr != nullptr && material.type == MaterialKind::Dielectric) {
-        material.albedo = ColorParam(params, "Kr", material.albedo);
-    }
-    if (const PbrtParam* ks = FindParam(params, "Ks"); ks != nullptr && ks->values.size() >= 3) {
-        material.specular = Average(ColorParam(params, "Ks", Color3f{material.specular, material.specular, material.specular}));
-    }
-    if (std::optional<float> roughness = FloatParam(params, "roughness")) {
-        material.roughness = *roughness;
-    }
-    if (std::optional<float> uroughness = FloatParam(params, "uroughness")) {
-        material.roughness = *uroughness;
-    }
-    if (std::optional<float> vroughness = FloatParam(params, "vroughness")) {
-        material.roughness = (material.roughness + *vroughness) * 0.5f;
-    }
-    if (std::optional<float> eta = FloatParam(params, "eta")) {
-        material.ior = *eta;
-    }
-    if (std::optional<float> ior = FloatParam(params, "ior")) {
-        material.ior = *ior;
-    }
-    if (std::optional<float> index = FloatParam(params, "index")) {
-        material.ior = *index;
-    }
-    if (pbrt_type == "thindielectric") {
-        material.thin = true;
-    }
+    return param->strings[0];
 }
 
 std::filesystem::path ResolvePath(const std::filesystem::path& base, std::string_view value) {
@@ -474,166 +287,6 @@ bool ReadFloatSequence(
     return true;
 }
 
-void ParseFilm(
-    const std::filesystem::path& path,
-    const std::vector<PbrtParam>& params,
-    SceneWorld& world
-) {
-    if (const PbrtParam* x = FindParam(params, "xresolution")) {
-        world.render.width = IntAt(x->values, 0, world.render.width);
-    }
-    if (const PbrtParam* y = FindParam(params, "yresolution")) {
-        world.render.height = IntAt(y->values, 0, world.render.height);
-    }
-    if (const PbrtParam* filename = FindParam(params, "filename");
-        filename != nullptr && !filename->values.empty()) {
-        world.film.output = ResolvePath(path.parent_path(), filename->values[0]);
-    }
-}
-
-void AddShapeAsset(PbrtParserState& state, std::vector<SceneWorldMesh> meshes) {
-    SceneWorldAsset asset;
-    asset.name = "__pbrt_shape_" + std::to_string(state.next_asset_index++);
-    asset.meshes = std::move(meshes);
-    state.world.instances.push_back(SceneWorldInstance{asset.name, TransformDescription{}, ""});
-    state.world.assets.push_back(std::move(asset));
-}
-
-bool AppendTriangleMeshShape(
-    PbrtParserState& state,
-    const std::filesystem::path& path,
-    const std::vector<PbrtParam>& params
-) {
-    const PbrtParam* p = FindParam(params, "P");
-    const PbrtParam* indices = FindParam(params, "indices");
-    if (p == nullptr || indices == nullptr) {
-        state.diagnostics.push_back(PbrtError(path, "Shape", "trianglemesh requires P and indices parameters"));
-        return false;
-    }
-    if (p->values.size() % 3 != 0) {
-        state.diagnostics.push_back(PbrtError(path, "Shape.P", "trianglemesh P count must be divisible by three"));
-        return false;
-    }
-    if (indices->values.size() % 3 != 0) {
-        state.diagnostics.push_back(PbrtError(path, "Shape.indices", "trianglemesh index count must be divisible by three"));
-        return false;
-    }
-
-    SceneWorldMesh mesh;
-    mesh.material = state.current_material;
-    mesh.positions.reserve(p->values.size() / 3);
-    for (std::size_t value = 0; value + 2 < p->values.size(); value += 3) {
-        mesh.positions.push_back(TransformPoint(state.current_transform, Point3f{
-            FloatAt(p->values, value + 0),
-            FloatAt(p->values, value + 1),
-            FloatAt(p->values, value + 2)
-        }));
-    }
-
-    if (const PbrtParam* normals = FindParam(params, "N");
-        normals != nullptr && normals->values.size() == mesh.positions.size() * 3) {
-        mesh.normals.reserve(mesh.positions.size());
-        for (std::size_t value = 0; value + 2 < normals->values.size(); value += 3) {
-            mesh.normals.push_back(TransformNormal(state.current_transform, Vec3f{
-                FloatAt(normals->values, value + 0),
-                FloatAt(normals->values, value + 1),
-                FloatAt(normals->values, value + 2)
-            }));
-        }
-    }
-
-    const PbrtParam* uv = FindParam(params, "uv");
-    if (uv == nullptr) {
-        uv = FindParam(params, "st");
-    }
-    if (uv != nullptr && uv->values.size() == mesh.positions.size() * 2) {
-        mesh.texcoords0.reserve(mesh.positions.size());
-        for (std::size_t value = 0; value + 1 < uv->values.size(); value += 2) {
-            mesh.texcoords0.push_back(Vec2f{
-                FloatAt(uv->values, value + 0),
-                FloatAt(uv->values, value + 1)
-            });
-        }
-    }
-
-    mesh.indices.reserve(indices->values.size());
-    for (const std::string& value : indices->values) {
-        const std::optional<std::uint32_t> index = ParseUintToken(value);
-        if (!index.has_value()) {
-            state.diagnostics.push_back(PbrtError(path, "Shape.indices", "trianglemesh index must be a non-negative integer"));
-            return false;
-        }
-        mesh.indices.push_back(*index);
-    }
-
-    AddShapeAsset(state, std::vector<SceneWorldMesh>{std::move(mesh)});
-    return true;
-}
-
-bool AppendPlyMeshShape(
-    PbrtParserState& state,
-    const std::filesystem::path& path,
-    const std::vector<PbrtParam>& params
-) {
-    const PbrtParam* filename = FindParam(params, "filename");
-    if (filename == nullptr || filename->values.empty()) {
-        state.diagnostics.push_back(PbrtError(path, "Shape.filename", "plymesh requires string filename parameter"));
-        return false;
-    }
-
-    const std::filesystem::path ply_path = ResolvePath(path.parent_path(), filename->values[0]);
-    AssetLoadResult load = LoadPlyResource(ply_path);
-    for (const std::string& warning : load.warnings) {
-        state.diagnostics.push_back(PbrtWarning(path, "Shape.filename", warning));
-    }
-    for (const std::string& error : load.errors) {
-        state.diagnostics.push_back(PbrtError(path, "Shape.filename", error));
-    }
-    if (!load.errors.empty()) {
-        return false;
-    }
-    if (!load.resource.has_value()) {
-        state.diagnostics.push_back(PbrtError(path, "Shape.filename", "PLY loader returned no resource"));
-        return false;
-    }
-
-    std::vector<SceneWorldMesh> meshes;
-    for (const AssetMesh& asset_mesh : load.resource->meshes) {
-        for (const AssetPrimitive& primitive : asset_mesh.primitives) {
-            if (primitive.topology != AssetPrimitiveTopology::Triangles) {
-                state.diagnostics.push_back(PbrtError(path, "Shape.filename", "PLY primitive topology is not triangles"));
-                return false;
-            }
-
-            SceneWorldMesh mesh;
-            mesh.material = state.current_material;
-            mesh.positions.reserve(primitive.positions.size());
-            for (Point3f position : primitive.positions) {
-                mesh.positions.push_back(TransformPoint(state.current_transform, position));
-            }
-            if (primitive.normals.size() == primitive.positions.size()) {
-                mesh.normals.reserve(primitive.normals.size());
-                for (Vec3f normal : primitive.normals) {
-                    mesh.normals.push_back(TransformNormal(state.current_transform, normal));
-                }
-            }
-            if (primitive.texcoords0.size() == primitive.positions.size()) {
-                mesh.texcoords0 = primitive.texcoords0;
-            }
-            mesh.indices = primitive.indices;
-            meshes.push_back(std::move(mesh));
-        }
-    }
-
-    if (meshes.empty()) {
-        state.diagnostics.push_back(PbrtError(path, "Shape.filename", "PLY resource did not contain mesh primitives"));
-        return false;
-    }
-
-    AddShapeAsset(state, std::move(meshes));
-    return true;
-}
-
 void SkipUnsupportedWithParams(const std::vector<std::string>& tokens, std::size_t& index, int positional_count) {
     for (int i = 0; i < positional_count && index < tokens.size(); ++i) {
         ++index;
@@ -667,78 +320,50 @@ bool ParseTokens(
     for (std::size_t index = 0; index < tokens.size();) {
         const std::string command = tokens[index++];
         if (command == "Film") {
-            if (index < tokens.size()) {
-                ++index;
-            }
-            ParseFilm(path, ReadParams(tokens, index), state.world);
+            std::string film_type = index < tokens.size() ? tokens[index++] : "rgb";
+            state.scene.film = PbrtEntity{film_type, ReadParams(tokens, index)};
         } else if (command == "Integrator") {
-            std::string integrator = index < tokens.size() ? tokens[index++] : "";
-            const std::vector<PbrtParam> params = ReadParams(tokens, index);
-            if (integrator == "path") {
-                state.world.render.integrator = RenderIntegratorKind::Path;
-            }
-            if (std::optional<float> max_depth = FloatParam(params, "maxdepth")) {
-                state.world.render.max_depth = static_cast<int>(*max_depth);
-            }
+            std::string type = index < tokens.size() ? tokens[index++] : "";
+            state.scene.integrator = PbrtEntity{type, ReadParams(tokens, index)};
         } else if (command == "Sampler") {
-            std::string sampler = index < tokens.size() ? tokens[index++] : "";
-            const std::vector<PbrtParam> params = ReadParams(tokens, index);
-            state.world.render.sampler = sampler == "stratified"
-                ? RenderSamplerKind::Stratified
-                : RenderSamplerKind::Independent;
-            if (std::optional<float> pixelsamples = FloatParam(params, "pixelsamples")) {
-                state.world.render.spp = static_cast<int>(*pixelsamples);
-            } else if (std::optional<float> xsamples = FloatParam(params, "xsamples")) {
-                const int x = static_cast<int>(*xsamples);
-                const int y = static_cast<int>(FloatParam(params, "ysamples").value_or(1.0f));
-                state.world.render.spp = x * y;
-            }
+            std::string type = index < tokens.size() ? tokens[index++] : "";
+            state.scene.sampler = PbrtEntity{type, ReadParams(tokens, index)};
         } else if (command == "Camera") {
-            if (index < tokens.size()) {
-                ++index;
-            }
-            const std::vector<PbrtParam> params = ReadParams(tokens, index);
-            if (const PbrtParam* fov = FindParam(params, "fov")) {
-                state.current_fov = FloatAt(fov->values, 0, state.current_fov);
-                if (state.world.camera.has_value()) {
-                    state.world.camera->fov_y = state.current_fov;
-                }
-            }
-            if (!state.world.camera.has_value()) {
-                CameraDescription camera;
-                camera.type = CameraKind::Perspective;
-                camera.position = TransformPoint(state.current_transform, Point3f{0.0f, 0.0f, 0.0f});
-                camera.target = TransformPoint(state.current_transform, Point3f{0.0f, 0.0f, 1.0f});
-                camera.fov_y = state.current_fov;
-                state.world.camera = camera;
-            }
+            std::string type = index < tokens.size() ? tokens[index++] : "perspective";
+            std::vector<PbrtParam> params = ReadParams(tokens, index);
+            state.scene.camera = PbrtEntity{type, std::move(params)};
+            // camera_transform is captured at WorldBegin, not here (PBRT v4 semantics)
         } else if (command == "LookAt") {
             std::vector<float> values;
             if (!ReadFloatSequence(tokens, index, 9, path, "LookAt", state.diagnostics, values)) {
                 return false;
             }
-            CameraDescription camera;
-            camera.type = CameraKind::Perspective;
-            camera.position = Point3f{values[0], values[1], values[2]};
-            camera.target = Point3f{values[3], values[4], values[5]};
-            camera.fov_y = state.current_fov;
-            state.world.camera = camera;
+            Point3f eye{values[0], values[1], values[2]};
+            Point3f target{values[3], values[4], values[5]};
+            Vec3f up{values[6], values[7], values[8]};
+            state.current_transform = Multiply(state.current_transform, LookAtMatrix(eye, target, up));
         } else if (command == "WorldBegin") {
-            state.current_transform = Mat4{};
+            // PBRT v4: camera transform is the CTM at WorldBegin
+            state.scene.camera_transform = state.current_transform;
+            state.current_transform = Mat4f{};
             state.attribute_stack.clear();
             state.transform_stack.clear();
         } else if (command == "WorldEnd") {
             continue;
         } else if (command == "AttributeBegin") {
-            state.attribute_stack.push_back(ScopedPbrtState{state.current_material, state.current_transform});
+            state.attribute_stack.push_back(ScopedPbrtState{
+                state.current_material_name, state.current_inline_material,
+                state.current_area_light, state.current_transform});
         } else if (command == "AttributeEnd") {
             if (state.attribute_stack.empty()) {
                 state.diagnostics.push_back(PbrtWarning(path, "AttributeEnd", "unmatched AttributeEnd ignored"));
             } else {
-                const ScopedPbrtState scoped = state.attribute_stack.back();
-                state.attribute_stack.pop_back();
-                state.current_material = scoped.material;
+                const ScopedPbrtState& scoped = state.attribute_stack.back();
+                state.current_material_name = scoped.material_name;
+                state.current_inline_material = scoped.inline_material;
+                state.current_area_light = scoped.current_area_light;
                 state.current_transform = scoped.transform;
+                state.attribute_stack.pop_back();
             }
         } else if (command == "TransformBegin") {
             state.transform_stack.push_back(state.current_transform);
@@ -750,7 +375,7 @@ bool ParseTokens(
                 state.transform_stack.pop_back();
             }
         } else if (command == "Identity") {
-            state.current_transform = Mat4{};
+            state.current_transform = Mat4f{};
         } else if (command == "Translate") {
             std::vector<float> values;
             if (!ReadFloatSequence(tokens, index, 3, path, "Translate", state.diagnostics, values)) {
@@ -789,64 +414,93 @@ bool ParseTokens(
                 state.diagnostics.push_back(PbrtError(path, "MakeNamedMaterial", "missing material name"));
                 return false;
             }
-            MaterialDescription material;
-            material.name = tokens[index++];
-            const std::vector<PbrtParam> params = ReadParams(tokens, index);
-            PopulateMaterialFromPbrt(material, MaterialTypeParam(params, "matte"), params);
-            state.world.materials.push_back(material);
+            std::string name = tokens[index++];
+            std::vector<PbrtParam> params = ReadParams(tokens, index);
+            std::string mat_type = StringParam(params, "type", "matte");
+            state.scene.named_materials[name] = PbrtEntity{mat_type, std::move(params)};
         } else if (command == "Material") {
             if (index >= tokens.size()) {
                 state.diagnostics.push_back(PbrtError(path, "Material", "missing material type"));
                 return false;
             }
-            const std::string pbrt_type = tokens[index++];
-            const std::vector<PbrtParam> params = ReadParams(tokens, index);
-            MaterialDescription material;
-            material.name = "__pbrt_material_" + std::to_string(state.next_material_index++);
-            PopulateMaterialFromPbrt(material, pbrt_type, params);
-            state.current_material = material.name;
-            state.world.materials.push_back(material);
+            std::string type = tokens[index++];
+            std::vector<PbrtParam> params = ReadParams(tokens, index);
+            state.current_inline_material = PbrtEntity{type, std::move(params)};
+            state.current_material_name.clear();
         } else if (command == "NamedMaterial") {
             if (index >= tokens.size()) {
                 state.diagnostics.push_back(PbrtError(path, "NamedMaterial", "missing material name"));
                 return false;
             }
-            state.current_material = tokens[index++];
+            state.current_material_name = tokens[index++];
+            state.current_inline_material.reset();
+        } else if (command == "AreaLightSource") {
+            std::string type = index < tokens.size() ? tokens[index++] : "diffuse";
+            state.current_area_light = PbrtEntity{type, ReadParams(tokens, index)};
         } else if (command == "Shape") {
             if (index >= tokens.size()) {
                 state.diagnostics.push_back(PbrtError(path, "Shape", "missing shape type"));
                 return false;
             }
-            const std::string shape_type = tokens[index++];
-            const std::vector<PbrtParam> params = ReadParams(tokens, index);
-            if (shape_type == "trianglemesh") {
-                if (!AppendTriangleMeshShape(state, path, params)) {
-                    return false;
-                }
-            } else if (shape_type == "plymesh") {
-                if (!AppendPlyMeshShape(state, path, params)) {
-                    return false;
-                }
+            std::string shape_type = tokens[index++];
+            std::vector<PbrtParam> params = ReadParams(tokens, index);
+            PbrtShapeRecord record;
+            record.shape = PbrtEntity{shape_type, std::move(params)};
+            record.material_name = state.current_material_name;
+            record.inline_material = state.current_inline_material;
+            record.area_light = state.current_area_light;
+            record.object_to_world = state.current_transform;
+            if (state.inside_object) {
+                state.scene.object_definitions[state.current_object_name].push_back(std::move(record));
             } else {
-                state.diagnostics.push_back(PbrtError(path, "Shape", "unsupported PBRT shape: " + shape_type));
+                state.scene.shapes.push_back(std::move(record));
+            }
+        } else if (command == "Texture") {
+            if (index + 2 >= tokens.size()) {
+                state.diagnostics.push_back(PbrtError(path, "Texture", "missing texture parameters"));
                 return false;
             }
+            std::string tex_name = tokens[index++];
+            std::string tex_value_type = tokens[index++];  // "float" or "spectrum"/"color"
+            std::string tex_class = tokens[index++];  // "imagemap", "constant", etc.
+            std::vector<PbrtParam> params = ReadParams(tokens, index);
+            state.scene.named_textures[tex_name] = PbrtEntity{tex_class, std::move(params)};
+        } else if (command == "LightSource") {
+            std::string type = index < tokens.size() ? tokens[index++] : "";
+            std::vector<PbrtParam> params = ReadParams(tokens, index);
+            state.scene.lights.push_back(PbrtLightRecord{PbrtEntity{type, std::move(params)}, state.current_transform});
+        } else if (command == "PixelFilter") {
+            std::string type = index < tokens.size() ? tokens[index++] : "";
+            state.scene.filter = PbrtEntity{type, ReadParams(tokens, index)};
+        } else if (command == "ObjectBegin") {
+            if (index >= tokens.size()) {
+                state.diagnostics.push_back(PbrtError(path, "ObjectBegin", "missing object name"));
+                return false;
+            }
+            state.current_object_name = tokens[index++];
+            state.inside_object = true;
+            state.scene.object_definitions[state.current_object_name]; // ensure entry exists
+        } else if (command == "ObjectEnd") {
+            state.inside_object = false;
+            state.current_object_name.clear();
+        } else if (command == "ObjectInstance") {
+            if (index >= tokens.size()) {
+                state.diagnostics.push_back(PbrtError(path, "ObjectInstance", "missing object name"));
+                return false;
+            }
+            std::string name = tokens[index++];
+            state.scene.instances.push_back(PbrtObjectInstance{std::move(name), state.current_transform});
         } else if (command == "Include") {
             if (!ParseInclude(tokens, index, path, state, include_depth)) {
                 return false;
             }
-        } else if (command == "PixelFilter" || command == "Accelerator" || command == "LightSource" ||
-                   command == "AreaLightSource" || command == "MakeNamedMedium" || command == "MediumInterface") {
+        } else if (command == "Accelerator" || command == "MakeNamedMedium" || command == "MediumInterface") {
             state.diagnostics.push_back(PbrtWarning(path, command, "unsupported PBRT directive ignored"));
             SkipUnsupportedWithParams(tokens, index, 1);
-        } else if (command == "Texture") {
-            state.diagnostics.push_back(PbrtWarning(path, command, "unsupported PBRT directive ignored"));
-            SkipUnsupportedWithParams(tokens, index, 3);
-        } else if (command == "ObjectBegin" || command == "ObjectInstance" || command == "CoordinateSystem" ||
-                   command == "CoordSysTransform" || command == "ActiveTransform") {
+        } else if (command == "CoordinateSystem" || command == "CoordSysTransform" || command == "ActiveTransform") {
             state.diagnostics.push_back(PbrtWarning(path, command, "unsupported PBRT directive ignored"));
             SkipUnsupportedWithParams(tokens, index, 1);
-        } else if (command == "ObjectEnd" || command == "ReverseOrientation") {
+        } else if (command == "ReverseOrientation") {
             state.diagnostics.push_back(PbrtWarning(path, command, "unsupported PBRT directive ignored"));
         } else if (command == "TransformTimes") {
             state.diagnostics.push_back(PbrtWarning(path, command, "unsupported PBRT directive ignored"));
@@ -898,37 +552,20 @@ bool ParsePbrtFileIntoState(const std::filesystem::path& path, PbrtParserState& 
 
 } // namespace
 
-SceneWorldLoadResult LoadPbrtSceneFile(const std::filesystem::path& path) {
+PbrtSceneLoadResult LoadPbrtScene(const std::filesystem::path& path) {
     PbrtParserState state;
-    state.world.source_path = path;
-    state.world.source_root = path.parent_path();
-    state.world.render.backend = RenderBackendKind::Cpu;
-    state.world.render.integrator = RenderIntegratorKind::Path;
-    state.world.render.sampler = RenderSamplerKind::Independent;
-    state.world.render.width = 1280;
-    state.world.render.height = 720;
-    state.world.render.spp = 1;
-    state.world.render.max_depth = 5;
-    state.world.film.output = path.parent_path() / "out" / (path.stem().string() + ".png");
-    state.world.environment.type = EnvironmentKind::Constant;
-    state.world.environment.radiance = Color3f{0.0f, 0.0f, 0.0f};
+    state.scene.source_path = path;
+    state.scene.source_root = path.parent_path();
 
     (void)ParsePbrtFileIntoState(path, state, 0);
 
-    if (!state.world.camera.has_value()) {
-        state.diagnostics.push_back(PbrtError(path, "Camera", "PBRT scene did not define a supported camera"));
-    }
-    if (state.world.assets.empty()) {
-        state.diagnostics.push_back(PbrtError(path, "Shape", "PBRT scene did not define supported geometry"));
-    }
-
-    SceneWorldLoadResult result;
+    PbrtSceneLoadResult result;
     result.diagnostics = std::move(state.diagnostics);
     if (HasSceneErrors(result.diagnostics)) {
         return result;
     }
 
-    result.scene = std::move(state.world);
+    result.scene = std::move(state.scene);
     return result;
 }
 

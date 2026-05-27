@@ -11,8 +11,6 @@ struct CpuSurfaceHit {
     bool hit = false;
     bool exhausted = false;
     BvhHit geometry_hit;
-    Vec3f barycentric;
-    Vec2f uv;
     ResolvedMaterialSample sample;
 };
 

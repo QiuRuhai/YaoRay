@@ -11,11 +11,8 @@
 namespace yr {
 
 struct RenderSceneIR;
-struct RenderTriangle;
 
-enum class BvhSplitMethod {
-    LongestAxisMedian,
-};
+enum class BvhSplitMethod { LongestAxisMedian };
 
 struct BvhBuildOptions {
     BvhSplitMethod split_method = BvhSplitMethod::LongestAxisMedian;
@@ -33,7 +30,9 @@ struct RenderBvhNode {
 struct RenderBvh {
     std::vector<RenderBvhNode> nodes;
     std::vector<int> triangle_indices;
+    std::vector<std::pair<int, int>> triangle_to_primitive;  // flat tri → (primitive_index, local_tri)
     int max_depth = 0;
+    int total_triangles = 0;
 };
 
 struct BvhTraceStats {
@@ -44,8 +43,10 @@ struct BvhTraceStats {
 struct BvhHit {
     bool hit = false;
     float t = std::numeric_limits<float>::infinity();
-    const RenderTriangle* triangle = nullptr;
     int triangle_index = -1;
+    int primitive_index = -1;
+    float bary_u = 0.0f;
+    float bary_v = 0.0f;
 };
 
 struct BvhBuildResult {
@@ -53,10 +54,7 @@ struct BvhBuildResult {
     std::vector<std::string> errors;
 };
 
-BvhBuildResult BuildBvh(
-    const std::vector<RenderTriangle>& triangles,
-    const BvhBuildOptions& options = {}
-);
+BvhBuildResult BuildBvh(const RenderSceneIR& scene, const BvhBuildOptions& options = {});
 
 BvhHit IntersectBvh(
     const RenderSceneIR& scene,

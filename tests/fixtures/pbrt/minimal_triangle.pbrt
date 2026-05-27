@@ -1,6 +1,6 @@
-Film "rgb" "integer xresolution" [64] "integer yresolution" [32] "string filename" ["../scene/out/minimal_pbrt.png"]
-Camera "perspective" "float fov" [45]
 LookAt 0 0 3  0 0 0  0 1 0
+Camera "perspective" "float fov" [45]
+Film "rgb" "integer xresolution" [64] "integer yresolution" [32] "string filename" ["out/minimal_pbrt.png"]
 WorldBegin
 MakeNamedMaterial "white" "string type" ["matte"] "rgb reflectance" [0.7 0.7 0.7]
 NamedMaterial "white"

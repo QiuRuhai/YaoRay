@@ -6,6 +6,8 @@
 #include <yaoray/render/environment.hpp>
 #include <yaoray/render/render_scene.hpp>
 
+// TODO(Task 11): Rewrite environment tests for new RenderEnvironment (bool active, no EnvironmentKind).
+
 namespace {
 
 yr::RenderTexture MakeEnvironmentTexture() {
@@ -15,17 +17,17 @@ yr::RenderTexture MakeEnvironmentTexture() {
     texture.wrap_s = yr::TextureWrap::Repeat;
     texture.wrap_t = yr::TextureWrap::ClampToEdge;
     texture.texels = {
-        yr::Color3f{8.0f, 8.0f, 8.0f},
-        yr::Color3f{1.0f, 1.0f, 1.0f},
-        yr::Color3f{1.0f, 1.0f, 1.0f},
-        yr::Color3f{1.0f, 1.0f, 1.0f}
+        yr::Color4f{8.0f, 8.0f, 8.0f, 1.0f},
+        yr::Color4f{1.0f, 1.0f, 1.0f, 1.0f},
+        yr::Color4f{1.0f, 1.0f, 1.0f, 1.0f},
+        yr::Color4f{1.0f, 1.0f, 1.0f, 1.0f}
     };
     return texture;
 }
 
 yr::RenderSceneIR MakeHdriScene() {
     yr::RenderSceneIR scene;
-    scene.environment.type = yr::EnvironmentKind::Hdri;
+    scene.environment.active = true;
     scene.environment.strength = 2.0f;
     scene.environment.texture_index = 0;
     scene.environment.distribution_index = 0;
@@ -102,10 +104,10 @@ YR_TEST(environment_black_distribution_stays_finite) {
     texture.width = 2;
     texture.height = 2;
     texture.texels = {
-        yr::Color3f{},
-        yr::Color3f{},
-        yr::Color3f{},
-        yr::Color3f{}
+        yr::Color4f{},
+        yr::Color4f{},
+        yr::Color4f{},
+        yr::Color4f{}
     };
 
     const yr::RenderEnvironmentDistribution distribution = yr::BuildEnvironmentDistribution(texture);
