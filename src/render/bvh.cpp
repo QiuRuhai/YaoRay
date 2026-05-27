@@ -6,7 +6,6 @@
 #include <cmath>
 #include <cstddef>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace yr {

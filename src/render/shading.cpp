@@ -1,7 +1,5 @@
 #include <yaoray/render/shading.hpp>
 
-#include <cmath>
-
 namespace yr {
 
 TriangleRef LocateTriangle(const RenderSceneIR& scene, int flat_triangle_index) {
