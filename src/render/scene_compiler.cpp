@@ -55,6 +55,11 @@ int IntParam(const PbrtParam* param, int fallback) {
     return param->ints[0];
 }
 
+Point3f Point3FromParam(const PbrtParam* param, Point3f fallback) {
+    if (param == nullptr || param->floats.size() < 3) return fallback;
+    return Point3f{param->floats[0], param->floats[1], param->floats[2]};
+}
+
 // ---------------------------------------------------------------------------
 // Film / Camera / Integrator / Sampler
 // ---------------------------------------------------------------------------
@@ -465,6 +470,45 @@ bool CompileInstances(
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Analytic light compilation
+// ---------------------------------------------------------------------------
+
+void CompileAnalyticLights(const PbrtScene& scene, RenderSceneIR& ir, std::vector<SceneDiagnostic>& diagnostics) {
+    for (const PbrtLightRecord& record : scene.lights) {
+        if (record.light.type == "point") {
+            AnalyticLight al;
+            al.kind = AnalyticLightKind::Point;
+
+            const Point3f from_local = Point3FromParam(FindParam(record.light.params, "from"),
+                                                       Point3f{0.0f, 0.0f, 0.0f});
+            al.position = TransformPoint(record.light_to_world, from_local);
+
+            const Color3f intensity = RgbParam(FindParam(record.light.params, "I"),
+                                               Color3f{1.0f, 1.0f, 1.0f});
+            const Color3f scale = RgbParam(FindParam(record.light.params, "scale"),
+                                           Color3f{1.0f, 1.0f, 1.0f});
+            al.intensity = Color3f{
+                intensity.x * scale.x,
+                intensity.y * scale.y,
+                intensity.z * scale.z
+            };
+            al.direction = Vec3f{};
+            al.cone_angle = 0.0f;
+
+            ir.analytic_lights.push_back(al);
+        } else if (record.light.type == "distant" ||
+                   record.light.type == "spot" ||
+                   record.light.type == "infinite") {
+            diagnostics.push_back(Warning(scene, "LightSource",
+                "LightSource type '" + record.light.type + "' is not yet supported in M1 Slice 1 and was ignored"));
+        } else {
+            diagnostics.push_back(Warning(scene, "LightSource",
+                "unsupported LightSource type: " + record.light.type));
+        }
+    }
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -522,6 +566,9 @@ SceneCompileResult CompilePbrtScene(const PbrtScene& scene) {
 
     // 4. Compile object instances
     CompileInstances(scene, material_name_to_index, ir, diagnostics);
+
+    // 5. Compile analytic light sources
+    CompileAnalyticLights(scene, ir, diagnostics);
 
     if (ir.primitives.empty() && ir.spheres.empty()) {
         diagnostics.push_back(Error(scene, "Shape", "scene contains no geometry"));
