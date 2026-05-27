@@ -247,6 +247,111 @@ TextureBindings CompileTextures(
 }
 
 // ---------------------------------------------------------------------------
+// Texture-param helpers
+// ---------------------------------------------------------------------------
+
+// Returns the texture name referenced by a "texture"-typed param, or empty if not a texture ref.
+std::string TextureNameInParam(const PbrtParam* param) {
+    if (param == nullptr) return {};
+    if (param->type != "texture") return {};
+    if (param->strings.empty()) return {};
+    return param->strings[0];
+}
+
+TexParam3f TexParam3fFromParams(
+    const std::vector<PbrtParam>& params,
+    const std::string& param_name,
+    Color3f fallback_value,
+    const TextureBindings& bindings,
+    const PbrtScene& scene,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    TexParam3f result;
+    result.value = fallback_value;
+    result.texture = -1;
+
+    const PbrtParam* p = FindParam(params, param_name);
+    if (p == nullptr) {
+        return result;
+    }
+
+    const std::string texture_name = TextureNameInParam(p);
+    if (!texture_name.empty()) {
+        auto it = bindings.name_to_index.find(texture_name);
+        if (it == bindings.name_to_index.end()) {
+            diagnostics.push_back(Warning(scene, "Material." + param_name,
+                "texture '" + texture_name + "' is not defined; using fallback value"));
+            return result;
+        }
+        if (it->second >= 0) {
+            // Real RenderTexture index.
+            result.texture = it->second;
+        } else {
+            // Folded constant -- look up the value.
+            auto cv = bindings.constant_values.find(texture_name);
+            if (cv != bindings.constant_values.end()) {
+                result.value = cv->second;
+            }
+        }
+        return result;
+    }
+
+    // Fall back to the inline RGB / spectrum value.
+    if (!p->floats.empty()) {
+        if (p->floats.size() >= 3) {
+            result.value = Color3f{p->floats[0], p->floats[1], p->floats[2]};
+        } else {
+            const float scalar = p->floats[0];
+            result.value = Color3f{scalar, scalar, scalar};
+        }
+    }
+    return result;
+}
+
+TexParam1f TexParam1fFromParams(
+    const std::vector<PbrtParam>& params,
+    const std::string& param_name,
+    float fallback_value,
+    const TextureBindings& bindings,
+    const PbrtScene& scene,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    TexParam1f result;
+    result.value = fallback_value;
+    result.texture = -1;
+
+    const PbrtParam* p = FindParam(params, param_name);
+    if (p == nullptr) {
+        return result;
+    }
+
+    const std::string texture_name = TextureNameInParam(p);
+    if (!texture_name.empty()) {
+        auto it = bindings.name_to_index.find(texture_name);
+        if (it == bindings.name_to_index.end()) {
+            diagnostics.push_back(Warning(scene, "Material." + param_name,
+                "texture '" + texture_name + "' is not defined; using fallback value"));
+            return result;
+        }
+        if (it->second >= 0) {
+            result.texture = it->second;
+        } else {
+            auto cv = bindings.constant_values.find(texture_name);
+            if (cv != bindings.constant_values.end()) {
+                // Take the X channel of an RGB constant as the scalar.
+                result.value = cv->second.x;
+            }
+        }
+        return result;
+    }
+
+    if (!p->floats.empty()) {
+        result.value = p->floats[0];
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
 // Material compilation
 // ---------------------------------------------------------------------------
 
@@ -257,56 +362,76 @@ int CompileMaterial(
     const PbrtScene& scene,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
-    (void)bindings; // Task 2 will wire texture refs; for now, body uses raw param helpers.
     RenderMaterial material;
     const auto& params = entity.params;
     const std::string& type = entity.type;
 
     if (type == "matte" || type == "diffuse") {
         material.kind = RenderMaterialKind::Diffuse;
-        material.reflectance.value = RgbParam(FindParam(params, "reflectance"), Color3f{0.5f, 0.5f, 0.5f});
-        material.reflectance.value = RgbParam(FindParam(params, "Kd"), material.reflectance.value);
+        material.reflectance = TexParam3fFromParams(params, "reflectance",
+            Color3f{0.5f, 0.5f, 0.5f}, bindings, scene, diagnostics);
+        // PBRT v3 "Kd" alias only matters when explicit; if present, override.
+        if (FindParam(params, "Kd") != nullptr) {
+            material.reflectance = TexParam3fFromParams(params, "Kd",
+                material.reflectance.value, bindings, scene, diagnostics);
+        }
     } else if (type == "conductor" || type == "metal") {
         material.kind = RenderMaterialKind::Conductor;
-        material.eta.value = RgbParam(FindParam(params, "eta"), Color3f{0.2f, 0.2f, 0.2f});
-        material.k.value = RgbParam(FindParam(params, "k"), Color3f{1.0f, 1.0f, 1.0f});
-        material.uroughness.value = FloatParam(FindParam(params, "roughness"), 0.0f);
-        material.uroughness.value = FloatParam(FindParam(params, "uroughness"), material.uroughness.value);
-        material.vroughness.value = FloatParam(FindParam(params, "vroughness"), material.uroughness.value);
+        material.eta = TexParam3fFromParams(params, "eta",
+            Color3f{0.2f, 0.2f, 0.2f}, bindings, scene, diagnostics);
+        material.k = TexParam3fFromParams(params, "k",
+            Color3f{1.0f, 1.0f, 1.0f}, bindings, scene, diagnostics);
+        const float fallback_u = FloatParam(FindParam(params, "roughness"), 0.0f);
+        material.uroughness = TexParam1fFromParams(params, "uroughness",
+            fallback_u, bindings, scene, diagnostics);
+        material.vroughness = TexParam1fFromParams(params, "vroughness",
+            material.uroughness.value, bindings, scene, diagnostics);
     } else if (type == "dielectric" || type == "glass") {
         material.kind = RenderMaterialKind::Dielectric;
         material.ior = FloatParam(FindParam(params, "eta"), 1.5f);
         material.ior = FloatParam(FindParam(params, "index"), material.ior);
-        material.uroughness.value = FloatParam(FindParam(params, "uroughness"), 0.0f);
-        material.vroughness.value = FloatParam(FindParam(params, "vroughness"), material.uroughness.value);
+        material.uroughness = TexParam1fFromParams(params, "uroughness",
+            0.0f, bindings, scene, diagnostics);
+        material.vroughness = TexParam1fFromParams(params, "vroughness",
+            material.uroughness.value, bindings, scene, diagnostics);
     } else if (type == "thindielectric") {
         material.kind = RenderMaterialKind::ThinDielectric;
         material.ior = FloatParam(FindParam(params, "eta"), 1.5f);
     } else if (type == "coateddiffuse") {
         material.kind = RenderMaterialKind::CoatedDiffuse;
-        material.reflectance.value = RgbParam(FindParam(params, "reflectance"), Color3f{0.5f, 0.5f, 0.5f});
+        material.reflectance = TexParam3fFromParams(params, "reflectance",
+            Color3f{0.5f, 0.5f, 0.5f}, bindings, scene, diagnostics);
         material.coating_ior = FloatParam(FindParam(params, "eta"), 1.5f);
-        material.coating_roughness.value = FloatParam(FindParam(params, "roughness"), 0.0f);
+        material.coating_roughness = TexParam1fFromParams(params, "roughness",
+            0.0f, bindings, scene, diagnostics);
     } else if (type == "coatedconductor") {
         material.kind = RenderMaterialKind::CoatedConductor;
-        material.eta.value = RgbParam(FindParam(params, "conductor.eta"), Color3f{0.2f, 0.2f, 0.2f});
-        material.k.value = RgbParam(FindParam(params, "conductor.k"), Color3f{1.0f, 1.0f, 1.0f});
-        material.uroughness.value = FloatParam(FindParam(params, "conductor.roughness"), 0.0f);
+        material.eta = TexParam3fFromParams(params, "conductor.eta",
+            Color3f{0.2f, 0.2f, 0.2f}, bindings, scene, diagnostics);
+        material.k = TexParam3fFromParams(params, "conductor.k",
+            Color3f{1.0f, 1.0f, 1.0f}, bindings, scene, diagnostics);
+        material.uroughness = TexParam1fFromParams(params, "conductor.roughness",
+            0.0f, bindings, scene, diagnostics);
         material.coating_ior = FloatParam(FindParam(params, "eta"), 1.5f);
+        material.coating_roughness = TexParam1fFromParams(params, "roughness",
+            0.0f, bindings, scene, diagnostics);
     } else if (type == "diffusetransmission") {
         material.kind = RenderMaterialKind::DiffuseTransmission;
-        material.reflectance.value = RgbParam(FindParam(params, "reflectance"), Color3f{0.25f, 0.25f, 0.25f});
+        material.reflectance = TexParam3fFromParams(params, "reflectance",
+            Color3f{0.25f, 0.25f, 0.25f}, bindings, scene, diagnostics);
     } else if (type == "plastic" || type == "uber" || type == "substrate") {
-        // Map legacy types to diffuse with some roughness
         material.kind = RenderMaterialKind::Diffuse;
-        material.reflectance.value = RgbParam(FindParam(params, "Kd"), Color3f{0.5f, 0.5f, 0.5f});
-        material.reflectance.value = RgbParam(FindParam(params, "reflectance"), material.reflectance.value);
+        material.reflectance = TexParam3fFromParams(params, "Kd",
+            Color3f{0.5f, 0.5f, 0.5f}, bindings, scene, diagnostics);
+        if (FindParam(params, "reflectance") != nullptr) {
+            material.reflectance = TexParam3fFromParams(params, "reflectance",
+                material.reflectance.value, bindings, scene, diagnostics);
+        }
     } else {
         diagnostics.push_back(MaterialFallbackWarning(scene, type));
         material.kind = RenderMaterialKind::Diffuse;
-        material.reflectance.value = RgbParam(FindParam(params, "reflectance"), Color3f{0.5f, 0.5f, 0.5f});
-        material.reflectance.value = RgbParam(FindParam(params, "Kd"), material.reflectance.value);
-        material.reflectance.value = RgbParam(FindParam(params, "color"), material.reflectance.value);
+        material.reflectance = TexParam3fFromParams(params, "reflectance",
+            Color3f{0.5f, 0.5f, 0.5f}, bindings, scene, diagnostics);
     }
 
     int index = static_cast<int>(ir.materials.size());

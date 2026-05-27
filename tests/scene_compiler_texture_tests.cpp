@@ -118,3 +118,95 @@ YR_TEST(scene_compiler_imagemap_missing_file_emits_error_diagnostic) {
     // Missing texture is an Error — compilation fails.
     YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
 }
+
+YR_TEST(scene_compiler_binds_imagemap_to_diffuse_reflectance) {
+    yr::PbrtScene pbrt = MinimalScene();
+
+    yr::PbrtEntity tex;
+    tex.type = "imagemap";
+    tex.params.push_back(yr::PbrtParam{"string", "filename", {}, {}, {"assets/checker_2x2.png"}, {}});
+    pbrt.named_textures["wood"] = tex;
+
+    yr::PbrtEntity mat;
+    mat.type = "diffuse";
+    mat.params.push_back(yr::PbrtParam{"texture", "reflectance", {}, {}, {"wood"}, {}});
+    pbrt.named_materials["floor"] = mat;
+    pbrt.shapes[0].material_name = "floor";
+
+    const yr::SceneCompileResult result = yr::CompilePbrtScene(pbrt);
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene->materials.size(), std::size_t{1});
+    const yr::RenderMaterial& m = result.scene->materials[0];
+    YR_EXPECT_EQ(m.reflectance.texture, 0);
+}
+
+YR_TEST(scene_compiler_binds_constant_texture_to_diffuse_reflectance_value) {
+    yr::PbrtScene pbrt = MinimalScene();
+
+    yr::PbrtEntity tex;
+    tex.type = "constant";
+    tex.params.push_back(yr::PbrtParam{"rgb", "value", {0.4f, 0.5f, 0.6f}, {}, {}, {}});
+    pbrt.named_textures["bluish"] = tex;
+
+    yr::PbrtEntity mat;
+    mat.type = "diffuse";
+    mat.params.push_back(yr::PbrtParam{"texture", "reflectance", {}, {}, {"bluish"}, {}});
+    pbrt.named_materials["wall"] = mat;
+    pbrt.shapes[0].material_name = "wall";
+
+    const yr::SceneCompileResult result = yr::CompilePbrtScene(pbrt);
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene->materials.size(), std::size_t{1});
+    const yr::RenderMaterial& m = result.scene->materials[0];
+    // Constant texture folds into .value; .texture stays -1.
+    YR_EXPECT_EQ(m.reflectance.texture, -1);
+    YR_EXPECT_NEAR(m.reflectance.value.x, 0.4f, 1.0e-5);
+    YR_EXPECT_NEAR(m.reflectance.value.y, 0.5f, 1.0e-5);
+    YR_EXPECT_NEAR(m.reflectance.value.z, 0.6f, 1.0e-5);
+}
+
+YR_TEST(scene_compiler_binds_imagemap_to_conductor_roughness) {
+    yr::PbrtScene pbrt = MinimalScene();
+
+    yr::PbrtEntity tex;
+    tex.type = "imagemap";
+    tex.params.push_back(yr::PbrtParam{"string", "filename", {}, {}, {"assets/checker_2x2.png"}, {}});
+    pbrt.named_textures["microfacets"] = tex;
+
+    yr::PbrtEntity mat;
+    mat.type = "conductor";
+    mat.params.push_back(yr::PbrtParam{"texture", "uroughness", {}, {}, {"microfacets"}, {}});
+    pbrt.named_materials["bumpy_gold"] = mat;
+    pbrt.shapes[0].material_name = "bumpy_gold";
+
+    const yr::SceneCompileResult result = yr::CompilePbrtScene(pbrt);
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderMaterial& m = result.scene->materials[0];
+    YR_EXPECT_EQ(m.uroughness.texture, 0);
+}
+
+YR_TEST(scene_compiler_unknown_texture_name_emits_warning_and_uses_fallback) {
+    yr::PbrtScene pbrt = MinimalScene();
+
+    yr::PbrtEntity mat;
+    mat.type = "diffuse";
+    // No Texture directive created, but the material references "missing".
+    mat.params.push_back(yr::PbrtParam{"texture", "reflectance", {}, {}, {"missing"}, {}});
+    pbrt.named_materials["broken"] = mat;
+    pbrt.shapes[0].material_name = "broken";
+
+    const yr::SceneCompileResult result = yr::CompilePbrtScene(pbrt);
+    YR_EXPECT_TRUE(result.scene.has_value());
+    // No fatal error; compilation succeeds with the default reflectance and a Warning.
+    bool found_warning = false;
+    for (const yr::SceneDiagnostic& d : result.diagnostics) {
+        if (d.severity == yr::DiagnosticSeverity::Warning &&
+            d.message.find("missing") != std::string::npos) {
+            found_warning = true;
+            break;
+        }
+    }
+    YR_EXPECT_TRUE(found_warning);
+    const yr::RenderMaterial& m = result.scene->materials[0];
+    YR_EXPECT_EQ(m.reflectance.texture, -1);
+}
