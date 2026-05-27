@@ -184,4 +184,14 @@ if(BUILD_TESTING)
             "Rendered image:"
             "Hits: [^0]"
     )
+    add_yaoray_cli_render_test(yaoray_cli_render_pbrt_material_studio
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/scenes/pbrt/material_studio/material_studio_smoke.pbrt"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/scenes/pbrt/material_studio/out/material_studio_smoke.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: path"
+            "Rendered image:"
+            "Hits: [^0]"
+            "Compiled textures: [^0]"
+    )
 endif()
