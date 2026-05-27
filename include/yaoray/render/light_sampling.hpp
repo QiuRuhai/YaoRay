@@ -7,26 +7,29 @@
 
 namespace yr {
 
-struct AreaLightSample {
+struct EmissiveSample {
     Point3f point;
     Vec3f normal;
     Color3f radiance;
-    float area = 0.0f;
-    float pdf_area = 0.0f;
+    float pdf = 0.0f;
+    int emissive_index = -1;
 };
 
-std::optional<AreaLightSample> SampleAreaLight(const RenderAreaLight& light, Vec2f uv);
+std::optional<EmissiveSample> SampleEmissivePrimitive(
+    const RenderSceneIR& scene,
+    int emissive_index,
+    Vec2f sample_triangle,
+    Vec2f sample_select);
 
-float PdfAreaLightSampleSolidAngle(
-    const RenderAreaLight& light,
-    Point3f shading_point,
-    Point3f light_point
-);
+std::optional<EmissiveSample> SampleEmissiveLights(
+    const RenderSceneIR& scene,
+    float select_sample,
+    Vec2f triangle_sample);
 
-float PdfAreaLightsForPointSolidAngle(
+float PdfEmissiveLightSolidAngle(
     const RenderSceneIR& scene,
     Point3f shading_point,
-    Point3f light_point
-);
+    Point3f light_point,
+    Vec3f light_normal);
 
 } // namespace yr
