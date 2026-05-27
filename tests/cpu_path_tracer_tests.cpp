@@ -192,4 +192,10 @@ YR_TEST(cpu_path_tracer_renders_sphere_in_an_emissive_room) {
     // The center pixel must see the sphere (not the ceiling and not a miss).
     const yr::Color3f center = result.film.LinearPixel(16, 16);
     YR_EXPECT_TRUE(center.x > 0.0f);
+    // The sphere material is orange (0.8, 0.4, 0.2). After reflecting the white
+    // ceiling light, the pixel should keep a clear orange tint — green and blue
+    // should both be noticeably below red. If the sphere were not hit and the
+    // ray fell through to the white ceiling, this check would fail.
+    YR_EXPECT_TRUE(center.y < center.x);
+    YR_EXPECT_TRUE(center.z < center.x);
 }

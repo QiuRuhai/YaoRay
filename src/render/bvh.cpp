@@ -312,6 +312,7 @@ BvhHit IntersectBvh(
                     nearest.t = t;
                     nearest.triangle_index = flat_idx;
                     nearest.primitive_index = prim_idx;
+                    nearest.sphere_index = -1;          // defensive reset: triangle branch clears sphere slot
                     nearest.bary_u = u;
                     nearest.bary_v = v;
                 }
