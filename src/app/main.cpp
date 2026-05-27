@@ -6,7 +6,6 @@
 #include <yaoray/pbrt/pbrt_scene.hpp>
 #include <yaoray/render/scene_compiler.hpp>
 
-#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
