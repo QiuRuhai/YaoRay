@@ -79,6 +79,7 @@ YR_TEST(cpu_debug_renderer_shades_environment_misses) {
     scene.indices.clear();
     scene.primitives.clear();
     scene.materials.clear();
+    scene.environment.active = true;
     scene.environment.radiance = yr::Color3f{0.2f, 0.3f, 0.4f};
     scene.environment.strength = 2.0f;
 

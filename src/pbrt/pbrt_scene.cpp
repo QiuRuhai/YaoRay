@@ -332,7 +332,7 @@ bool ParseTokens(
             std::string type = index < tokens.size() ? tokens[index++] : "perspective";
             std::vector<PbrtParam> params = ReadParams(tokens, index);
             state.scene.camera = PbrtEntity{type, std::move(params)};
-            state.scene.camera_transform = state.current_transform;
+            // camera_transform is captured at WorldBegin, not here (PBRT v4 semantics)
         } else if (command == "LookAt") {
             std::vector<float> values;
             if (!ReadFloatSequence(tokens, index, 9, path, "LookAt", state.diagnostics, values)) {
@@ -343,6 +343,8 @@ bool ParseTokens(
             Vec3f up{values[6], values[7], values[8]};
             state.current_transform = Multiply(state.current_transform, LookAtMatrix(eye, target, up));
         } else if (command == "WorldBegin") {
+            // PBRT v4: camera transform is the CTM at WorldBegin
+            state.scene.camera_transform = state.current_transform;
             state.current_transform = Mat4f{};
             state.attribute_stack.clear();
             state.transform_stack.clear();
