@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include <yaoray/core/vec.hpp>
-#include <yaoray/scene/scene.hpp>
+#include <yaoray/render/render_scene.hpp>
 
 namespace yr {
 

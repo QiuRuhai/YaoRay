@@ -22,22 +22,6 @@ Vec3f FaceForward(Vec3f normal, Vec3f reference) {
     return Dot(normal, reference) < 0.0f ? -normal : normal;
 }
 
-Vec3f InterpolateTangent(const RenderTriangle& triangle, Vec3f barycentric) {
-    return Normalize(
-        triangle.t0 * barycentric.x +
-        triangle.t1 * barycentric.y +
-        triangle.t2 * barycentric.z
-    );
-}
-
-float InterpolateHandedness(const RenderTriangle& triangle, Vec3f barycentric) {
-    const float handedness =
-        triangle.tangent_handedness0 * barycentric.x +
-        triangle.tangent_handedness1 * barycentric.y +
-        triangle.tangent_handedness2 * barycentric.z;
-    return handedness < 0.0f ? -1.0f : 1.0f;
-}
-
 Vec3f OrthogonalizeTangent(Vec3f tangent, Vec3f normal) {
     const Vec3f projected = tangent - normal * Dot(tangent, normal);
     if (LengthSquared(projected) <= 1.0e-12f) {
@@ -48,17 +32,18 @@ Vec3f OrthogonalizeTangent(Vec3f tangent, Vec3f normal) {
 
 Vec3f ResolveNormalMap(
     const RenderSceneIR& scene,
-    const RenderTriangle& triangle,
+    TriangleRef tri,
+    float bary_u,
+    float bary_v,
     const RenderMaterial& material,
-    Vec3f barycentric,
     Vec2f uv,
     Vec3f shading_normal
 ) {
-    if (!triangle.has_tangents || !TextureIndexValid(scene, material.normal_texture)) {
+    if (!scene.primitives[tri.primitive_index].has_tangents || !TextureIndexValid(scene, material.normal_map)) {
         return shading_normal;
     }
 
-    const Color3f encoded = SampleTexture(scene.textures[static_cast<std::size_t>(material.normal_texture)], uv);
+    const Color3f encoded = SampleTexture(scene.textures[static_cast<std::size_t>(material.normal_map)], uv);
     Vec3f tangent_space{
         encoded.x * 2.0f - 1.0f,
         encoded.y * 2.0f - 1.0f,
@@ -71,11 +56,11 @@ Vec3f ResolveNormalMap(
         return shading_normal;
     }
 
-    Vec3f tangent = OrthogonalizeTangent(InterpolateTangent(triangle, barycentric), shading_normal);
+    Vec3f tangent = OrthogonalizeTangent(InterpolateTangent(scene, tri, bary_u, bary_v), shading_normal);
     if (LengthSquared(tangent) == 0.0f) {
         return shading_normal;
     }
-    const float handedness = InterpolateHandedness(triangle, barycentric);
+    const float handedness = InterpolateHandedness(scene, tri, bary_u, bary_v);
     const Vec3f bitangent = Cross(shading_normal, tangent) * handedness;
     const Vec3f mapped = Normalize(
         tangent * tangent_space.x +
@@ -89,45 +74,38 @@ Vec3f ResolveNormalMap(
 
 ResolvedMaterialSample ResolveCpuMaterialSample(
     const RenderSceneIR& scene,
-    const RenderTriangle& triangle,
+    TriangleRef tri,
     const RenderMaterial& base_material,
-    Vec3f barycentric,
+    float bary_u,
+    float bary_v,
     Vec3f geometric_normal,
     Vec3f wo
 ) {
+    const RenderPrimitive& prim = scene.primitives[tri.primitive_index];
+
     ResolvedMaterialSample sample;
     sample.material = base_material;
-    sample.uv = triangle.has_uv ? InterpolateUv(triangle, barycentric) : Vec2f{};
-    sample.alpha = base_material.albedo_alpha;
+    sample.uv = prim.has_uvs ? InterpolateUv(scene, tri, bary_u, bary_v) : Vec2f{};
+    sample.alpha = base_material.alpha.value;
 
-    if (triangle.has_uv && TextureIndexValid(scene, sample.material.albedo_texture)) {
-        const Color4f albedo = SampleTexture4(scene.textures[static_cast<std::size_t>(sample.material.albedo_texture)], sample.uv);
-        sample.material.albedo = Multiply(sample.material.albedo, albedo.rgb());
-        sample.alpha *= albedo.w;
+    if (prim.has_uvs && TextureIndexValid(scene, sample.material.reflectance.texture)) {
+        const Color3f tex_color = SampleTexture(scene.textures[static_cast<std::size_t>(sample.material.reflectance.texture)], sample.uv);
+        sample.material.reflectance.value = Multiply(sample.material.reflectance.value, tex_color);
     }
 
-    if (triangle.has_uv && TextureIndexValid(scene, sample.material.metallic_roughness_texture)) {
-        const Color4f metallic_roughness =
-            SampleTexture4(scene.textures[static_cast<std::size_t>(sample.material.metallic_roughness_texture)], sample.uv);
-        sample.material.roughness = std::clamp(metallic_roughness.y, 0.0f, 1.0f);
-        sample.material.metallic = std::clamp(metallic_roughness.z, 0.0f, 1.0f);
-        if (sample.material.metallic >= 0.5f) {
-            sample.material.type = MaterialKind::Metal;
-        }
+    if (prim.has_uvs && TextureIndexValid(scene, sample.material.alpha.texture)) {
+        const Color4f alpha_tex = SampleTexture4(scene.textures[static_cast<std::size_t>(sample.material.alpha.texture)], sample.uv);
+        sample.alpha *= alpha_tex.x;
     }
 
-    if (triangle.has_uv && TextureIndexValid(scene, sample.material.emissive_texture)) {
-        const Color3f emissive = SampleTexture(scene.textures[static_cast<std::size_t>(sample.material.emissive_texture)], sample.uv);
-        sample.material.emission = Multiply(sample.material.emission, emissive);
-    }
-
-    sample.shading_normal = ResolveShadingNormal(triangle, barycentric, geometric_normal);
-    if (triangle.has_uv) {
+    sample.shading_normal = ResolveShadingNormal(scene, tri, bary_u, bary_v, geometric_normal);
+    if (prim.has_uvs) {
         sample.shading_normal = ResolveNormalMap(
             scene,
-            triangle,
+            tri,
+            bary_u,
+            bary_v,
             sample.material,
-            barycentric,
             sample.uv,
             sample.shading_normal
         );
@@ -137,10 +115,7 @@ ResolvedMaterialSample ResolveCpuMaterialSample(
 }
 
 bool IsAlphaVisible(const ResolvedMaterialSample& sample) {
-    if (sample.material.alpha_mode != RenderAlphaMode::Mask) {
-        return true;
-    }
-    return sample.alpha >= sample.material.alpha_cutoff;
+    return sample.alpha >= 0.5f;
 }
 
 } // namespace yr
