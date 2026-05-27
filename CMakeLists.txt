@@ -82,6 +82,7 @@ add_executable(yaoray_tests
     tests/version_tests.cpp
     tests/core_tests.cpp
     tests/bvh_tests.cpp
+    tests/sphere_tests.cpp
     tests/film_tests.cpp
     tests/render_scene_tests.cpp
     tests/pbrt_tests.cpp
