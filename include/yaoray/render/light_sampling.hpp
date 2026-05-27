@@ -32,4 +32,16 @@ float PdfEmissiveLightSolidAngle(
     Point3f light_point,
     Vec3f light_normal);
 
+// --- Analytic light sampling ---
+
+struct AnalyticLightSample {
+    Vec3f wi{0.0f, 0.0f, 0.0f};         // Direction from shading point to light.
+    float distance = 0.0f;              // Shadow ray segment length.
+    Color3f radiance{0.0f, 0.0f, 0.0f}; // Radiance reaching the shading point.
+    bool is_delta = true;               // Point/Distant/Spot are deltas; no MIS vs BSDF.
+    bool valid = false;
+};
+
+AnalyticLightSample SampleAnalyticPoint(const AnalyticLight& light, Point3f shading_point);
+
 } // namespace yr

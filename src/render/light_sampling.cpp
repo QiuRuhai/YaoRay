@@ -106,4 +106,29 @@ float PdfEmissiveLightSolidAngle(
     return area_pdf * dist_sq / cos_theta;
 }
 
+AnalyticLightSample SampleAnalyticPoint(const AnalyticLight& light, Point3f shading_point) {
+    AnalyticLightSample s;
+    const Vec3f delta{
+        light.position.x - shading_point.x,
+        light.position.y - shading_point.y,
+        light.position.z - shading_point.z
+    };
+    const float dist_sq = Dot(delta, delta);
+    if (dist_sq <= 0.0f) {
+        return s;
+    }
+    const float dist = std::sqrt(dist_sq);
+    const float inv_dist = 1.0f / dist;
+    s.wi = Vec3f{delta.x * inv_dist, delta.y * inv_dist, delta.z * inv_dist};
+    s.distance = dist;
+    s.radiance = Color3f{
+        light.intensity.x / dist_sq,
+        light.intensity.y / dist_sq,
+        light.intensity.z / dist_sq
+    };
+    s.is_delta = true;
+    s.valid = true;
+    return s;
+}
+
 } // namespace yr

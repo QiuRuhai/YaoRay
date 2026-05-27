@@ -98,6 +98,7 @@ add_executable(yaoray_tests
     tests/cpu_tile_scheduler_tests.cpp
     tests/cpu_sampler_tests.cpp
     tests/cpu_path_tracer_tests.cpp
+    tests/analytic_light_tests.cpp
 )
 target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_pbrt yaoray_render yaoray_assets yaoray_backends)
 target_compile_definitions(yaoray_tests PRIVATE YAORAY_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
