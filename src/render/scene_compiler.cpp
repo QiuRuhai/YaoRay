@@ -387,6 +387,49 @@ TexParam1f TexParam1fFromParams(
 }
 
 // ---------------------------------------------------------------------------
+// Normal-map compilation helper
+// ---------------------------------------------------------------------------
+
+// Returns true if a normal map was loaded and assigned. Mutates material.normal_map
+// and material.normal_scale. On load failure, pushes an Error and returns false.
+bool CompileNormalMap(
+    const std::vector<PbrtParam>& params,
+    const PbrtScene& scene,
+    RenderSceneIR& ir,
+    RenderMaterial& material,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const PbrtParam* normalmap = FindParam(params, "normalmap");
+    if (normalmap == nullptr || normalmap->strings.empty()) {
+        return false;
+    }
+
+    const std::filesystem::path resolved = scene.source_root / normalmap->strings[0];
+
+    std::string ext = resolved.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    if (ext != ".png" && ext != ".jpg" && ext != ".jpeg") {
+        diagnostics.push_back(Error(scene, "Material.normalmap",
+            "normal map must be a PNG or JPEG: " + resolved.generic_string()));
+        return false;
+    }
+
+    // Normal maps are always linear data (not radiometric).
+    TextureLoadResult load = LoadLdrTexture(resolved, TextureColorSpace::Linear);
+    if (!load.ok) {
+        diagnostics.push_back(Error(scene, "Material.normalmap", load.error));
+        return false;
+    }
+
+    material.normal_map = static_cast<int>(ir.textures.size());
+    ir.textures.push_back(std::move(load.texture));
+    material.normal_scale = FloatParam(FindParam(params, "normalscale"), 1.0f);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Material compilation
 // ---------------------------------------------------------------------------
 
@@ -468,6 +511,8 @@ int CompileMaterial(
         material.reflectance = TexParam3fFromParams(params, "reflectance",
             Color3f{0.5f, 0.5f, 0.5f}, bindings, scene, diagnostics);
     }
+
+    CompileNormalMap(params, scene, ir, material, diagnostics);
 
     int index = static_cast<int>(ir.materials.size());
     ir.materials.push_back(material);
