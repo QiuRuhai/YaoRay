@@ -3,6 +3,7 @@
 #include <yaoray/assets/ply_loader.hpp>
 #include <yaoray/render/texture.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -130,15 +131,133 @@ void CompileSampler(const PbrtScene& scene, RenderSceneIR& ir) {
 }
 
 // ---------------------------------------------------------------------------
+// Texture compilation
+// ---------------------------------------------------------------------------
+
+struct TextureBindings {
+    // Texture name -> ir.textures index. -1 means "folded constant"; look in constant_values.
+    std::unordered_map<std::string, int> name_to_index;
+    // Texture name -> constant Color3f for folded constants.
+    std::unordered_map<std::string, Color3f> constant_values;
+};
+
+TextureColorSpace InferTextureColorSpace(
+    const std::filesystem::path& path,
+    const std::string& explicit_encoding
+) {
+    if (explicit_encoding == "linear") return TextureColorSpace::Linear;
+    if (explicit_encoding == "sRGB" || explicit_encoding == "srgb") return TextureColorSpace::Srgb;
+
+    std::string ext = path.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    // HDR float formats default to linear; LDR formats default to sRGB.
+    if (ext == ".hdr" || ext == ".exr") return TextureColorSpace::Linear;
+    return TextureColorSpace::Srgb;
+}
+
+bool CompileImagemapTexture(
+    const std::string& name,
+    const PbrtEntity& entity,
+    const PbrtScene& scene,
+    RenderSceneIR& ir,
+    TextureBindings& bindings,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const PbrtParam* filename = FindParam(entity.params, "filename");
+    if (filename == nullptr || filename->strings.empty()) {
+        diagnostics.push_back(Error(scene, "Texture." + name,
+            "imagemap texture requires a filename"));
+        return false;
+    }
+
+    const std::filesystem::path resolved = scene.source_root / filename->strings[0];
+
+    std::string explicit_encoding;
+    const PbrtParam* encoding = FindParam(entity.params, "encoding");
+    if (encoding != nullptr && !encoding->strings.empty()) {
+        explicit_encoding = encoding->strings[0];
+    }
+    const TextureColorSpace color_space = InferTextureColorSpace(resolved, explicit_encoding);
+
+    std::string ext = resolved.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+
+    TextureLoadResult load;
+    if (ext == ".hdr") {
+        load = LoadHdrTexture(resolved);
+    } else if (ext == ".png" || ext == ".jpg" || ext == ".jpeg") {
+        load = LoadLdrTexture(resolved, color_space);
+    } else {
+        diagnostics.push_back(Error(scene, "Texture." + name,
+            "unsupported texture extension: " + ext));
+        return false;
+    }
+
+    if (!load.ok) {
+        diagnostics.push_back(Error(scene, "Texture." + name, load.error));
+        return false;
+    }
+    load.texture.color_space = color_space;
+    bindings.name_to_index[name] = static_cast<int>(ir.textures.size());
+    ir.textures.push_back(std::move(load.texture));
+    return true;
+}
+
+void CompileConstantTexture(
+    const std::string& name,
+    const PbrtEntity& entity,
+    TextureBindings& bindings
+) {
+    const PbrtParam* value_param = FindParam(entity.params, "value");
+    Color3f value{1.0f, 1.0f, 1.0f};
+    if (value_param != nullptr && !value_param->floats.empty()) {
+        if (value_param->floats.size() >= 3) {
+            value = Color3f{value_param->floats[0], value_param->floats[1], value_param->floats[2]};
+        } else {
+            const float scalar = value_param->floats[0];
+            value = Color3f{scalar, scalar, scalar};
+        }
+    }
+    bindings.name_to_index[name] = -1;          // -1 == folded constant.
+    bindings.constant_values[name] = value;
+}
+
+TextureBindings CompileTextures(
+    const PbrtScene& scene,
+    RenderSceneIR& ir,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    TextureBindings bindings;
+    for (const auto& [name, entity] : scene.named_textures) {
+        if (entity.type == "imagemap") {
+            CompileImagemapTexture(name, entity, scene, ir, bindings, diagnostics);
+        } else if (entity.type == "constant") {
+            CompileConstantTexture(name, entity, bindings);
+        } else {
+            diagnostics.push_back(Warning(scene, "Texture." + name,
+                "unsupported texture class '" + entity.type + "' is ignored in M1; "
+                "callers will see the parameter fall back to its inline constant"));
+        }
+    }
+    return bindings;
+}
+
+// ---------------------------------------------------------------------------
 // Material compilation
 // ---------------------------------------------------------------------------
 
 int CompileMaterial(
     const PbrtEntity& entity,
+    const TextureBindings& bindings,
     RenderSceneIR& ir,
     const PbrtScene& scene,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
+    (void)bindings; // Task 2 will wire texture refs; for now, body uses raw param helpers.
     RenderMaterial material;
     const auto& params = entity.params;
     const std::string& type = entity.type;
@@ -444,6 +563,7 @@ bool CompilePlyMeshShape(
 bool CompileInstances(
     const PbrtScene& scene,
     const std::unordered_map<std::string, int>& material_name_to_index,
+    const TextureBindings& texture_bindings,
     RenderSceneIR& ir,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
@@ -464,7 +584,7 @@ bool CompileInstances(
                 auto mit = material_name_to_index.find(composed.material_name);
                 if (mit != material_name_to_index.end()) mat_idx = mit->second;
             } else if (composed.inline_material.has_value()) {
-                mat_idx = CompileMaterial(*composed.inline_material, ir, scene, diagnostics);
+                mat_idx = CompileMaterial(*composed.inline_material, texture_bindings, ir, scene, diagnostics);
             }
 
             if (composed.shape.type == "trianglemesh") {
@@ -533,14 +653,22 @@ SceneCompileResult CompilePbrtScene(const PbrtScene& scene) {
     CompileIntegrator(scene, ir);
     CompileSampler(scene, ir);
 
-    // 2. Compile named materials -> build name->index map
+    // 2. Compile named textures -> name-to-index map (+ constant value side-map).
+    TextureBindings texture_bindings = CompileTextures(scene, ir, diagnostics);
+
+    // Early-exit if texture loading failed (e.g. missing imagemap files).
+    if (HasSceneErrors(diagnostics)) {
+        return result;
+    }
+
+    // 3. Compile named materials -> build name->index map
     std::unordered_map<std::string, int> material_name_to_index;
     for (const auto& [name, entity] : scene.named_materials) {
-        int idx = CompileMaterial(entity, ir, scene, diagnostics);
+        int idx = CompileMaterial(entity, texture_bindings, ir, scene, diagnostics);
         material_name_to_index[name] = idx;
     }
 
-    // 3. Compile shapes
+    // 4. Compile shapes
     for (const PbrtShapeRecord& record : scene.shapes) {
         // Resolve material
         int mat_idx = 0;
@@ -552,7 +680,7 @@ SceneCompileResult CompilePbrtScene(const PbrtScene& scene) {
                 diagnostics.push_back(Warning(scene, "Shape", "undefined material: " + record.material_name));
             }
         } else if (record.inline_material.has_value()) {
-            mat_idx = CompileMaterial(*record.inline_material, ir, scene, diagnostics);
+            mat_idx = CompileMaterial(*record.inline_material, texture_bindings, ir, scene, diagnostics);
         }
         // If no material at all, ensure at least one default exists
         if (ir.materials.empty()) {
@@ -571,10 +699,10 @@ SceneCompileResult CompilePbrtScene(const PbrtScene& scene) {
         }
     }
 
-    // 4. Compile object instances
-    CompileInstances(scene, material_name_to_index, ir, diagnostics);
+    // 5. Compile object instances
+    CompileInstances(scene, material_name_to_index, texture_bindings, ir, diagnostics);
 
-    // 5. Compile analytic light sources
+    // 6. Compile analytic light sources
     CompileAnalyticLights(scene, ir, diagnostics);
 
     if (ir.primitives.empty() && ir.spheres.empty()) {
