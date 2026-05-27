@@ -8,7 +8,6 @@ namespace {
 
 constexpr float Pi = 3.14159265358979323846f;
 constexpr float DeltaRoughness = 1.0e-3f;
-constexpr float PlasticMinRoughness = 0.05f;
 
 bool IsAboveSurface(Vec3f direction, Vec3f normal) {
     return Dot(direction, normal) > 0.0f;
@@ -354,231 +353,169 @@ BsdfSample SampleGgxReflection(Vec3f wo, Vec3f normal, Vec2f sample, Color3f f0,
 } // namespace
 
 Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal) {
-    switch (material.type) {
-        case MaterialKind::Diffuse:
+    switch (material.kind) {
+        case RenderMaterialKind::Diffuse:
+        case RenderMaterialKind::CoatedDiffuse:
+        case RenderMaterialKind::DiffuseTransmission:
+        case RenderMaterialKind::Mix:
             if (!IsAboveSurface(wo, normal) || !IsAboveSurface(wi, normal)) {
                 return Color3f{};
             }
-            return LambertianBrdf(material.albedo);
-        case MaterialKind::Mirror:
-            return Color3f{};
-        case MaterialKind::Metal:
-            if (material.roughness <= DeltaRoughness) {
+            return LambertianBrdf(material.reflectance.value);
+        case RenderMaterialKind::Conductor:
+        case RenderMaterialKind::CoatedConductor:
+            if (material.uroughness.value <= DeltaRoughness && material.vroughness.value <= DeltaRoughness) {
                 return Color3f{};
             }
-            return GgxSpecularBrdf(material.albedo, material.roughness, wo, wi, normal);
-        case MaterialKind::Plastic: {
-            if (!IsAboveSurface(wo, normal) || !IsAboveSurface(wi, normal)) {
+            return GgxSpecularBrdf(material.reflectance.value, material.uroughness.value, wo, wi, normal);
+        case RenderMaterialKind::ThinDielectric: {
+            if (material.uroughness.value <= DeltaRoughness) {
                 return Color3f{};
             }
-            const float specular = Clamp01(material.specular);
-            const Color3f diffuse = LambertianBrdf(material.albedo) * (1.0f - specular);
-            const Color3f f0{specular, specular, specular};
-            const Color3f glossy = GgxSpecularBrdf(f0, std::max(material.roughness, PlasticMinRoughness), wo, wi, normal);
-            return diffuse + glossy;
+            const Vec3f forward = Normalize(-wo);
+            const float cos_forward = std::max(0.0f, Dot(forward, wi));
+            if (cos_forward <= 0.0f) {
+                return Color3f{};
+            }
+            const float fresnel = FresnelDielectric(std::fabs(Dot(normal, wo)), 1.0f, std::max(1.0f, material.ior));
+            return LambertianBrdf(material.reflectance.value) * (1.0f - fresnel);
         }
-        case MaterialKind::Dielectric:
-            if (material.thin) {
-                if (material.roughness <= DeltaRoughness) {
-                    return Color3f{};
-                }
-                const Vec3f forward = Normalize(-wo);
-                const float cos_forward = std::max(0.0f, Dot(forward, wi));
-                if (cos_forward <= 0.0f) {
-                    return Color3f{};
-                }
-                const float fresnel = FresnelDielectric(std::fabs(Dot(normal, wo)), 1.0f, std::max(1.0f, material.ior));
-                return LambertianBrdf(material.albedo) * (1.0f - fresnel);
-            }
-            if (material.roughness <= DeltaRoughness) {
+        case RenderMaterialKind::Dielectric:
+            if (material.uroughness.value <= DeltaRoughness) {
                 return Color3f{};
             }
             return SameHemisphere(wo, wi, normal)
-                ? GgxDielectricReflection(material.albedo, material.ior, material.roughness, wo, wi, normal)
-                : GgxDielectricTransmission(material.albedo, material.ior, material.roughness, wo, wi, normal);
+                ? GgxDielectricReflection(material.reflectance.value, material.ior, material.uroughness.value, wo, wi, normal)
+                : GgxDielectricTransmission(material.reflectance.value, material.ior, material.uroughness.value, wo, wi, normal);
     }
     return Color3f{};
 }
 
 float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal) {
-    switch (material.type) {
-        case MaterialKind::Diffuse:
+    switch (material.kind) {
+        case RenderMaterialKind::Diffuse:
+        case RenderMaterialKind::CoatedDiffuse:
+        case RenderMaterialKind::DiffuseTransmission:
+        case RenderMaterialKind::Mix:
             if (!IsAboveSurface(wo, normal) || !IsAboveSurface(wi, normal)) {
                 return 0.0f;
             }
             return std::max(0.0f, Dot(normal, wi)) / Pi;
-        case MaterialKind::Mirror:
-            return 0.0f;
-        case MaterialKind::Metal:
-            if (material.roughness <= DeltaRoughness) {
+        case RenderMaterialKind::Conductor:
+        case RenderMaterialKind::CoatedConductor:
+            if (material.uroughness.value <= DeltaRoughness && material.vroughness.value <= DeltaRoughness) {
                 return 0.0f;
             }
-            return GgxReflectionPdf(material.roughness, wo, wi, normal);
-        case MaterialKind::Plastic: {
-            if (!IsAboveSurface(wo, normal) || !IsAboveSurface(wi, normal)) {
+            return GgxReflectionPdf(material.uroughness.value, wo, wi, normal);
+        case RenderMaterialKind::ThinDielectric: {
+            if (material.uroughness.value <= DeltaRoughness) {
                 return 0.0f;
             }
-            const float specular = Clamp01(material.specular);
-            const float diffuse_pdf = std::max(0.0f, Dot(normal, wi)) / Pi;
-            if (specular <= 0.0f) {
-                return diffuse_pdf;
-            }
-            const float glossy_pdf = GgxReflectionPdf(std::max(material.roughness, PlasticMinRoughness), wo, wi, normal);
-            return 0.5f * diffuse_pdf + 0.5f * glossy_pdf;
+            const Vec3f forward = Normalize(-wo);
+            return std::max(0.0f, Dot(forward, wi)) / Pi;
         }
-        case MaterialKind::Dielectric:
-            if (material.thin) {
-                if (material.roughness <= DeltaRoughness) {
-                    return 0.0f;
-                }
-                const Vec3f forward = Normalize(-wo);
-                return std::max(0.0f, Dot(forward, wi)) / Pi;
-            }
-            if (material.roughness <= DeltaRoughness) {
+        case RenderMaterialKind::Dielectric:
+            if (material.uroughness.value <= DeltaRoughness) {
                 return 0.0f;
             }
             return SameHemisphere(wo, wi, normal)
-                ? GgxDielectricReflectionPdf(material.ior, material.roughness, wo, wi, normal)
-                : GgxDielectricTransmissionPdf(material.ior, material.roughness, wo, wi, normal);
+                ? GgxDielectricReflectionPdf(material.ior, material.uroughness.value, wo, wi, normal)
+                : GgxDielectricTransmissionPdf(material.ior, material.uroughness.value, wo, wi, normal);
     }
     return 0.0f;
 }
 
 BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Vec2f sample) {
-    switch (material.type) {
-        case MaterialKind::Diffuse: {
-            if (!IsAboveSurface(wo, normal) || IsBlack(material.albedo)) {
+    switch (material.kind) {
+        case RenderMaterialKind::Diffuse:
+        case RenderMaterialKind::CoatedDiffuse:
+        case RenderMaterialKind::DiffuseTransmission:
+        case RenderMaterialKind::Mix: {
+            if (!IsAboveSurface(wo, normal) || IsBlack(material.reflectance.value)) {
                 return BsdfSample{};
             }
             const Vec3f wi = SampleCosineHemisphere(normal, sample);
             return BsdfSample{
                 wi,
-                material.albedo,
+                material.reflectance.value,
                 PdfBsdf(material, wo, wi, normal),
                 true,
                 false
             };
         }
-        case MaterialKind::Mirror:
-            if (!IsAboveSurface(wo, normal) || IsBlack(material.albedo)) {
-                return BsdfSample{};
-            }
-            return BsdfSample{
-                Reflect(-wo, normal),
-                material.albedo,
-                1.0f,
-                true,
-                true
-            };
-        case MaterialKind::Metal:
-            if (material.roughness <= DeltaRoughness) {
-                if (!IsAboveSurface(wo, normal) || IsBlack(material.albedo)) {
+        case RenderMaterialKind::Conductor:
+        case RenderMaterialKind::CoatedConductor:
+            if (material.uroughness.value <= DeltaRoughness && material.vroughness.value <= DeltaRoughness) {
+                if (!IsAboveSurface(wo, normal) || IsBlack(material.reflectance.value)) {
                     return BsdfSample{};
                 }
                 return BsdfSample{
                     Reflect(-wo, normal),
-                    material.albedo,
+                    material.reflectance.value,
                     1.0f,
                     true,
                     true
                 };
             }
-            return SampleGgxReflection(wo, normal, sample, material.albedo, material.roughness);
-        case MaterialKind::Plastic: {
-            if (!IsAboveSurface(wo, normal)) {
+            return SampleGgxReflection(wo, normal, sample, material.reflectance.value, material.uroughness.value);
+        case RenderMaterialKind::ThinDielectric: {
+            if (IsBlack(material.reflectance.value)) {
                 return BsdfSample{};
             }
-            const float specular = Clamp01(material.specular);
-            Vec2f remapped = sample;
-            if (specular <= 0.0f || sample.x < 0.5f) {
-                remapped.x = specular <= 0.0f ? sample.x : sample.x * 2.0f;
-                const Vec3f wi = SampleCosineHemisphere(normal, remapped);
-                const float pdf = PdfBsdf(material, wo, wi, normal);
-                if (pdf <= 0.0f) {
-                    return BsdfSample{};
+            const Vec3f oriented_normal = Dot(normal, wo) >= 0.0f ? normal : -normal;
+            const float fresnel =
+                FresnelDielectric(std::fabs(Dot(oriented_normal, wo)), 1.0f, std::max(1.0f, material.ior));
+            if (material.uroughness.value <= DeltaRoughness) {
+                if (sample.x < fresnel) {
+                    return BsdfSample{Reflect(-wo, oriented_normal), material.reflectance.value, 1.0f, true, true};
                 }
-                const Color3f f = EvaluateBsdf(material, wo, wi, normal);
-                const float cos_i = std::max(0.0f, Dot(normal, wi));
-                return BsdfSample{wi, f * (cos_i / pdf), pdf, true, false};
+                return BsdfSample{Normalize(-wo), material.reflectance.value, 1.0f, true, true};
             }
-            remapped.x = (sample.x - 0.5f) * 2.0f;
-            const Color3f f0{specular, specular, specular};
-            BsdfSample result = SampleGgxReflection(
-                wo,
-                normal,
-                remapped,
-                f0,
-                std::max(material.roughness, PlasticMinRoughness)
-            );
-            if (!result.valid) {
-                return result;
+
+            Vec2f remapped = sample;
+            if (sample.x < fresnel) {
+                remapped.x = fresnel > 0.0f ? sample.x / fresnel : sample.x;
+                BsdfSample reflection = SampleGgxReflection(
+                    wo, oriented_normal, remapped, material.reflectance.value * fresnel, material.uroughness.value);
+                if (reflection.valid) {
+                    reflection.specular = false;
+                }
+                return reflection;
             }
-            const float pdf = PdfBsdf(material, wo, result.wi, normal);
+
+            remapped.x = (1.0f - fresnel) > 0.0f ? (sample.x - fresnel) / (1.0f - fresnel) : sample.x;
+            const Vec3f forward = Normalize(-wo);
+            const Vec3f wi = SampleCosineHemisphere(forward, remapped);
+            const float pdf = std::max(0.0f, Dot(forward, wi)) / Pi;
             if (pdf <= 0.0f) {
                 return BsdfSample{};
             }
-            const Color3f f = EvaluateBsdf(material, wo, result.wi, normal);
-            const float cos_i = std::max(0.0f, Dot(normal, result.wi));
-            result.weight = f * (cos_i / pdf);
-            result.pdf = pdf;
-            result.specular = false;
-            return result;
+            return BsdfSample{wi, material.reflectance.value * (1.0f - fresnel), pdf, true, false};
         }
-        case MaterialKind::Dielectric: {
-            if (IsBlack(material.albedo)) {
+        case RenderMaterialKind::Dielectric: {
+            if (IsBlack(material.reflectance.value)) {
                 return BsdfSample{};
             }
-            if (material.thin) {
-                const Vec3f oriented_normal = Dot(normal, wo) >= 0.0f ? normal : -normal;
-                const float fresnel =
-                    FresnelDielectric(std::fabs(Dot(oriented_normal, wo)), 1.0f, std::max(1.0f, material.ior));
-                if (material.roughness <= DeltaRoughness) {
-                    if (sample.x < fresnel) {
-                        return BsdfSample{Reflect(-wo, oriented_normal), material.albedo, 1.0f, true, true};
-                    }
-                    return BsdfSample{Normalize(-wo), material.albedo, 1.0f, true, true};
-                }
-
-                Vec2f remapped = sample;
-                if (sample.x < fresnel) {
-                    remapped.x = fresnel > 0.0f ? sample.x / fresnel : sample.x;
-                    BsdfSample reflection =
-                        SampleGgxReflection(wo, oriented_normal, remapped, material.albedo * fresnel, material.roughness);
-                    if (reflection.valid) {
-                        reflection.specular = false;
-                    }
-                    return reflection;
-                }
-
-                remapped.x = (1.0f - fresnel) > 0.0f ? (sample.x - fresnel) / (1.0f - fresnel) : sample.x;
-                const Vec3f forward = Normalize(-wo);
-                const Vec3f wi = SampleCosineHemisphere(forward, remapped);
-                const float pdf = std::max(0.0f, Dot(forward, wi)) / Pi;
-                if (pdf <= 0.0f) {
-                    return BsdfSample{};
-                }
-                return BsdfSample{wi, material.albedo * (1.0f - fresnel), pdf, true, false};
-            }
-            if (material.roughness <= DeltaRoughness) {
+            if (material.uroughness.value <= DeltaRoughness) {
                 const DielectricFrame frame = MakeDielectricFrame(wo, normal, material.ior);
                 Vec3f refracted;
                 const bool can_refract = Refract(wo, frame.normal, frame.eta, refracted);
                 const float fresnel = can_refract ? FresnelDielectric(frame.cos_o, frame.eta_i, frame.eta_t) : 1.0f;
                 if (!can_refract || sample.x < fresnel) {
-                    return BsdfSample{Reflect(-wo, frame.normal), material.albedo, 1.0f, true, true};
+                    return BsdfSample{Reflect(-wo, frame.normal), material.reflectance.value, 1.0f, true, true};
                 }
-                return BsdfSample{refracted, material.albedo, 1.0f, true, true};
+                return BsdfSample{refracted, material.reflectance.value, 1.0f, true, true};
             }
             const DielectricFrame frame = MakeDielectricFrame(wo, normal, material.ior);
             Vec2f remapped = sample;
-            Vec3f half_vector = SampleGgxHalfVector(frame.normal, material.roughness, remapped);
+            Vec3f half_vector = SampleGgxHalfVector(frame.normal, material.uroughness.value, remapped);
             if (Dot(half_vector, wo) < 0.0f) {
                 half_vector = -half_vector;
             }
             const float fresnel = FresnelDielectric(std::fabs(Dot(wo, half_vector)), frame.eta_i, frame.eta_t);
             if (sample.x < fresnel) {
                 remapped.x = fresnel > 0.0f ? sample.x / fresnel : sample.x;
-                half_vector = SampleGgxHalfVector(frame.normal, material.roughness, remapped);
+                half_vector = SampleGgxHalfVector(frame.normal, material.uroughness.value, remapped);
                 if (Dot(half_vector, wo) < 0.0f) {
                     half_vector = -half_vector;
                 }
@@ -593,13 +530,13 @@ BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Ve
             }
 
             remapped.x = (1.0f - fresnel) > 0.0f ? (sample.x - fresnel) / (1.0f - fresnel) : sample.x;
-            half_vector = SampleGgxHalfVector(frame.normal, material.roughness, remapped);
+            half_vector = SampleGgxHalfVector(frame.normal, material.uroughness.value, remapped);
             if (Dot(half_vector, wo) < 0.0f) {
                 half_vector = -half_vector;
             }
             Vec3f wi;
             if (!Refract(wo, half_vector, frame.eta, wi)) {
-                return BsdfSample{Reflect(-wo, half_vector), material.albedo, 1.0f, true, true};
+                return BsdfSample{Reflect(-wo, half_vector), material.reflectance.value, 1.0f, true, true};
             }
             const float pdf = PdfBsdf(material, wo, wi, normal);
             if (pdf <= 0.0f) {
@@ -614,19 +551,16 @@ BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Ve
 }
 
 bool IsDeltaBsdf(const RenderMaterial& material) {
-    switch (material.type) {
-        case MaterialKind::Diffuse:
+    switch (material.kind) {
+        case RenderMaterialKind::Conductor:
+        case RenderMaterialKind::CoatedConductor:
+            return material.uroughness.value == 0.0f && material.vroughness.value == 0.0f;
+        case RenderMaterialKind::Dielectric:
+        case RenderMaterialKind::ThinDielectric:
+            return material.uroughness.value == 0.0f && material.vroughness.value == 0.0f;
+        default:
             return false;
-        case MaterialKind::Mirror:
-            return true;
-        case MaterialKind::Metal:
-            return material.roughness <= DeltaRoughness;
-        case MaterialKind::Plastic:
-            return false;
-        case MaterialKind::Dielectric:
-            return material.roughness <= DeltaRoughness;
     }
-    return false;
 }
 
 } // namespace yr
