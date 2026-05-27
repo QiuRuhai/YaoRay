@@ -280,6 +280,62 @@ bool CompileTriangleMeshShape(
     return true;
 }
 
+bool CompileSphereShape(
+    const PbrtShapeRecord& record,
+    int material_index,
+    RenderSceneIR& ir,
+    const PbrtScene& scene,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const float radius = FloatParam(FindParam(record.shape.params, "radius"), 1.0f);
+
+    // Warn on unsupported partial-sphere params.
+    if (FindParam(record.shape.params, "zmin") != nullptr ||
+        FindParam(record.shape.params, "zmax") != nullptr ||
+        FindParam(record.shape.params, "phimax") != nullptr) {
+        diagnostics.push_back(Warning(scene, "Shape.sphere",
+            "partial sphere parameters (zmin/zmax/phimax) are not supported in M1; full sphere will be used"));
+    }
+
+    // Sphere center = object_to_world * (0,0,0). Radius is scaled by the uniform component
+    // of the linear part; warn if non-uniform.
+    const Mat4f& m = record.object_to_world;
+    const Point3f center = TransformPoint(m, Point3f{0.0f, 0.0f, 0.0f});
+
+    const Vec3f sx = TransformVector(m, Vec3f{1.0f, 0.0f, 0.0f});
+    const Vec3f sy = TransformVector(m, Vec3f{0.0f, 1.0f, 0.0f});
+    const Vec3f sz = TransformVector(m, Vec3f{0.0f, 0.0f, 1.0f});
+    const float lx = std::sqrt(Dot(sx, sx));
+    const float ly = std::sqrt(Dot(sy, sy));
+    const float lz = std::sqrt(Dot(sz, sz));
+    const float scale = (lx + ly + lz) / 3.0f;
+    const float max_dev = std::max({
+        std::fabs(lx - scale),
+        std::fabs(ly - scale),
+        std::fabs(lz - scale)
+    });
+    if (max_dev > 1.0e-3f * scale) {
+        diagnostics.push_back(Warning(scene, "Shape.sphere",
+            "non-uniform scale on sphere transform; using average scale"));
+    }
+
+    RenderSphere sphere;
+    sphere.center = center;
+    sphere.radius = radius * scale;
+    sphere.material_index = material_index;
+    sphere.area_light_index = -1;  // Area lights on spheres are handled in a later slice.
+
+    // If an area light is attached, surface this as a warning for Slice 1 (we don't
+    // yet sample analytic-shape emitters as area lights).
+    if (record.area_light.has_value()) {
+        diagnostics.push_back(Warning(scene, "Shape.sphere.AreaLightSource",
+            "area light on a sphere is not yet supported in M1 Slice 1; the emission will be ignored"));
+    }
+
+    ir.spheres.push_back(sphere);
+    return true;
+}
+
 bool CompilePlyMeshShape(
     const PbrtShapeRecord& record,
     int material_index,
@@ -457,6 +513,8 @@ SceneCompileResult CompilePbrtScene(const PbrtScene& scene) {
             CompileTriangleMeshShape(record, mat_idx, ir, scene, diagnostics);
         } else if (record.shape.type == "plymesh") {
             CompilePlyMeshShape(record, mat_idx, ir, scene, diagnostics);
+        } else if (record.shape.type == "sphere") {
+            CompileSphereShape(record, mat_idx, ir, scene, diagnostics);
         } else {
             diagnostics.push_back(Warning(scene, "Shape", "unsupported shape type: " + record.shape.type));
         }
@@ -465,7 +523,7 @@ SceneCompileResult CompilePbrtScene(const PbrtScene& scene) {
     // 4. Compile object instances
     CompileInstances(scene, material_name_to_index, ir, diagnostics);
 
-    if (ir.primitives.empty()) {
+    if (ir.primitives.empty() && ir.spheres.empty()) {
         diagnostics.push_back(Error(scene, "Shape", "scene contains no geometry"));
     }
 

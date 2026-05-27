@@ -2,8 +2,10 @@
 
 #include <cstdint>
 
+#include <yaoray/pbrt/pbrt_scene.hpp>
 #include <yaoray/render/render_scene.hpp>
 #include <yaoray/render/render_scene_hash.hpp>
+#include <yaoray/render/scene_compiler.hpp>
 
 // TODO(Task 11): Rewrite scene compiler tests for PBRT-only pipeline (CompilePbrtScene).
 
@@ -67,4 +69,37 @@ YR_TEST(render_settings_hash_changes_for_geometry_table_counts) {
     changed.vertices.push_back(yr::RenderVertex{});
 
     YR_EXPECT_TRUE(yr::ComputeRenderSettingsHash(base) != yr::ComputeRenderSettingsHash(changed));
+}
+
+YR_TEST(scene_compiler_compiles_shape_sphere) {
+    // Build a minimal PbrtScene with a Shape "sphere" of radius 0.5 translated to (1, 2, 3).
+    yr::PbrtScene pbrt;
+    pbrt.source_path = "test.pbrt";
+    pbrt.source_root = ".";
+    pbrt.film.type = "rgb";
+    pbrt.film.params.push_back(yr::PbrtParam{"integer", "xresolution", {}, {16}, {}, {}});
+    pbrt.film.params.push_back(yr::PbrtParam{"integer", "yresolution", {}, {16}, {}, {}});
+    pbrt.camera.type = "perspective";
+    pbrt.camera.params.push_back(yr::PbrtParam{"float", "fov", {45.0f}, {}, {}, {}});
+    pbrt.camera_transform = yr::Mat4f{};  // identity
+    pbrt.integrator.type = "path";
+    pbrt.sampler.type = "independent";
+
+    yr::PbrtShapeRecord record;
+    record.shape.type = "sphere";
+    record.shape.params.push_back(yr::PbrtParam{"float", "radius", {0.5f}, {}, {}, {}});
+    // object_to_world that translates by (1,2,3)
+    record.object_to_world = yr::Mat4f{};
+    record.object_to_world.m[12] = 1.0f;
+    record.object_to_world.m[13] = 2.0f;
+    record.object_to_world.m[14] = 3.0f;
+    pbrt.shapes.push_back(record);
+
+    const yr::SceneCompileResult result = yr::CompilePbrtScene(pbrt);
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene->spheres.size(), std::size_t{1});
+    YR_EXPECT_NEAR(result.scene->spheres[0].center.x, 1.0f, 1.0e-6);
+    YR_EXPECT_NEAR(result.scene->spheres[0].center.y, 2.0f, 1.0e-6);
+    YR_EXPECT_NEAR(result.scene->spheres[0].center.z, 3.0f, 1.0e-6);
+    YR_EXPECT_NEAR(result.scene->spheres[0].radius, 0.5f, 1.0e-6);
 }
