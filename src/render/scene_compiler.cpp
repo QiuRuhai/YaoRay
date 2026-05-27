@@ -142,6 +142,29 @@ struct TextureBindings {
     std::unordered_map<std::string, Color3f> constant_values;
 };
 
+TextureWrap ParseWrapMode(
+    const std::string& wrap_value,
+    const std::string& texture_name,
+    const PbrtScene& scene,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    if (wrap_value == "repeat" || wrap_value.empty()) {
+        return TextureWrap::Repeat;
+    }
+    if (wrap_value == "clamp") {
+        return TextureWrap::ClampToEdge;
+    }
+    if (wrap_value == "black") {
+        diagnostics.push_back(Warning(scene, "Texture." + texture_name,
+            "wrap mode 'black' is not fully supported in M1; degraded to 'clamp'. "
+            "True black-border sampling lands in M2."));
+        return TextureWrap::ClampToEdge;
+    }
+    diagnostics.push_back(Warning(scene, "Texture." + texture_name,
+        "unknown wrap mode '" + wrap_value + "'; falling back to 'repeat'"));
+    return TextureWrap::Repeat;
+}
+
 TextureColorSpace InferTextureColorSpace(
     const std::filesystem::path& path,
     const std::string& explicit_encoding
@@ -203,6 +226,17 @@ bool CompileImagemapTexture(
         return false;
     }
     load.texture.color_space = color_space;
+
+    // PBRT applies the same wrap to both axes. Defaults to repeat.
+    std::string wrap_value;
+    const PbrtParam* wrap_param = FindParam(entity.params, "wrap");
+    if (wrap_param != nullptr && !wrap_param->strings.empty()) {
+        wrap_value = wrap_param->strings[0];
+    }
+    const TextureWrap wrap = ParseWrapMode(wrap_value, name, scene, diagnostics);
+    load.texture.wrap_s = wrap;
+    load.texture.wrap_t = wrap;
+
     bindings.name_to_index[name] = static_cast<int>(ir.textures.size());
     ir.textures.push_back(std::move(load.texture));
     return true;

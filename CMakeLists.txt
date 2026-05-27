@@ -102,6 +102,7 @@ add_executable(yaoray_tests
     tests/material_degradation_tests.cpp
     tests/scene_compiler_texture_tests.cpp
     tests/scene_compiler_environment_tests.cpp
+    tests/scene_compiler_wrap_mode_tests.cpp
 )
 target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_pbrt yaoray_render yaoray_assets yaoray_backends)
 target_compile_definitions(yaoray_tests PRIVATE YAORAY_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
