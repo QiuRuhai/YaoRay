@@ -173,4 +173,13 @@ if(BUILD_TESTING)
             "Integrator: path"
             "Rendered image:"
     )
+    add_yaoray_cli_render_test(yaoray_cli_render_pbrt_cornell_box
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/scenes/pbrt/cornell_box_pbrt/cornell_box_pbrt_smoke.pbrt"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/scenes/pbrt/cornell_box_pbrt/out/cornell_box_pbrt_smoke.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: path"
+            "Rendered image:"
+            "Hits: [^0]"
+    )
 endif()

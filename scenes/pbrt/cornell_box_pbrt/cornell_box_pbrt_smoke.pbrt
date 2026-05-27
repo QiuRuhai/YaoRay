@@ -1,0 +1,104 @@
+# Cornell box, PBRT v4 style — low-resolution smoke variant for CTest.
+#
+# YaoRay M1 Slice 1 smoke test: exercises Shape "trianglemesh",
+# Shape "sphere", LightSource "point", AreaLightSource "diffuse", and
+# the three M0 materials (diffuse, conductor, dielectric).
+
+LookAt 0 1 3.5  0 1 0  0 1 0
+Camera "perspective" "float fov" [40]
+Sampler "independent" "integer pixelsamples" [4]
+Integrator "path" "integer maxdepth" [6]
+Film "rgb"
+    "integer xresolution" [64]
+    "integer yresolution" [64]
+    "string filename" ["out/cornell_box_pbrt_smoke.png"]
+
+WorldBegin
+
+# --- materials --------------------------------------------------------
+MakeNamedMaterial "white"
+    "string type" ["diffuse"]
+    "rgb reflectance" [0.73 0.73 0.73]
+
+MakeNamedMaterial "red"
+    "string type" ["diffuse"]
+    "rgb reflectance" [0.65 0.05 0.05]
+
+MakeNamedMaterial "green"
+    "string type" ["diffuse"]
+    "rgb reflectance" [0.12 0.45 0.15]
+
+MakeNamedMaterial "mirror"
+    "string type" ["conductor"]
+    "rgb eta" [0.16 0.42 1.37]
+    "rgb k"   [3.98 2.41 1.60]
+    "float uroughness" [0.02]
+    "float vroughness" [0.02]
+
+MakeNamedMaterial "glass"
+    "string type" ["dielectric"]
+    "float eta" [1.5]
+
+# --- room (white floor / ceiling / back wall) -------------------------
+AttributeBegin
+NamedMaterial "white"
+Shape "trianglemesh"
+    "point3 P" [
+        -1 0 -1   1 0 -1   1 0 1   -1 0 1
+        -1 2 -1   1 2 -1   1 2 1   -1 2 1
+        -1 0 -1   1 0 -1   1 2 -1  -1 2 -1
+    ]
+    "integer indices" [
+        0 1 2  0 2 3
+        4 6 5  4 7 6
+        8 9 10 8 10 11
+    ]
+AttributeEnd
+
+# --- left wall (red) --------------------------------------------------
+AttributeBegin
+NamedMaterial "red"
+Shape "trianglemesh"
+    "point3 P" [-1 0 -1   -1 0 1   -1 2 1   -1 2 -1]
+    "integer indices" [0 1 2  0 2 3]
+AttributeEnd
+
+# --- right wall (green) -----------------------------------------------
+AttributeBegin
+NamedMaterial "green"
+Shape "trianglemesh"
+    "point3 P" [1 0 -1   1 2 -1   1 2 1   1 0 1]
+    "integer indices" [0 1 2  0 2 3]
+AttributeEnd
+
+# --- mirror sphere (left) ---------------------------------------------
+AttributeBegin
+NamedMaterial "mirror"
+Translate -0.4 0.35 0.0
+Shape "sphere" "float radius" [0.35]
+AttributeEnd
+
+# --- glass sphere (right) ---------------------------------------------
+AttributeBegin
+NamedMaterial "glass"
+Translate 0.4 0.35 0.4
+Shape "sphere" "float radius" [0.35]
+AttributeEnd
+
+# --- ceiling area light (a small bright square) -----------------------
+AttributeBegin
+AreaLightSource "diffuse" "rgb L" [3 2.8 2.5]
+NamedMaterial "white"
+Shape "trianglemesh"
+    "point3 P" [-0.3 1.99 -0.3   0.3 1.99 -0.3   0.3 1.99 0.3   -0.3 1.99 0.3]
+    "integer indices" [0 1 2  0 2 3]
+AttributeEnd
+
+# --- point light (an accent fill from behind the camera-right) --------
+AttributeBegin
+LightSource "point"
+    "point3 from" [1.4 1.7 1.5]
+    "rgb I"       [3 3 3]
+AttributeEnd
+
+WorldEnd
