@@ -2,7 +2,6 @@
 
 #include <yaoray/render/shading.hpp>
 
-#include <cmath>
 #include <cstddef>
 
 namespace yr {
