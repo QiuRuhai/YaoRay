@@ -1,8 +1,9 @@
 # Cornell box, PBRT v4 style — low-resolution smoke variant for CTest.
 #
-# YaoRay M1 Slice 1 smoke test: exercises Shape "trianglemesh",
-# Shape "sphere", LightSource "point", AreaLightSource "diffuse", and
-# the three M0 materials (diffuse, conductor, dielectric).
+# Same geometry / materials / lights as cornell_box_pbrt.pbrt, scaled
+# down to 64x64, 4 spp so the CTest run finishes in well under a
+# second. Used to detect regressions in Shape "sphere",
+# LightSource "point", or the M0 pipeline.
 
 LookAt 0 1 3.5  0 1 0  0 1 0
 Camera "perspective" "float fov" [40]

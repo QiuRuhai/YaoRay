@@ -1,8 +1,9 @@
-# Cornell box, PBRT v4 style.
+# Cornell box, PBRT v4 style — full-resolution showcase render.
 #
-# YaoRay M1 Slice 1 smoke test: exercises Shape "trianglemesh",
-# Shape "sphere", LightSource "point", AreaLightSource "diffuse", and
-# the three M0 materials (diffuse, conductor, dielectric).
+# YaoRay M1 Slice 1 deliverable: exercises Shape "trianglemesh",
+# Shape "sphere", LightSource "point", AreaLightSource "diffuse",
+# and the diffuse / conductor / dielectric material kinds across
+# five named materials (white / red / green / mirror / glass).
 
 LookAt 0 1 3.5  0 1 0  0 1 0
 Camera "perspective" "float fov" [40]
