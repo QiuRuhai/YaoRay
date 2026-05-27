@@ -123,11 +123,10 @@ RenderEnvironmentDistribution BuildEnvironmentDistribution(const RenderTexture& 
 }
 
 Color3f EvaluateEnvironment(const RenderSceneIR& scene, Vec3f direction) {
-    if (scene.environment.type == EnvironmentKind::Constant) {
+    if (!scene.environment.active) {
         return scene.environment.radiance * scene.environment.strength;
     }
-    if (scene.environment.type != EnvironmentKind::Hdri ||
-        scene.environment.strength <= 0.0f ||
+    if (scene.environment.strength <= 0.0f ||
         !ValidTextureIndex(scene, scene.environment.texture_index)) {
         return Color3f{};
     }
@@ -138,7 +137,7 @@ Color3f EvaluateEnvironment(const RenderSceneIR& scene, Vec3f direction) {
 }
 
 bool HasSampleableEnvironment(const RenderSceneIR& scene) {
-    return scene.environment.type == EnvironmentKind::Hdri &&
+    return scene.environment.active &&
            scene.environment.strength > 0.0f &&
            ValidTextureIndex(scene, scene.environment.texture_index) &&
            ValidDistributionIndex(scene, scene.environment.distribution_index);

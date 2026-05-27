@@ -43,7 +43,7 @@ void HashVec3(std::uint64_t& hash, Vec3f value) {
 
 std::uint64_t ComputeRenderSettingsHash(const RenderSceneIR& scene) {
     std::uint64_t hash = FnvOffset;
-    HashString(hash, "YaoRayRenderSettingsHashV1");
+    HashString(hash, "YaoRayRenderSettingsHashV2");
     HashValue(hash, static_cast<int>(scene.requested_backend));
     HashValue(hash, static_cast<int>(scene.integrator));
     HashValue(hash, static_cast<int>(scene.sampler));
@@ -52,26 +52,22 @@ std::uint64_t ComputeRenderSettingsHash(const RenderSceneIR& scene) {
     HashValue(hash, scene.spp);
     HashValue(hash, scene.max_depth);
     HashValue(hash, scene.seed);
-    HashValue(hash, scene.light_samples);
     HashValue(hash, scene.radiance_clamp);
     HashVec3(hash, scene.camera.origin);
     HashVec3(hash, scene.camera.forward);
     HashVec3(hash, scene.camera.right);
     HashVec3(hash, scene.camera.up);
     HashValue(hash, scene.camera.fov_y_radians);
-    HashValue(hash, scene.camera.aperture);
-    HashValue(hash, scene.camera.focus_distance);
-    HashValue(hash, static_cast<int>(scene.environment.type));
+    HashValue(hash, scene.environment.active);
     HashColor(hash, scene.environment.radiance);
     HashValue(hash, scene.environment.strength);
     HashValue(hash, scene.environment.rotation_radians);
     HashValue(hash, scene.vertices.size());
     HashValue(hash, scene.indices.size());
     HashValue(hash, scene.primitives.size());
-    HashValue(hash, scene.triangles.size());
     HashValue(hash, scene.materials.size());
     HashValue(hash, scene.textures.size());
-    HashValue(hash, scene.area_lights.size());
+    HashValue(hash, scene.emissive_primitives.size());
     return hash;
 }
 

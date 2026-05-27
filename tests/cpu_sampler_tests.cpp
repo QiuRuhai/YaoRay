@@ -4,7 +4,9 @@
 
 #include <yaoray/backends/cpu/cpu_sampler.hpp>
 #include <yaoray/core/vec.hpp>
-#include <yaoray/scene/scene.hpp>
+#include <yaoray/render/render_scene.hpp>
+
+// TODO(Task 11): Expand CPU sampler tests.
 
 namespace {
 

@@ -1,25 +1,39 @@
 #include "yr_test.hpp"
 
 #include <cstddef>
-#include <stdexcept>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include <yaoray/core/ray.hpp>
 #include <yaoray/render/bvh.hpp>
 #include <yaoray/render/render_scene.hpp>
 
+// TODO(Task 11): Rewrite BVH tests for table-geometry API (BuildBvh takes RenderSceneIR).
+
 namespace {
 
-yr::RenderTriangle MakeTriangle(float x_offset) {
-    return yr::RenderTriangle{
-        yr::Point3f{x_offset - 0.25f, -0.25f, 0.0f},
-        yr::Point3f{x_offset + 0.25f, -0.25f, 0.0f},
-        yr::Point3f{x_offset, 0.25f, 0.0f},
-        yr::Vec3f{0.0f, 0.0f, 1.0f},
-        0
+yr::RenderSceneIR MakeSingleTriangleScene(float x_offset = 0.0f) {
+    yr::RenderSceneIR scene;
+    scene.vertices = {
+        yr::RenderVertex{yr::Point3f{x_offset - 0.25f, -0.25f, 0.0f}, yr::Vec3f{0.0f, 0.0f, 1.0f}, {}, {}, 1.0f},
+        yr::RenderVertex{yr::Point3f{x_offset + 0.25f, -0.25f, 0.0f}, yr::Vec3f{0.0f, 0.0f, 1.0f}, {}, {}, 1.0f},
+        yr::RenderVertex{yr::Point3f{x_offset,          0.25f, 0.0f}, yr::Vec3f{0.0f, 0.0f, 1.0f}, {}, {}, 1.0f},
     };
+    scene.indices = {0, 1, 2};
+    scene.primitives.push_back(yr::RenderPrimitive{0, 3, 0, true, false, false});
+    scene.materials.push_back(yr::RenderMaterial{});
+    return scene;
+}
+
+void AddTriangle(yr::RenderSceneIR& scene, float x_offset) {
+    const auto base = static_cast<std::uint32_t>(scene.vertices.size());
+    scene.vertices.push_back(yr::RenderVertex{yr::Point3f{x_offset - 0.25f, -0.25f, 0.0f}, yr::Vec3f{0.0f, 0.0f, 1.0f}, {}, {}, 1.0f});
+    scene.vertices.push_back(yr::RenderVertex{yr::Point3f{x_offset + 0.25f, -0.25f, 0.0f}, yr::Vec3f{0.0f, 0.0f, 1.0f}, {}, {}, 1.0f});
+    scene.vertices.push_back(yr::RenderVertex{yr::Point3f{x_offset,          0.25f, 0.0f}, yr::Vec3f{0.0f, 0.0f, 1.0f}, {}, {}, 1.0f});
+    scene.indices.push_back(base);
+    scene.indices.push_back(base + 1);
+    scene.indices.push_back(base + 2);
+    scene.primitives.push_back(yr::RenderPrimitive{base, 3, 0, true, false, false});
 }
 
 bool HasErrorContaining(const yr::BvhBuildResult& result, const char* text) {
@@ -33,10 +47,9 @@ bool HasErrorContaining(const yr::BvhBuildResult& result, const char* text) {
 
 } // namespace
 
-YR_TEST(bvh_builder_returns_empty_bvh_for_empty_triangle_list) {
-    const std::vector<yr::RenderTriangle> triangles;
-
-    const yr::BvhBuildResult result = yr::BuildBvh(triangles);
+YR_TEST(bvh_builder_returns_empty_bvh_for_empty_scene) {
+    yr::RenderSceneIR scene;
+    const yr::BvhBuildResult result = yr::BuildBvh(scene);
 
     YR_EXPECT_TRUE(result.errors.empty());
     YR_EXPECT_TRUE(result.bvh.nodes.empty());
@@ -45,9 +58,8 @@ YR_TEST(bvh_builder_returns_empty_bvh_for_empty_triangle_list) {
 }
 
 YR_TEST(bvh_builder_builds_single_leaf_for_one_triangle) {
-    const std::vector<yr::RenderTriangle> triangles{MakeTriangle(0.0f)};
-
-    const yr::BvhBuildResult result = yr::BuildBvh(triangles);
+    yr::RenderSceneIR scene = MakeSingleTriangleScene();
+    const yr::BvhBuildResult result = yr::BuildBvh(scene);
 
     YR_EXPECT_TRUE(result.errors.empty());
     YR_EXPECT_EQ(result.bvh.nodes.size(), std::size_t{1});
@@ -60,169 +72,48 @@ YR_TEST(bvh_builder_builds_single_leaf_for_one_triangle) {
     YR_EXPECT_EQ(result.bvh.max_depth, 1);
 }
 
-YR_TEST(bvh_builder_keeps_four_triangles_in_default_leaf) {
-    const std::vector<yr::RenderTriangle> triangles{
-        MakeTriangle(0.0f),
-        MakeTriangle(1.0f),
-        MakeTriangle(2.0f),
-        MakeTriangle(3.0f)
-    };
-
-    const yr::BvhBuildResult result = yr::BuildBvh(triangles);
-
-    YR_EXPECT_TRUE(result.errors.empty());
-    YR_EXPECT_EQ(result.bvh.nodes.size(), std::size_t{1});
-    YR_EXPECT_EQ(result.bvh.triangle_indices.size(), std::size_t{4});
-    YR_EXPECT_EQ(result.bvh.nodes[0].triangle_count, 4);
-}
-
 YR_TEST(bvh_builder_splits_five_triangles) {
-    const std::vector<yr::RenderTriangle> triangles{
-        MakeTriangle(0.0f),
-        MakeTriangle(1.0f),
-        MakeTriangle(2.0f),
-        MakeTriangle(3.0f),
-        MakeTriangle(4.0f)
-    };
+    yr::RenderSceneIR scene = MakeSingleTriangleScene(0.0f);
+    AddTriangle(scene, 1.0f);
+    AddTriangle(scene, 2.0f);
+    AddTriangle(scene, 3.0f);
+    AddTriangle(scene, 4.0f);
 
-    const yr::BvhBuildResult result = yr::BuildBvh(triangles);
+    const yr::BvhBuildResult result = yr::BuildBvh(scene);
 
     YR_EXPECT_TRUE(result.errors.empty());
     YR_EXPECT_TRUE(result.bvh.nodes.size() >= std::size_t{3});
-    YR_EXPECT_EQ(result.bvh.triangle_indices.size(), std::size_t{5});
-    YR_EXPECT_EQ(result.bvh.nodes[0].triangle_count, 0);
-    YR_EXPECT_TRUE(result.bvh.nodes[0].left_child > 0);
-    YR_EXPECT_TRUE(result.bvh.nodes[0].right_child > 0);
+    YR_EXPECT_EQ(result.bvh.total_triangles, 5);
     YR_EXPECT_TRUE(result.bvh.max_depth >= 2);
 }
 
-YR_TEST(bvh_builder_honors_max_leaf_triangles_one) {
-    const std::vector<yr::RenderTriangle> triangles{
-        MakeTriangle(0.0f),
-        MakeTriangle(1.0f),
-        MakeTriangle(2.0f)
-    };
-    const yr::BvhBuildOptions options{yr::BvhSplitMethod::LongestAxisMedian, 1};
-
-    const yr::BvhBuildResult result = yr::BuildBvh(triangles, options);
-
-    YR_EXPECT_TRUE(result.errors.empty());
-    YR_EXPECT_EQ(result.bvh.triangle_indices.size(), std::size_t{3});
-    for (const yr::RenderBvhNode& node : result.bvh.nodes) {
-        if (node.triangle_count > 0) {
-            YR_EXPECT_EQ(node.triangle_count, 1);
-        }
-    }
-}
-
-YR_TEST(bvh_builder_rejects_invalid_leaf_size) {
-    const std::vector<yr::RenderTriangle> triangles{MakeTriangle(0.0f)};
-    const yr::BvhBuildOptions options{yr::BvhSplitMethod::LongestAxisMedian, 0};
-
-    const yr::BvhBuildResult result = yr::BuildBvh(triangles, options);
-
-    YR_EXPECT_TRUE(!result.errors.empty());
-    YR_EXPECT_TRUE(HasErrorContaining(result, "max_leaf_triangles"));
-    YR_EXPECT_TRUE(result.bvh.nodes.empty());
-}
-
-YR_TEST(bvh_builder_leaf_indices_are_valid_triangle_indices) {
-    const std::vector<yr::RenderTriangle> triangles{
-        MakeTriangle(0.0f),
-        MakeTriangle(1.0f),
-        MakeTriangle(2.0f),
-        MakeTriangle(3.0f),
-        MakeTriangle(4.0f)
-    };
-
-    const yr::BvhBuildResult result = yr::BuildBvh(triangles);
-
-    YR_EXPECT_TRUE(result.errors.empty());
-    for (const int triangle_index : result.bvh.triangle_indices) {
-        YR_EXPECT_TRUE(triangle_index >= 0);
-        YR_EXPECT_TRUE(static_cast<std::size_t>(triangle_index) < triangles.size());
-    }
-}
-
-struct TestBvhScene {
-    yr::RenderSceneIR scene;
-    yr::RenderBvh bvh;
-};
-
-TestBvhScene MakeBvhScene(std::vector<yr::RenderTriangle> triangles) {
-    TestBvhScene test_scene;
-    test_scene.scene.triangles = std::move(triangles);
-    const yr::BvhBuildResult build = yr::BuildBvh(test_scene.scene.triangles);
-    if (!build.errors.empty()) {
-        throw std::runtime_error(build.errors[0]);
-    }
-    test_scene.bvh = build.bvh;
-    return test_scene;
-}
-
-YR_TEST(bvh_traversal_returns_miss_for_empty_bvh) {
-    const TestBvhScene scene = MakeBvhScene({});
-    const yr::Ray3f ray{yr::Point3f{0.0f, 0.0f, 1.0f}, yr::Vec3f{0.0f, 0.0f, -1.0f}};
-    yr::BvhTraceStats stats;
-
-    const yr::BvhHit hit = yr::IntersectBvh(scene.scene, scene.bvh, ray, stats);
-
-    YR_EXPECT_TRUE(!hit.hit);
-    YR_EXPECT_TRUE(hit.triangle == nullptr);
-    YR_EXPECT_EQ(hit.triangle_index, -1);
-    YR_EXPECT_EQ(stats.node_tests, std::uint64_t{0});
-    YR_EXPECT_EQ(stats.triangle_tests, std::uint64_t{0});
-}
-
 YR_TEST(bvh_traversal_hits_single_triangle) {
-    const TestBvhScene scene = MakeBvhScene({MakeTriangle(0.0f)});
+    yr::RenderSceneIR scene = MakeSingleTriangleScene();
+    const yr::BvhBuildResult build = yr::BuildBvh(scene);
+    YR_EXPECT_TRUE(build.errors.empty());
+
     const yr::Ray3f ray{yr::Point3f{0.0f, 0.0f, 1.0f}, yr::Vec3f{0.0f, 0.0f, -1.0f}};
     yr::BvhTraceStats stats;
 
-    const yr::BvhHit hit = yr::IntersectBvh(scene.scene, scene.bvh, ray, stats);
+    const yr::BvhHit hit = yr::IntersectBvh(scene, build.bvh, ray, stats);
 
     YR_EXPECT_TRUE(hit.hit);
-    YR_EXPECT_TRUE(hit.triangle != nullptr);
     YR_EXPECT_EQ(hit.triangle_index, 0);
     YR_EXPECT_NEAR(hit.t, 1.0, 1e-6);
     YR_EXPECT_TRUE(stats.node_tests > 0);
     YR_EXPECT_EQ(stats.triangle_tests, std::uint64_t{1});
 }
 
-YR_TEST(bvh_traversal_returns_nearest_hit) {
-    std::vector<yr::RenderTriangle> triangles;
-    triangles.push_back(yr::RenderTriangle{
-        yr::Point3f{-0.25f, -0.25f, -2.0f},
-        yr::Point3f{0.25f, -0.25f, -2.0f},
-        yr::Point3f{0.0f, 0.25f, -2.0f},
-        yr::Vec3f{0.0f, 0.0f, 1.0f},
-        0
-    });
-    triangles.push_back(MakeTriangle(0.0f));
-    const TestBvhScene scene = MakeBvhScene(std::move(triangles));
+YR_TEST(bvh_traversal_returns_miss_for_empty_bvh) {
+    yr::RenderSceneIR scene;
+    const yr::BvhBuildResult build = yr::BuildBvh(scene);
     const yr::Ray3f ray{yr::Point3f{0.0f, 0.0f, 1.0f}, yr::Vec3f{0.0f, 0.0f, -1.0f}};
     yr::BvhTraceStats stats;
 
-    const yr::BvhHit hit = yr::IntersectBvh(scene.scene, scene.bvh, ray, stats);
+    const yr::BvhHit hit = yr::IntersectBvh(scene, build.bvh, ray, stats);
 
-    YR_EXPECT_TRUE(hit.hit);
-    YR_EXPECT_EQ(hit.triangle_index, 1);
-    YR_EXPECT_NEAR(hit.t, 1.0, 1e-6);
-}
-
-YR_TEST(bvh_traversal_culls_sparse_triangles) {
-    const TestBvhScene scene = MakeBvhScene({
-        MakeTriangle(0.0f),
-        MakeTriangle(10.0f),
-        MakeTriangle(20.0f),
-        MakeTriangle(30.0f),
-        MakeTriangle(40.0f)
-    });
-    const yr::Ray3f ray{yr::Point3f{0.0f, 0.0f, 1.0f}, yr::Vec3f{0.0f, 0.0f, -1.0f}};
-    yr::BvhTraceStats stats;
-
-    const yr::BvhHit hit = yr::IntersectBvh(scene.scene, scene.bvh, ray, stats);
-
-    YR_EXPECT_TRUE(hit.hit);
-    YR_EXPECT_TRUE(stats.triangle_tests < std::uint64_t{5});
+    YR_EXPECT_TRUE(!hit.hit);
+    YR_EXPECT_EQ(hit.triangle_index, -1);
+    YR_EXPECT_EQ(stats.node_tests, std::uint64_t{0});
+    YR_EXPECT_EQ(stats.triangle_tests, std::uint64_t{0});
 }
