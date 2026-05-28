@@ -38,10 +38,11 @@ compile time.
 sampling), `LightSource "point"`, `LightSource "distant"`,
 `LightSource "spot"`, `AreaLightSource "diffuse"`.
 
-**Textures:** `Texture "imagemap"` (PNG / JPEG / TGA / BMP / HDR / PFM),
+**Textures:** `Texture "imagemap"` (PNG / JPEG / TGA / BMP / HDR / PFM / EXR),
 `Texture "constant"`. Wrap modes: `repeat` and `clamp` (`black`
 degrades to clamp). Color space auto-detected from extension, explicit
-`"string encoding"` overrides.
+`"string encoding"` overrides. EXR (OpenEXR) loads via vendored
+tinyexr and goes through the same HDR envmap path as `.hdr` / `.pfm`.
 
 ## Backend
 
@@ -99,7 +100,7 @@ M1+M2 (done) ──▶ M3 (Advanced Materials) ──▶ M4 (CUDA) ──▶ M5+
 | **M2** | `barcelona-pavilion` (mmp PBRT v4) | SAH BVH + parallel BVH build; dining-room renders ≥ 2× faster | done |
 | **M3** | TBD — `ganesha` / `sportscar` / `killeroo-coated` | Real `subsurface` + `measured` + nested `layered` materials | sketch |
 | **M4** | `dining-room` < 10 s, `barcelona-pavilion` < 1 min | CUDA backend filling the existing `RenderBackendKind::Cuda` slot | sketch |
-| **M5+** | by interest | Denoiser, EXR, volumetrics, hair, subdivision, spectral, polish | exploratory |
+| **M5+** | by interest | Denoiser, volumetrics, hair, subdivision, spectral, polish | exploratory |
 
 See [`docs/superpowers/specs/2026-05-28-yaoray-post-m1-roadmap-design.md`](../superpowers/specs/2026-05-28-yaoray-post-m1-roadmap-design.md)
 for the full roadmap design, including detailed M2 acceptance criteria,

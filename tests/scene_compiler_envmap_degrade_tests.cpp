@@ -12,9 +12,11 @@
 namespace {
 
 // Build a minimal compilable scene with one infinite light pointing at a
-// filename whose extension (.exr) is NOT supported by LoadHdrTexture (which
-// only accepts .hdr and .pfm). A sentinel sphere is included so the
-// downstream "scene contains no geometry" guard does not fire.
+// filename ("sky.exr") that does NOT exist on disk relative to the source
+// root. .exr loading is now supported natively (via tinyexr), so this
+// fixture exercises the missing-file degrade path rather than the
+// historical unsupported-extension path. A sentinel sphere is included so
+// the downstream "scene contains no geometry" guard does not fire.
 yr::PbrtScene MakeSceneWithUnsupportedEnvmap() {
     yr::PbrtScene pbrt;
     pbrt.source_path = "unsupported_envmap.pbrt";

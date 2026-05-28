@@ -3,7 +3,11 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
+#define TINYEXR_IMPLEMENTATION
+#include <tinyexr.h>
+
 #include <algorithm>
+#include <cstdlib>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
@@ -339,6 +343,80 @@ TextureLoadResult LoadPfmTexture(const std::filesystem::path& path) {
     return TextureLoadResult{std::move(texture), true, {}};
 }
 
+// EXR loader (OpenEXR HDR). Uses tinyexr's high-level LoadEXR which
+// returns RGBA float32 interleaved data. Application must free the buffer.
+TextureLoadResult LoadExrTexture(const std::filesystem::path& path) {
+    if (!std::filesystem::exists(path)) {
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "EXR environment file not found: " + path.generic_string()
+        };
+    }
+
+    float* rgba = nullptr;
+    int width = 0;
+    int height = 0;
+    const char* err = nullptr;
+    const std::string path_str = path.generic_string();
+    const int status = LoadEXR(&rgba, &width, &height, path_str.c_str(), &err);
+
+    if (status != TINYEXR_SUCCESS) {
+        const std::string message = err != nullptr ? std::string{err} : std::string{"unknown error"};
+        if (err != nullptr) {
+            FreeEXRErrorMessage(err);
+        }
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "failed to load EXR environment: " + path.generic_string() + " (" + message + ")"
+        };
+    }
+    if (rgba == nullptr || width <= 0 || height <= 0) {
+        if (rgba != nullptr) {
+            std::free(rgba);
+        }
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "EXR environment has invalid dimensions: " + path.generic_string()
+        };
+    }
+
+    RenderTexture texture;
+    texture.width = width;
+    texture.height = height;
+    texture.filter = TextureFilter::Bilinear;
+    texture.wrap_s = TextureWrap::Repeat;
+    texture.wrap_t = TextureWrap::ClampToEdge;
+    texture.color_space = TextureColorSpace::Linear;
+    const std::size_t pixel_count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    texture.texels.reserve(pixel_count);
+    for (std::size_t i = 0; i < pixel_count; ++i) {
+        const std::size_t base = i * 4;
+        const Color3f color{rgba[base + 0], rgba[base + 1], rgba[base + 2]};
+        if (!IsFiniteColor(color)) {
+            std::free(rgba);
+            return TextureLoadResult{
+                RenderTexture{},
+                false,
+                "EXR environment contains non-finite texels: " + path.generic_string()
+            };
+        }
+        texture.texels.push_back(Color4f{color.x, color.y, color.z, rgba[base + 3]});
+    }
+    std::free(rgba);
+
+    if (texture.texels.empty()) {
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "EXR environment contains no texels: " + path.generic_string()
+        };
+    }
+    return TextureLoadResult{std::move(texture), true, {}};
+}
+
 } // namespace
 
 TextureLoadResult LoadHdrTexture(const std::filesystem::path& path) {
@@ -346,11 +424,14 @@ TextureLoadResult LoadHdrTexture(const std::filesystem::path& path) {
     if (extension == ".pfm") {
         return LoadPfmTexture(path);
     }
+    if (extension == ".exr") {
+        return LoadExrTexture(path);
+    }
     if (extension != ".hdr") {
         return TextureLoadResult{
             RenderTexture{},
             false,
-            "HDR environment path must use a .hdr or .pfm extension: " + path.generic_string()
+            "HDR environment path must use a .hdr, .pfm, or .exr extension: " + path.generic_string()
         };
     }
     if (!std::filesystem::exists(path)) {

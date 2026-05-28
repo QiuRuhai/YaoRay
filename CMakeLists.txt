@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 project(YaoRay
     VERSION 0.1.0
     DESCRIPTION "Physically based offline path tracer"
-    LANGUAGES CXX
+    LANGUAGES C CXX
 )
 
 option(YAORAY_ENABLE_CUDA "Build the CUDA backend when available" OFF)
@@ -32,7 +32,15 @@ target_include_directories(yaoray_film PUBLIC include)
 add_library(stb INTERFACE)
 target_include_directories(stb INTERFACE external/stb)
 
-target_link_libraries(yaoray_film PUBLIC yaoray_core PRIVATE stb)
+add_library(tinyexr STATIC
+    external/tinyexr/deps/miniz/miniz.c
+)
+target_include_directories(tinyexr PUBLIC
+    external/tinyexr
+    external/tinyexr/deps/miniz
+)
+
+target_link_libraries(yaoray_film PUBLIC yaoray_core PRIVATE stb tinyexr)
 
 add_library(yaoray_assets STATIC
     src/assets/ply_loader.cpp
@@ -59,7 +67,7 @@ add_library(yaoray_render STATIC
     src/render/texture.cpp
 )
 target_include_directories(yaoray_render PUBLIC include)
-target_link_libraries(yaoray_render PUBLIC yaoray_core yaoray_pbrt PRIVATE yaoray_assets stb)
+target_link_libraries(yaoray_render PUBLIC yaoray_core yaoray_pbrt PRIVATE yaoray_assets stb tinyexr)
 
 add_library(yaoray_backends STATIC
     src/backends/backend.cpp
@@ -109,6 +117,7 @@ add_executable(yaoray_tests
     tests/scene_compiler_wrap_mode_tests.cpp
     tests/scene_compiler_normal_map_tests.cpp
     tests/scene_compiler_tangent_tests.cpp
+    tests/exr_io_tests.cpp
 )
 target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_pbrt yaoray_render yaoray_assets yaoray_backends)
 target_compile_definitions(yaoray_tests PRIVATE YAORAY_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")

@@ -25,6 +25,12 @@ ImageWriteResult WritePng(
     const std::filesystem::path& path
 );
 
+ImageWriteResult WriteExr(
+    const Film& film,
+    const ToneMapSettings& tone_map,
+    const std::filesystem::path& path
+);
+
 ImageWriteResult WriteImage(
     const Film& film,
     const ToneMapSettings& tone_map,
