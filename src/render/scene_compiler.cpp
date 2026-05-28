@@ -705,13 +705,13 @@ bool CompileSphereShape(
     sphere.center = center;
     sphere.radius = radius * scale;
     sphere.material_index = material_index;
-    sphere.area_light_index = -1;  // Area lights on spheres are handled in a later slice.
+    sphere.area_light_index = -1;  // Sphere area lights are not yet supported.
 
-    // If an area light is attached, surface this as a warning for Slice 1 (we don't
-    // yet sample analytic-shape emitters as area lights).
+    // Analytic spheres can't yet be sampled as emitters; warn if the source
+    // scene attaches an AreaLightSource to a Shape "sphere".
     if (record.area_light.has_value()) {
         diagnostics.push_back(Warning(scene, "Shape.sphere.AreaLightSource",
-            "area light on a sphere is not yet supported in M1 Slice 1; the emission will be ignored"));
+            "area light on a sphere is not yet supported; the emission will be ignored"));
     }
 
     ir.spheres.push_back(sphere);
