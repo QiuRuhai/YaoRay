@@ -112,6 +112,7 @@ add_executable(yaoray_tests
     tests/scene_compiler_environment_tests.cpp
     tests/scene_compiler_imagemap_degrade_tests.cpp
     tests/scene_compiler_imagemap_exr_tests.cpp
+    tests/scene_compiler_film_iso_tests.cpp
     tests/scene_compiler_plymesh_degrade_tests.cpp
     tests/scene_compiler_envmap_degrade_tests.cpp
     tests/scene_compiler_scale_texture_tests.cpp
