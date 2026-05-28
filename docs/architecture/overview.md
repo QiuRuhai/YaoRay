@@ -2,7 +2,7 @@
 
 YaoRay is a physically-based offline path tracer that consumes PBRT v4
 scene files and produces HDR images via a multi-threaded CPU backend.
-A CUDA backend is planned for M2+.
+A CUDA backend is on the roadmap (see below).
 
 ## Two-Layer Pipeline
 
@@ -19,11 +19,7 @@ textures, and lights. The CPU backend's `Prepare` step turns
 `RenderSceneIR` into a `CpuPreparedScene` (BVH + texture cache + light
 distributions); `Render` then ray-traces against that prepared scene.
 
-This is the two-layer design introduced by the M0 architecture reset,
-which dropped the older three-layer `TOML + SceneWorld + frontends`
-pipeline along with OBJ and glTF loaders.
-
-## Supported PBRT v4 Surface (M1)
+## Supported PBRT v4 Surface
 
 **Geometry:** `trianglemesh` (P / N / uv / S), `plymesh`, `sphere`.
 
@@ -66,17 +62,17 @@ multi-threaded path tracer
 
 | Scene | Purpose |
 |---|---|
-| `scenes/pbrt/hello_emissive/` | Smallest end-to-end demo: trianglemesh + area light (M0 sanity). |
-| `scenes/pbrt/cornell_box_pbrt/` | Slice 1 — `Shape "sphere"` and `LightSource "point"`. |
-| `scenes/pbrt/material_studio/` | Slice 2 — HDRI environment + material parameter textures. |
-| `scenes/pbrt/texture_test/` | Slice 3 — wrap modes and normal-map data path. |
-| `scenes/pbrt/dining_room/README.md` | Slice 4 — Bitterli's PBRT v4 dining-room (downloaded; gitignored). |
+| `scenes/pbrt/hello_emissive/` | Smallest end-to-end demo: trianglemesh + area light. |
+| `scenes/pbrt/cornell_box_pbrt/` | `Shape "sphere"` + `LightSource "point"` + mirror/glass spheres. |
+| `scenes/pbrt/material_studio/` | HDRI environment + each supported BSDF on a row of spheres. |
+| `scenes/pbrt/texture_test/` | Texture wrap modes + normal-map data path. |
+| `scenes/pbrt/dining_room/README.md` | Bitterli's PBRT v4 dining-room (downloaded; gitignored). |
 
 The first four scenes are committed and exercised by CTest. The
 dining-room asset is large and CC-BY-licensed by its author, so the
 repo links to the download workflow rather than redistributing.
 
-## What's not in M1
+## Not currently supported
 
 - Spectral rendering (RGB only).
 - Volumetrics / media.
@@ -88,3 +84,20 @@ repo links to the download workflow rather than redistributing.
   but degrade to `independent` at compile time.
 - True black-border wrap (degrades to clamp).
 - Auto-tangent generation when trianglemesh has `uv` but no `S`.
+
+## Roadmap
+
+```
+M1 (done) ──▶ M2 (Large Scenes) ──▶ M3 (Advanced Materials) ──▶ M4 (CUDA) ──▶ M5+ (by interest)
+```
+
+| Milestone | Anchor scene | Headline | Status |
+|---|---|---|---|
+| **M2** | `barcelona-pavilion` (mmp PBRT v4) | SAH BVH + parallel BVH build; dining-room renders ≥ 2× faster | planned |
+| **M3** | TBD — `ganesha` / `sportscar` / `killeroo-coated` | Real `subsurface` + `measured` + nested `layered` materials | sketch |
+| **M4** | `dining-room` < 10 s, `barcelona-pavilion` < 1 min | CUDA backend filling the existing `RenderBackendKind::Cuda` slot | sketch |
+| **M5+** | by interest | Denoiser, EXR, volumetrics, hair, subdivision, spectral, polish | exploratory |
+
+See [`docs/superpowers/specs/2026-05-28-yaoray-post-m1-roadmap-design.md`](../superpowers/specs/2026-05-28-yaoray-post-m1-roadmap-design.md)
+for the full roadmap design, including detailed M2 acceptance criteria,
+risk register, and rationale for the milestone ordering.
