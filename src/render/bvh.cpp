@@ -79,50 +79,69 @@ int LongestAxis(const Bounds3f& bounds) {
     return 2;
 }
 
-int BuildRecursive(
-    std::vector<BvhPrimRef>& prims,
+struct SplitDecision {
+    enum class Kind { MakeLeaf, Split };
+    Kind kind = Kind::MakeLeaf;
+    int mid = -1;  // partition point; only valid when kind == Split
+};
+
+void EmitLeafNode(
+    const std::vector<BvhPrimRef>& prims,
     int begin,
     int end,
+    const Bounds3f& node_bounds,
     int depth,
-    int max_leaf_triangles,
-    RenderBvh& bvh,
+    int node_index,
+    RenderBvh& bvh
+) {
+    const int first_triangle = static_cast<int>(bvh.triangle_indices.size());
+    for (int i = begin; i < end; ++i) {
+        bvh.triangle_indices.push_back(prims[static_cast<std::size_t>(i)].flat_index);
+    }
+    bvh.nodes[static_cast<std::size_t>(node_index)] = RenderBvhNode{
+        node_bounds,
+        -1,
+        -1,
+        first_triangle,
+        end - begin
+    };
+    bvh.max_depth = std::max(bvh.max_depth, depth);
+}
+
+bool ComputeRangeBounds(
+    const std::vector<BvhPrimRef>& prims,
+    int begin,
+    int end,
+    Bounds3f* out_node_bounds,
+    Bounds3f* out_centroid_bounds,
     std::vector<std::string>& errors
 ) {
-    if (begin >= end) {
-        errors.push_back("BVH build produced an empty primitive range");
-        return -1;
-    }
-
-    const int node_index = static_cast<int>(bvh.nodes.size());
-    bvh.nodes.push_back(RenderBvhNode{});
-
     Bounds3f node_bounds;
     Bounds3f centroid_bounds;
     for (int i = begin; i < end; ++i) {
         node_bounds = UnionBounds(node_bounds, prims[static_cast<std::size_t>(i)].bounds);
         centroid_bounds = Union(centroid_bounds, prims[static_cast<std::size_t>(i)].centroid);
     }
-
     if (!IsFinite(node_bounds) || !IsFinite(centroid_bounds)) {
         errors.push_back("BVH build encountered non-finite primitive bounds");
-        return -1;
+        return false;
     }
+    *out_node_bounds = node_bounds;
+    *out_centroid_bounds = centroid_bounds;
+    return true;
+}
 
+SplitDecision ChooseMedianSplit(
+    std::vector<BvhPrimRef>& prims,
+    int begin,
+    int end,
+    const Bounds3f& /*node_bounds*/,
+    const Bounds3f& centroid_bounds,
+    int max_leaf_triangles
+) {
     const int primitive_count = end - begin;
     if (primitive_count <= max_leaf_triangles) {
-        const int first_triangle = static_cast<int>(bvh.triangle_indices.size());
-        for (int i = begin; i < end; ++i) {
-            bvh.triangle_indices.push_back(prims[static_cast<std::size_t>(i)].flat_index);
-        }
-        bvh.nodes[static_cast<std::size_t>(node_index)] = RenderBvhNode{
-            node_bounds,
-            -1,
-            -1,
-            first_triangle,
-            primitive_count
-        };
-        bvh.max_depth = std::max(bvh.max_depth, depth);
-        return node_index;
+        return SplitDecision{SplitDecision::Kind::MakeLeaf, -1};
     }
 
     const int axis = LongestAxis(centroid_bounds);
@@ -135,27 +154,7 @@ int BuildRecursive(
             return AxisValue(a.centroid, axis) < AxisValue(b.centroid, axis);
         }
     );
-
-    if (mid == begin || mid == end) {
-        errors.push_back("BVH median split produced an empty child range");
-        return -1;
-    }
-
-    const int left_child = BuildRecursive(prims, begin, mid, depth + 1, max_leaf_triangles, bvh, errors);
-    const int right_child = BuildRecursive(prims, mid, end, depth + 1, max_leaf_triangles, bvh, errors);
-    if (left_child < 0 || right_child < 0) {
-        return -1;
-    }
-
-    bvh.nodes[static_cast<std::size_t>(node_index)] = RenderBvhNode{
-        node_bounds,
-        left_child,
-        right_child,
-        0,
-        0
-    };
-    bvh.max_depth = std::max(bvh.max_depth, depth);
-    return node_index;
+    return SplitDecision{SplitDecision::Kind::Split, mid};
 }
 
 constexpr int kSahBucketCount = 12;
@@ -272,48 +271,19 @@ bool ChooseBestSahSplit(
     return true;
 }
 
-int BuildRecursiveSah(
+SplitDecision ChooseSahSplit(
     std::vector<BvhPrimRef>& prims,
     int begin,
     int end,
-    int depth,
-    int max_leaf_triangles,
-    RenderBvh& bvh,
-    std::vector<std::string>& errors
+    const Bounds3f& node_bounds,
+    const Bounds3f& centroid_bounds,
+    int max_leaf_triangles
 ) {
-    if (begin >= end) {
-        errors.push_back("BVH build produced an empty primitive range");
-        return -1;
-    }
-
-    const int node_index = static_cast<int>(bvh.nodes.size());
-    bvh.nodes.push_back(RenderBvhNode{});
-
-    Bounds3f node_bounds;
-    Bounds3f centroid_bounds;
-    for (int i = begin; i < end; ++i) {
-        node_bounds = UnionBounds(node_bounds, prims[static_cast<std::size_t>(i)].bounds);
-        centroid_bounds = Union(centroid_bounds, prims[static_cast<std::size_t>(i)].centroid);
-    }
-
-    if (!IsFinite(node_bounds) || !IsFinite(centroid_bounds)) {
-        errors.push_back("BVH build encountered non-finite primitive bounds");
-        return -1;
-    }
-
     const int primitive_count = end - begin;
 
     // Leaf criterion (a): small enough -> leaf regardless of SAH cost.
     if (primitive_count <= max_leaf_triangles) {
-        const int first_triangle = static_cast<int>(bvh.triangle_indices.size());
-        for (int i = begin; i < end; ++i) {
-            bvh.triangle_indices.push_back(prims[static_cast<std::size_t>(i)].flat_index);
-        }
-        bvh.nodes[static_cast<std::size_t>(node_index)] = RenderBvhNode{
-            node_bounds, -1, -1, first_triangle, primitive_count
-        };
-        bvh.max_depth = std::max(bvh.max_depth, depth);
-        return node_index;
+        return SplitDecision{SplitDecision::Kind::MakeLeaf, -1};
     }
 
     int best_axis = -1;
@@ -327,15 +297,7 @@ int BuildRecursiveSah(
     // Leaf criterion (b): SAH says splitting is more expensive than leafing.
     const float leaf_cost = static_cast<float>(primitive_count);
     if (found_split && best_cost >= leaf_cost) {
-        const int first_triangle = static_cast<int>(bvh.triangle_indices.size());
-        for (int i = begin; i < end; ++i) {
-            bvh.triangle_indices.push_back(prims[static_cast<std::size_t>(i)].flat_index);
-        }
-        bvh.nodes[static_cast<std::size_t>(node_index)] = RenderBvhNode{
-            node_bounds, -1, -1, first_triangle, primitive_count
-        };
-        bvh.max_depth = std::max(bvh.max_depth, depth);
-        return node_index;
+        return SplitDecision{SplitDecision::Kind::MakeLeaf, -1};
     }
 
     int mid = -1;
@@ -384,21 +346,62 @@ int BuildRecursiveSah(
         );
     }
 
-    if (mid <= begin || mid >= end) {
-        errors.push_back("BVH SAH split produced an empty child range");
+    return SplitDecision{SplitDecision::Kind::Split, mid};
+}
+
+template <typename ChooserFn>
+int BuildSubtreeSerial(
+    std::vector<BvhPrimRef>& prims,
+    int begin,
+    int end,
+    int depth,
+    int max_leaf_triangles,
+    ChooserFn chooser,
+    RenderBvh& bvh,
+    std::vector<std::string>& errors
+) {
+    if (begin >= end) {
+        errors.push_back("BVH build produced an empty primitive range");
         return -1;
     }
 
-    const int left_child = BuildRecursiveSah(
-        prims, begin, mid, depth + 1, max_leaf_triangles, bvh, errors);
-    const int right_child = BuildRecursiveSah(
-        prims, mid, end, depth + 1, max_leaf_triangles, bvh, errors);
+    const int node_index = static_cast<int>(bvh.nodes.size());
+    bvh.nodes.push_back(RenderBvhNode{});
+
+    Bounds3f node_bounds;
+    Bounds3f centroid_bounds;
+    if (!ComputeRangeBounds(prims, begin, end, &node_bounds, &centroid_bounds, errors)) {
+        return -1;
+    }
+
+    const SplitDecision decision =
+        chooser(prims, begin, end, node_bounds, centroid_bounds, max_leaf_triangles);
+
+    if (decision.kind == SplitDecision::Kind::MakeLeaf) {
+        EmitLeafNode(prims, begin, end, node_bounds, depth, node_index, bvh);
+        return node_index;
+    }
+
+    const int mid = decision.mid;
+    if (mid <= begin || mid >= end) {
+        errors.push_back("BVH split produced an empty child range");
+        return -1;
+    }
+
+    const int left_child = BuildSubtreeSerial(
+        prims, begin, mid, depth + 1, max_leaf_triangles, chooser, bvh, errors);
+    const int right_child = BuildSubtreeSerial(
+        prims, mid, end, depth + 1, max_leaf_triangles, chooser, bvh, errors);
     if (left_child < 0 || right_child < 0) {
         return -1;
     }
 
     bvh.nodes[static_cast<std::size_t>(node_index)] = RenderBvhNode{
-        node_bounds, left_child, right_child, 0, 0
+        node_bounds,
+        left_child,
+        right_child,
+        0,
+        0
     };
     bvh.max_depth = std::max(bvh.max_depth, depth);
     return node_index;
@@ -465,23 +468,25 @@ BvhBuildResult BuildBvh(const RenderSceneIR& scene, const BvhBuildOptions& optio
     int root = -1;
     switch (options.split_method) {
         case BvhSplitMethod::SahBucketBinning:
-            root = BuildRecursiveSah(
+            root = BuildSubtreeSerial(
                 prims,
                 0,
                 static_cast<int>(prims.size()),
                 1,
                 options.max_leaf_triangles,
+                ChooseSahSplit,
                 result.bvh,
                 result.errors
             );
             break;
         case BvhSplitMethod::LongestAxisMedian:
-            root = BuildRecursive(
+            root = BuildSubtreeSerial(
                 prims,
                 0,
                 static_cast<int>(prims.size()),
                 1,
                 options.max_leaf_triangles,
+                ChooseMedianSplit,
                 result.bvh,
                 result.errors
             );
