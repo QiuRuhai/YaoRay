@@ -883,8 +883,19 @@ bool CompileEnvironmentLight(
     const std::filesystem::path resolved = scene.source_root / fname->strings[0];
     TextureLoadResult load = LoadHdrTexture(resolved);
     if (!load.ok) {
-        diagnostics.push_back(Error(scene, "LightSource.infinite", load.error));
-        return false;
+        diagnostics.push_back(Warning(scene, "LightSource.infinite",
+            "HDR envmap load failed (" + load.error +
+            "); degrading to constant 1x1 white sky (L and scale params still apply)"));
+        // Synthesize a 1x1 white fallback texture so the downstream env
+        // distribution build still produces a valid sampler (uniform sky).
+        load.texture.kind = RenderTextureKind::Image;
+        load.texture.width = 1;
+        load.texture.height = 1;
+        load.texture.texels.clear();
+        load.texture.texels.push_back(Color4f{1.0f, 1.0f, 1.0f, 1.0f});
+        load.texture.color_space = TextureColorSpace::Linear;
+        load.ok = true;
+        // Fall through into the success path below.
     }
 
     const int texture_index = static_cast<int>(ir.textures.size());
