@@ -6,10 +6,14 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstddef>
 #include <filesystem>
+#include <fstream>
+#include <ios>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace yr {
 namespace {
@@ -132,7 +136,9 @@ Color4f SampleTextureBilinear4(const RenderTexture& texture, Vec2f uv) {
 }
 
 bool IsSupportedLdrExtension(std::string_view extension) {
-    return extension == ".png" || extension == ".jpg" || extension == ".jpeg";
+    // stb_image natively supports all of these via stbi_load.
+    return extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
+           extension == ".tga" || extension == ".bmp";
 }
 
 float DecodeLdrChannel(unsigned char value, TextureColorSpace color_space) {
@@ -171,7 +177,7 @@ TextureLoadResult LoadLdrTexture(const std::filesystem::path& path, TextureColor
         return TextureLoadResult{
             RenderTexture{},
             false,
-            "texture path must use a .png, .jpg, or .jpeg extension: " + path.generic_string()
+            "texture path must use a .png, .jpg, .jpeg, .tga, or .bmp extension: " + path.generic_string()
         };
     }
     if (!std::filesystem::exists(path)) {
@@ -226,12 +232,125 @@ TextureLoadResult LoadPngTexture(const std::filesystem::path& path, TextureColor
     return LoadLdrTexture(path, color_space);
 }
 
-TextureLoadResult LoadHdrTexture(const std::filesystem::path& path) {
-    if (LowerExtension(path) != ".hdr") {
+namespace {
+
+// PFM loader (Portable Float Map). Format:
+//   Line 1: "PF" (color, 3 channels) or "Pf" (greyscale, 1 channel).
+//   Line 2: "<width> <height>"
+//   Line 3: "<scale>" — negative = little-endian, positive = big-endian.
+//           |scale| is a multiplier (commonly 1.0).
+//   Raw float32 data, row-major bottom-up.
+TextureLoadResult LoadPfmTexture(const std::filesystem::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) {
         return TextureLoadResult{
             RenderTexture{},
             false,
-            "HDR environment path must use a .hdr extension: " + path.generic_string()
+            "PFM environment file not found or unreadable: " + path.generic_string()
+        };
+    }
+
+    std::string magic;
+    int width = 0;
+    int height = 0;
+    float scale = 0.0f;
+
+    file >> magic;
+    if (magic != "PF" && magic != "Pf") {
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "PFM file has unknown magic: " + path.generic_string()
+        };
+    }
+    const int channels = (magic == "PF") ? 3 : 1;
+
+    file >> width >> height >> scale;
+    if (width <= 0 || height <= 0 || !std::isfinite(scale) || scale == 0.0f) {
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "PFM file has invalid header (width/height/scale): " + path.generic_string()
+        };
+    }
+
+    // Consume the single whitespace separator after the scale value.
+    file.get();
+
+    const bool little_endian = (scale < 0.0f);
+    const float abs_scale = std::fabs(scale);
+
+    const std::size_t pixel_count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    std::vector<float> raw(pixel_count * static_cast<std::size_t>(channels));
+    file.read(reinterpret_cast<char*>(raw.data()),
+              static_cast<std::streamsize>(raw.size() * sizeof(float)));
+    if (!file) {
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "PFM file truncated or read failed: " + path.generic_string()
+        };
+    }
+
+    // Endianness swap if the file's encoding doesn't match the host (assumed little-endian).
+    // We only flip when the file is big-endian.
+    if (!little_endian) {
+        for (float& v : raw) {
+            unsigned char* b = reinterpret_cast<unsigned char*>(&v);
+            std::swap(b[0], b[3]);
+            std::swap(b[1], b[2]);
+        }
+    }
+
+    RenderTexture texture;
+    texture.width = width;
+    texture.height = height;
+    texture.filter = TextureFilter::Bilinear;
+    texture.wrap_s = TextureWrap::Repeat;
+    texture.wrap_t = TextureWrap::ClampToEdge;
+    texture.color_space = TextureColorSpace::Linear;
+    texture.texels.reserve(pixel_count);
+
+    // PFM data is stored bottom-up; flip rows so texel (0,0) is the top-left,
+    // matching the rest of the texture pipeline.
+    for (int y = 0; y < height; ++y) {
+        const int src_y = height - 1 - y;
+        for (int x = 0; x < width; ++x) {
+            const std::size_t src = (static_cast<std::size_t>(src_y) * static_cast<std::size_t>(width) + x)
+                                    * static_cast<std::size_t>(channels);
+            Color3f color;
+            if (channels == 3) {
+                color = Color3f{raw[src + 0] * abs_scale, raw[src + 1] * abs_scale, raw[src + 2] * abs_scale};
+            } else {
+                const float v = raw[src] * abs_scale;
+                color = Color3f{v, v, v};
+            }
+            if (!IsFiniteColor(color)) {
+                return TextureLoadResult{
+                    RenderTexture{},
+                    false,
+                    "PFM file contains non-finite texels: " + path.generic_string()
+                };
+            }
+            texture.texels.push_back(Color4f{color});
+        }
+    }
+
+    return TextureLoadResult{std::move(texture), true, {}};
+}
+
+} // namespace
+
+TextureLoadResult LoadHdrTexture(const std::filesystem::path& path) {
+    const std::string extension = LowerExtension(path);
+    if (extension == ".pfm") {
+        return LoadPfmTexture(path);
+    }
+    if (extension != ".hdr") {
+        return TextureLoadResult{
+            RenderTexture{},
+            false,
+            "HDR environment path must use a .hdr or .pfm extension: " + path.generic_string()
         };
     }
     if (!std::filesystem::exists(path)) {

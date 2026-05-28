@@ -210,9 +210,10 @@ bool CompileImagemapTexture(
     });
 
     TextureLoadResult load;
-    if (ext == ".hdr") {
+    if (ext == ".hdr" || ext == ".pfm") {
         load = LoadHdrTexture(resolved);
-    } else if (ext == ".png" || ext == ".jpg" || ext == ".jpeg") {
+    } else if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
+               ext == ".tga" || ext == ".bmp") {
         load = LoadLdrTexture(resolved, color_space);
     } else {
         diagnostics.push_back(Error(scene, "Texture." + name,
