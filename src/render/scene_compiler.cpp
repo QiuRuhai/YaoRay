@@ -559,6 +559,10 @@ bool CompileTriangleMeshShape(
     if (uv_param == nullptr) uv_param = FindParam(params, "st");
     bool has_uvs = (uv_param != nullptr && uv_param->floats.size() == vertex_count * 2);
 
+    // Tangents (PBRT v4 "normal S"). Per-vertex handedness defaults to +1.
+    const PbrtParam* s_param = FindParam(params, "S");
+    bool has_tangents = (s_param != nullptr && s_param->floats.size() == vertex_count * 3);
+
     // Build vertices
     for (std::size_t vi = 0; vi < vertex_count; ++vi) {
         RenderVertex v;
@@ -570,6 +574,11 @@ bool CompileTriangleMeshShape(
         }
         if (has_uvs) {
             v.uv = Vec2f{uv_param->floats[vi * 2], uv_param->floats[vi * 2 + 1]};
+        }
+        if (has_tangents) {
+            Vec3f tangent{s_param->floats[vi * 3], s_param->floats[vi * 3 + 1], s_param->floats[vi * 3 + 2]};
+            v.tangent = TransformVector(record.object_to_world, tangent);
+            v.tangent_handedness = 1.0f;
         }
         ir.vertices.push_back(v);
     }
@@ -586,6 +595,7 @@ bool CompileTriangleMeshShape(
     prim.material_index = material_index;
     prim.has_normals = has_normals;
     prim.has_uvs = has_uvs;
+    prim.has_tangents = has_tangents;
     ir.primitives.push_back(prim);
 
     // Handle area light emission
