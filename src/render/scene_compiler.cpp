@@ -746,10 +746,12 @@ bool CompilePlyMeshShape(
         diagnostics.push_back(Warning(scene, "Shape.filename", w));
     }
     for (const std::string& e : load.errors) {
-        diagnostics.push_back(Error(scene, "Shape.filename", e));
+        diagnostics.push_back(Warning(scene, "Shape.filename",
+            "PLY load failed (" + e + "); skipping shape"));
     }
     if (!load.resource.has_value()) {
-        diagnostics.push_back(Error(scene, "Shape.filename", "PLY loader returned no resource"));
+        diagnostics.push_back(Warning(scene, "Shape.filename",
+            "PLY loader returned no resource; skipping shape"));
         return false;
     }
 
