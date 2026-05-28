@@ -556,8 +556,9 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
         const RenderMaterial& material = surface_hit.sample.material;
         const Vec3f normal = surface_hit.sample.shading_normal;
 
-        // Emissive contribution. For sphere hits, sphere emission is out of M1 Slice 1 scope,
-        // so we guard LocateTriangle with triangle_index >= 0.
+        // Emissive contribution. Sphere area lights are not yet supported,
+        // so we guard LocateTriangle behind triangle_index >= 0 and skip the
+        // MIS branch for sphere hits (their emission is treated as zero).
         if (!IsNearBlack(material.emission) && surface_hit.geometry_hit.triangle_index >= 0) {
             const TriangleRef hit_tri = LocateTriangle(scene, surface_hit.geometry_hit.triangle_index);
             const Vec3f light_geo_normal = GeometricNormal(scene, hit_tri);
