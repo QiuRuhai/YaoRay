@@ -43,30 +43,39 @@ filename"` directive — typically `dining-room.png` in the scene directory.
 - The BVH builds at depth 18; rays trace at ~5 million per second on
   11 CPU threads at the smoke resolutions used during development.
 
-A reference preview render (rendered with a custom interior camera
-position to bypass the camera-convention quirk noted below) lives at
-`docs/architecture/dining-room.png`.
+A reference render with the M1 pipeline lives at
+`docs/architecture/dining-room.png` (480x270 / 16 spp / max depth 8).
+It uses the camera workaround described below.
 
-## Known gap: camera transform convention (M2 follow-up)
+## Known gap: camera Y sign in the Tungsten-exported Transform (M2 follow-up)
 
-The original `scene-v4.pbrt` opens with a 4×4 `Transform` directive that
-encodes the camera's pose. Our M1 parser treats this matrix
-consistently with how `LookAt` directives are constructed (a
-camera-to-world convention with the camera origin in the last column),
-but the dining-room asset's `Transform` matrix appears to follow a
-different convention — when interpreted as we do, it places the camera
-outside the room rather than inside it. As a result, rendering the
-*unmodified* `scene-v4.pbrt` produces an image of the room's exterior
-shell (a dark wedge over a bright sky), not the dining room interior.
+The original `scene-v4.pbrt` opens with a 4×4 `Transform` directive
+whose translation column is `(0.460, -2.14, 9.88)`. The scene's
+geometry has its floor at Y ≈ `-1.52` and ceiling at Y ≈ `+7.90`
+(verified by sampling vertex positions across all 52 PLY meshes). With
+Y = `-2.14` the camera sits *below* the floor, looking up at the
+underside of the room from outside. Rendering the unmodified scene
+produces a black wedge (floor underside) over a bright HDRI sky.
 
-To verify the underlying pipeline, the operator can either:
+Flipping the camera Y sign (Y = `+2.14`) places the camera at a
+sensible eye height inside the room and reproduces the Tungsten
+reference (`TungstenRender.png`) composition: table with chairs, two
+pendant lamps, a framed picture on the left wall, and vertical blinds
+covering the window on the right. This is what
+`docs/architecture/dining-room.png` shows.
 
-1. Replace the leading `Transform [...]` line with a manual `LookAt`
-   pointing at the room contents (e.g. `LookAt 0 0 0   0 0 -1   0 1 0`
-   places the camera at the origin looking down -Z, which lands inside
-   the room).
-2. Wait for the M2 follow-up that nails down the PBRT v4 camera-matrix
-   convention against pbrt-v4's reference behavior.
+The discrepancy is consistent with a Y-axis sign convention difference
+between Tungsten's matrix exporter and PBRT v4. Resolving "which side
+is correct" requires running the unmodified scene through pbrt-v4
+itself for comparison; that follow-up is tracked as M2 work.
 
-The render reproduced in `docs/architecture/dining-room.png` uses the
-manual-LookAt workaround.
+To reproduce the M1 reference render, after downloading the asset,
+copy the scene and replace its leading `Transform [...]` line with:
+
+```pbrt
+LookAt 0.46 2.14 9.88   0 1 0   0 1 0
+```
+
+(Same XZ position, Y sign flipped, looking at a point one unit above
+the origin with +Y as up.) The pipeline then handles the resulting
+269K-triangle / 15-material / HDRI-lit scene cleanly.
