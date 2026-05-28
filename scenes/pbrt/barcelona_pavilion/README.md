@@ -39,11 +39,12 @@ documented Warnings (see *Documented degradations* below).
 ./build/Release/yaoray render external/assets/pbrt/barcelona-pavilion/pavilion-day.pbrt --backend cpu
 ```
 
-The output PNG lands at the path declared in the scene's `Film "string
+The output image lands at the path declared in the scene's `Film "string
 filename"` directive. The bundled scene targets a 1600×850 EXR at
-256 spp — to reproduce this repo's reference image at 1280×720 / 64 spp,
-temporarily edit the scene's `Film` and `Sampler` blocks before
-rendering, then revert.
+256 spp — YaoRay now writes that EXR natively (raw float RGB, no
+tone-mapping). To reproduce this repo's reference image at 1280×720 /
+64 spp, temporarily edit the scene's `Film` and `Sampler` blocks
+before rendering, then revert.
 
 ## What works in M2
 
@@ -70,6 +71,10 @@ rendering, then revert.
   scales.
 - The `Sampler "halton"` directive degrades to `independent` per the
   M1 anticipated policy.
+- `LightSource "infinite" "string filename" "sky.exr"` loads natively
+  via vendored tinyexr; the env distribution gets the real HDR sky
+  with its directional gradient. The matching `Film "string filename"
+  "pavilion-day.exr"` also writes natively as raw float RGB.
 - The SAH binned + parallel BVH (M2 Slices 1 & 2) builds 87,263 nodes
   over the Pavilion-only geometry in 0.07s (`Prepare seconds`). Render:
   1280×720 / 64 spp completes in ~38s on the dev sandbox (Windows,
@@ -83,9 +88,8 @@ polished travertine marble walls and floor, the chrome cross-piece
 column, the reflective water pool with stone tile floor visible
 through the water, Barcelona chairs in the interior, and the
 silhouette of Georg Kolbe's *Alba* statue visible through the glass
-walls (the pool reflects the statue and the building edges). The sky
-is uniform white (see below); the surrounding park trees are absent
-(landscape/ subtree not bundled).
+walls (the pool reflects the statue and the building edges). The
+surrounding park trees are absent (landscape/ subtree not bundled).
 
 ## Documented degradations (Pavilion-specific)
 
@@ -104,15 +108,6 @@ None of them block rendering; they affect specific visual aspects.
   `../landscape/geometry/*.ply`. Missing meshes produce Warnings and
   contribute no geometry (M2 Slice 3 Patch 2b). *Render effect*: trees
   and shrubs are absent from the scene; the building renders normally.
-- **`sky.exr` HDR envmap** (1 occurrence): Pavilion's
-  `LightSource "infinite"` uses OpenEXR. YaoRay's M2 HDR support covers
-  `.hdr` and `.pfm`; `.exr` is on the M5+ exploratory list. The patch
-  substitutes a 1×1 white texture so the environment importance sampler
-  still runs uniformly (M2 Slice 3 Patch 2c); the scene's `L` and
-  `scale` parameters apply normally. *Render effect*: the sky lacks
-  `sky.exr`'s directional gradient (no warm/cool sun bias), but indirect
-  illumination from the uniform white sky still drives the marble +
-  chrome highlights and the water reflection.
 
 ## Camera convention
 
