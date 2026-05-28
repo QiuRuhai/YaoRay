@@ -416,6 +416,14 @@ BvhBuildResult BuildBvh(const RenderSceneIR& scene, const BvhBuildOptions& optio
         result.errors.push_back("BVH max_leaf_triangles must be at least 1");
         return result;
     }
+    if (options.thread_count < 0) {
+        result.errors.push_back("BVH thread_count must be >= 0");
+        return result;
+    }
+    if (options.parallel_min_subtree_size < 1) {
+        result.errors.push_back("BVH parallel_min_subtree_size must be >= 1");
+        return result;
+    }
 
     // Build flat triangle list from table geometry
     std::vector<BvhPrimRef> prims;
