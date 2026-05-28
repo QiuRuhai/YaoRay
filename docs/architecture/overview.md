@@ -88,6 +88,3 @@ repo links to the download workflow rather than redistributing.
   but degrade to `independent` at compile time.
 - True black-border wrap (degrades to clamp).
 - Auto-tangent generation when trianglemesh has `uv` but no `S`.
-- Camera-matrix interop with PBRT-v4 reference scenes that use
-  non-`LookAt` `Transform` directives: a small camera-convention
-  follow-up tracked against `scenes/pbrt/dining_room/README.md`.

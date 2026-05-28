@@ -43,39 +43,24 @@ filename"` directive — typically `dining-room.png` in the scene directory.
 - The BVH builds at depth 18; rays trace at ~5 million per second on
   11 CPU threads at the smoke resolutions used during development.
 
-A reference render with the M1 pipeline lives at
-`docs/architecture/dining-room.png` (480x270 / 16 spp / max depth 8).
-It uses the camera workaround described below.
+A reference render at 1280×720 / 64 spp / max depth 65 lives at
+`docs/architecture/dining-room.png`. It is produced by the unmodified
+`scene-v4.pbrt` straight from Bitterli's download — no workarounds.
+Composition matches the bundled `TungstenRender.png` reference:
+dining table with chairs, two pendant lamps, framed artwork on the
+back wall, and vertical blinds covering the window on the right.
 
-## Known gap: camera Y sign in the Tungsten-exported Transform (M2 follow-up)
+## Camera convention
 
-The original `scene-v4.pbrt` opens with a 4×4 `Transform` directive
-whose translation column is `(0.460, -2.14, 9.88)`. The scene's
-geometry has its floor at Y ≈ `-1.52` and ceiling at Y ≈ `+7.90`
-(verified by sampling vertex positions across all 52 PLY meshes). With
-Y = `-2.14` the camera sits *below* the floor, looking up at the
-underside of the room from outside. Rendering the unmodified scene
-produces a black wedge (floor underside) over a bright HDRI sky.
+PBRT v4 stores the CTM at the camera point as the **world-to-camera**
+matrix. YaoRay's PBRT parser now matches that convention (see
+`Inverse()` in `src/core/transform.cpp` and the `Inverse(camera_transform)`
+call in `CompileCamera`). Both `LookAt eye target up` directives and
+explicit `Transform [...]` directives produce the same CTM convention,
+so PBRT v4 scenes exported by Tungsten, the official pbrt-v4
+converter, or any other tool that follows the spec work out of the
+box.
 
-Flipping the camera Y sign (Y = `+2.14`) places the camera at a
-sensible eye height inside the room and reproduces the Tungsten
-reference (`TungstenRender.png`) composition: table with chairs, two
-pendant lamps, a framed picture on the left wall, and vertical blinds
-covering the window on the right. This is what
-`docs/architecture/dining-room.png` shows.
-
-The discrepancy is consistent with a Y-axis sign convention difference
-between Tungsten's matrix exporter and PBRT v4. Resolving "which side
-is correct" requires running the unmodified scene through pbrt-v4
-itself for comparison; that follow-up is tracked as M2 work.
-
-To reproduce the M1 reference render, after downloading the asset,
-copy the scene and replace its leading `Transform [...]` line with:
-
-```pbrt
-LookAt 0.46 2.14 9.88   0 1 0   0 1 0
-```
-
-(Same XZ position, Y sign flipped, looking at a point one unit above
-the origin with +Y as up.) The pipeline then handles the resulting
-269K-triangle / 15-material / HDRI-lit scene cleanly.
+(Earlier M0/M1 development used the opposite convention — directly
+treating the CTM as camera-to-world. The dining-room scene exposed
+this and motivated the fix.)

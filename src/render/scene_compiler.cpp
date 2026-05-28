@@ -89,12 +89,24 @@ void CompileCamera(const PbrtScene& scene, RenderSceneIR& ir) {
     float fov = FloatParam(FindParam(scene.camera.params, "fov"), 45.0f);
     ir.camera.fov_y_radians = DegreesToRadians(fov);
 
-    // Extract camera basis from camera_transform
-    const Mat4f& ct = scene.camera_transform;
-    ir.camera.origin = Point3f{ct.m[12], ct.m[13], ct.m[14]};
-    ir.camera.right = Normalize(Vec3f{ct.m[0], ct.m[1], ct.m[2]});
-    ir.camera.up = Normalize(Vec3f{ct.m[4], ct.m[5], ct.m[6]});
-    ir.camera.forward = Normalize(Vec3f{ct.m[8], ct.m[9], ct.m[10]});
+    // PBRT v4 stores the CTM at the camera point as world-to-camera (matching
+    // pbrt-v4's LookAt() helper, which returns Transform(Inverse(worldFromCamera),
+    // worldFromCamera) and thus puts W2C in the forward matrix). To recover
+    // the camera basis in world space we invert to get worldFromCamera, then
+    // read columns 0/1/2 as right/up/forward and column 3 as the camera origin.
+    const Mat4f world_from_camera = Inverse(scene.camera_transform);
+    ir.camera.origin = Point3f{
+        world_from_camera.m[12], world_from_camera.m[13], world_from_camera.m[14]
+    };
+    ir.camera.right = Normalize(Vec3f{
+        world_from_camera.m[0], world_from_camera.m[1], world_from_camera.m[2]
+    });
+    ir.camera.up = Normalize(Vec3f{
+        world_from_camera.m[4], world_from_camera.m[5], world_from_camera.m[6]
+    });
+    ir.camera.forward = Normalize(Vec3f{
+        world_from_camera.m[8], world_from_camera.m[9], world_from_camera.m[10]
+    });
 }
 
 void CompileIntegrator(const PbrtScene& scene, RenderSceneIR& ir) {

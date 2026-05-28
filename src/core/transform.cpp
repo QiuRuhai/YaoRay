@@ -116,6 +116,58 @@ Mat4f RotationAxisMatrix(float angle_degrees, Vec3f axis) {
     return result;
 }
 
+Mat4f Inverse(Mat4f m) {
+    // Full 4x4 inverse via the adjugate formula. Returns identity on singular
+    // input. Works for general affine transforms (including non-orthonormal
+    // upper-left 3x3), not just rigid-body ones.
+    const float* a = m.m.data();
+    Mat4f result;
+    float* o = result.m.data();
+
+    o[0]  =  a[5]  * a[10] * a[15] - a[5]  * a[11] * a[14] - a[9]  * a[6]  * a[15] +
+             a[9]  * a[7]  * a[14] + a[13] * a[6]  * a[11] - a[13] * a[7]  * a[10];
+    o[4]  = -a[4]  * a[10] * a[15] + a[4]  * a[11] * a[14] + a[8]  * a[6]  * a[15] -
+             a[8]  * a[7]  * a[14] - a[12] * a[6]  * a[11] + a[12] * a[7]  * a[10];
+    o[8]  =  a[4]  * a[9]  * a[15] - a[4]  * a[11] * a[13] - a[8]  * a[5]  * a[15] +
+             a[8]  * a[7]  * a[13] + a[12] * a[5]  * a[11] - a[12] * a[7]  * a[9];
+    o[12] = -a[4]  * a[9]  * a[14] + a[4]  * a[10] * a[13] + a[8]  * a[5]  * a[14] -
+             a[8]  * a[6]  * a[13] - a[12] * a[5]  * a[10] + a[12] * a[6]  * a[9];
+    o[1]  = -a[1]  * a[10] * a[15] + a[1]  * a[11] * a[14] + a[9]  * a[2]  * a[15] -
+             a[9]  * a[3]  * a[14] - a[13] * a[2]  * a[11] + a[13] * a[3]  * a[10];
+    o[5]  =  a[0]  * a[10] * a[15] - a[0]  * a[11] * a[14] - a[8]  * a[2]  * a[15] +
+             a[8]  * a[3]  * a[14] + a[12] * a[2]  * a[11] - a[12] * a[3]  * a[10];
+    o[9]  = -a[0]  * a[9]  * a[15] + a[0]  * a[11] * a[13] + a[8]  * a[1]  * a[15] -
+             a[8]  * a[3]  * a[13] - a[12] * a[1]  * a[11] + a[12] * a[3]  * a[9];
+    o[13] =  a[0]  * a[9]  * a[14] - a[0]  * a[10] * a[13] - a[8]  * a[1]  * a[14] +
+             a[8]  * a[2]  * a[13] + a[12] * a[1]  * a[10] - a[12] * a[2]  * a[9];
+    o[2]  =  a[1]  * a[6]  * a[15] - a[1]  * a[7]  * a[14] - a[5]  * a[2]  * a[15] +
+             a[5]  * a[3]  * a[14] + a[13] * a[2]  * a[7]  - a[13] * a[3]  * a[6];
+    o[6]  = -a[0]  * a[6]  * a[15] + a[0]  * a[7]  * a[14] + a[4]  * a[2]  * a[15] -
+             a[4]  * a[3]  * a[14] - a[12] * a[2]  * a[7]  + a[12] * a[3]  * a[6];
+    o[10] =  a[0]  * a[5]  * a[15] - a[0]  * a[7]  * a[13] - a[4]  * a[1]  * a[15] +
+             a[4]  * a[3]  * a[13] + a[12] * a[1]  * a[7]  - a[12] * a[3]  * a[5];
+    o[14] = -a[0]  * a[5]  * a[14] + a[0]  * a[6]  * a[13] + a[4]  * a[1]  * a[14] -
+             a[4]  * a[2]  * a[13] - a[12] * a[1]  * a[6]  + a[12] * a[2]  * a[5];
+    o[3]  = -a[1]  * a[6]  * a[11] + a[1]  * a[7]  * a[10] + a[5]  * a[2]  * a[11] -
+             a[5]  * a[3]  * a[10] - a[9]  * a[2]  * a[7]  + a[9]  * a[3]  * a[6];
+    o[7]  =  a[0]  * a[6]  * a[11] - a[0]  * a[7]  * a[10] - a[4]  * a[2]  * a[11] +
+             a[4]  * a[3]  * a[10] + a[8]  * a[2]  * a[7]  - a[8]  * a[3]  * a[6];
+    o[11] = -a[0]  * a[5]  * a[11] + a[0]  * a[7]  * a[9]  + a[4]  * a[1]  * a[11] -
+             a[4]  * a[3]  * a[9]  - a[8]  * a[1]  * a[7]  + a[8]  * a[3]  * a[5];
+    o[15] =  a[0]  * a[5]  * a[10] - a[0]  * a[6]  * a[9]  - a[4]  * a[1]  * a[10] +
+             a[4]  * a[2]  * a[9]  + a[8]  * a[1]  * a[6]  - a[8]  * a[2]  * a[5];
+
+    const float det = a[0] * o[0] + a[1] * o[4] + a[2] * o[8] + a[3] * o[12];
+    if (std::fabs(det) <= 1.0e-12f) {
+        return Mat4f{};
+    }
+    const float inv_det = 1.0f / det;
+    for (int i = 0; i < 16; ++i) {
+        o[i] *= inv_det;
+    }
+    return result;
+}
+
 Mat4f LookAtMatrix(Point3f eye, Point3f target, Vec3f up) {
     Vec3f forward = Normalize(target - eye);
     if (LengthSquared(forward) == 0.0f) {
@@ -127,24 +179,31 @@ Mat4f LookAtMatrix(Point3f eye, Point3f target, Vec3f up) {
     }
     Vec3f true_up = Cross(right, forward);
 
-    // PBRT uses camera-to-world (not world-to-camera)
-    Mat4f result;
-    result.m[0] = right.x;
-    result.m[1] = right.y;
-    result.m[2] = right.z;
+    // First build worldFromCamera (C2W) with the eye in the translation
+    // column, mirroring PBRT v4's `LookAt()` helper.
+    Mat4f world_from_camera;
+    world_from_camera.m[0] = right.x;
+    world_from_camera.m[1] = right.y;
+    world_from_camera.m[2] = right.z;
 
-    result.m[4] = true_up.x;
-    result.m[5] = true_up.y;
-    result.m[6] = true_up.z;
+    world_from_camera.m[4] = true_up.x;
+    world_from_camera.m[5] = true_up.y;
+    world_from_camera.m[6] = true_up.z;
 
-    result.m[8] = forward.x;
-    result.m[9] = forward.y;
-    result.m[10] = forward.z;
+    world_from_camera.m[8] = forward.x;
+    world_from_camera.m[9] = forward.y;
+    world_from_camera.m[10] = forward.z;
 
-    result.m[12] = eye.x;
-    result.m[13] = eye.y;
-    result.m[14] = eye.z;
-    return result;
+    world_from_camera.m[12] = eye.x;
+    world_from_camera.m[13] = eye.y;
+    world_from_camera.m[14] = eye.z;
+
+    // PBRT v4's `LookAt()` returns a Transform whose forward matrix is the
+    // INVERSE of worldFromCamera — i.e. world-to-camera. The CTM stored
+    // after a LookAt or Transform directive is therefore W2C. This
+    // convention is what the dining-room (and other Tungsten-converted)
+    // scenes expect.
+    return Inverse(world_from_camera);
 }
 
 } // namespace yr

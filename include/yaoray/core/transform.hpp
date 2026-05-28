@@ -15,6 +15,7 @@ struct Mat4f {
 };
 
 Mat4f Multiply(Mat4f a, Mat4f b);
+Mat4f Inverse(Mat4f m);
 Point3f TransformPoint(Mat4f transform, Point3f point);
 Vec3f TransformVector(Mat4f transform, Vec3f value);
 Vec3f TransformNormal(Mat4f transform, Vec3f normal);
