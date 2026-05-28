@@ -129,4 +129,23 @@ AnalyticLightSample SampleAnalyticPoint(const AnalyticLight& light, Point3f shad
     return s;
 }
 
+AnalyticLightSample SampleAnalyticDistant(const AnalyticLight& light, Point3f shading_point) {
+    (void)shading_point;  // Distant lights are direction-only; position is irrelevant.
+    AnalyticLightSample s;
+    // The compiler stores `direction` as the propagation direction of light (from
+    // the source toward the scene). At any shading point, wi points back at the
+    // light source, i.e. opposite of the propagation direction.
+    Vec3f wi{-light.direction.x, -light.direction.y, -light.direction.z};
+    if (LengthSquared(wi) == 0.0f) {
+        return s;
+    }
+    s.wi = Normalize(wi);
+    s.distance = 1.0e6f;             // Effectively infinite for shadow-ray t_max.
+    s.radiance = light.intensity;   // For a Dirac-in-direction delta, this is the
+                                     // radiance directly.
+    s.is_delta = true;
+    s.valid = true;
+    return s;
+}
+
 } // namespace yr

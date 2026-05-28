@@ -470,8 +470,10 @@ Color3f EstimateDirectLight(
         AnalyticLightSample sample;
         if (light.kind == AnalyticLightKind::Point) {
             sample = SampleAnalyticPoint(light, hit_point);
+        } else if (light.kind == AnalyticLightKind::Distant) {
+            sample = SampleAnalyticDistant(light, hit_point);
         } else {
-            // Slice 1 only handles Point. Distant/Spot land in later slices.
+            // Spot lands in the next task.
             continue;
         }
         if (!sample.valid || IsNearBlack(sample.radiance)) {

@@ -239,3 +239,43 @@ YR_TEST(cpu_path_tracer_lights_a_sphere_with_a_point_light) {
     YR_EXPECT_TRUE(center.y > 0.0f);
     YR_EXPECT_TRUE(center.z > 0.0f);
 }
+
+YR_TEST(cpu_path_tracer_lights_a_sphere_with_a_distant_light) {
+    yr::RenderSceneIR scene;
+    scene.width = 32;
+    scene.height = 32;
+    scene.spp = 8;
+    scene.max_depth = 2;
+    scene.camera.origin = yr::Point3f{0.0f, 0.0f, 3.0f};
+    scene.camera.forward = yr::Vec3f{0.0f, 0.0f, -1.0f};
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Vec3f{0.0f, 1.0f, 0.0f};
+    scene.camera.fov_y_radians = 1.04719758f;
+
+    yr::RenderMaterial diffuse;
+    diffuse.kind = yr::RenderMaterialKind::Diffuse;
+    diffuse.reflectance.value = yr::Color3f{0.8f, 0.8f, 0.8f};
+    scene.materials.push_back(diffuse);
+
+    yr::RenderSphere sphere;
+    sphere.center = yr::Point3f{0.0f, 0.0f, 0.0f};
+    sphere.radius = 0.5f;
+    sphere.material_index = 0;
+    scene.spheres.push_back(sphere);
+
+    // Strong distant light from above so the top of the sphere is well-lit.
+    yr::AnalyticLight light;
+    light.kind = yr::AnalyticLightKind::Distant;
+    light.direction = yr::Vec3f{0.0f, -1.0f, 0.0f};  // propagating down
+    light.intensity = yr::Color3f{5.0f, 5.0f, 5.0f};
+    scene.analytic_lights.push_back(light);
+
+    const yr::CpuPathTraceResult result = RunPathTrace(std::move(scene));
+    YR_EXPECT_TRUE(result.ok);
+    YR_EXPECT_TRUE(result.stats.hits > 0);
+    // The top of the sphere (pixel near (16, 13)) should be brighter than the
+    // bottom (pixel near (16, 19)) under a downward-shining distant light.
+    const yr::Color3f top = result.film.LinearPixel(16, 13);
+    const yr::Color3f bottom = result.film.LinearPixel(16, 19);
+    YR_EXPECT_TRUE(top.x > bottom.x);
+}

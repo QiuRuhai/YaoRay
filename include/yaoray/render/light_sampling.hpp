@@ -43,5 +43,6 @@ struct AnalyticLightSample {
 };
 
 AnalyticLightSample SampleAnalyticPoint(const AnalyticLight& light, Point3f shading_point);
+AnalyticLightSample SampleAnalyticDistant(const AnalyticLight& light, Point3f shading_point);
 
 } // namespace yr

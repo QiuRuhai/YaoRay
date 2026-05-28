@@ -898,10 +898,42 @@ void CompileAnalyticLights(const PbrtScene& scene, RenderSceneIR& ir, std::vecto
             ir.analytic_lights.push_back(al);
         } else if (record.light.type == "infinite") {
             CompileEnvironmentLight(record, scene, ir, diagnostics);
-        } else if (record.light.type == "distant" ||
-                   record.light.type == "spot") {
+        } else if (record.light.type == "distant") {
+            AnalyticLight al;
+            al.kind = AnalyticLightKind::Distant;
+            // PBRT v4: direction = to - from, then transformed by light_to_world's
+            // linear part (translation is irrelevant for a directional light).
+            const Point3f from_local = Point3FromParam(FindParam(record.light.params, "from"),
+                                                       Point3f{0.0f, 0.0f, 0.0f});
+            const Point3f to_local = Point3FromParam(FindParam(record.light.params, "to"),
+                                                     Point3f{0.0f, 0.0f, 1.0f});
+            Vec3f dir_local{to_local.x - from_local.x, to_local.y - from_local.y, to_local.z - from_local.z};
+            if (LengthSquared(dir_local) == 0.0f) {
+                diagnostics.push_back(Warning(scene, "LightSource.distant",
+                    "distant light has zero direction; defaulting to (0,-1,0)"));
+                dir_local = Vec3f{0.0f, -1.0f, 0.0f};
+            }
+            const Vec3f dir_world = TransformVector(record.light_to_world, dir_local);
+            al.direction = Normalize(dir_world);
+
+            const Color3f L = RgbParam(FindParam(record.light.params, "L"), Color3f{1.0f, 1.0f, 1.0f});
+            Color3f scale{1.0f, 1.0f, 1.0f};
+            const PbrtParam* scale_param = FindParam(record.light.params, "scale");
+            if (scale_param != nullptr) {
+                if (scale_param->floats.size() >= 3) {
+                    scale = Color3f{scale_param->floats[0], scale_param->floats[1], scale_param->floats[2]};
+                } else if (!scale_param->floats.empty()) {
+                    const float s = scale_param->floats[0];
+                    scale = Color3f{s, s, s};
+                }
+            }
+            al.intensity = Color3f{L.x * scale.x, L.y * scale.y, L.z * scale.z};
+            al.position = Point3f{};
+            al.cone_angle = 0.0f;
+            ir.analytic_lights.push_back(al);
+        } else if (record.light.type == "spot") {
             diagnostics.push_back(Warning(scene, "LightSource",
-                "LightSource type '" + record.light.type + "' is not yet supported in M1 Slice 2 and was ignored"));
+                "LightSource type 'spot' is not yet supported in M1 Slice 3 and was ignored"));
         } else {
             diagnostics.push_back(Warning(scene, "LightSource",
                 "unsupported LightSource type: " + record.light.type));
