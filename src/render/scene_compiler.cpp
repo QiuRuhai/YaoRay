@@ -932,8 +932,45 @@ void CompileAnalyticLights(const PbrtScene& scene, RenderSceneIR& ir, std::vecto
             al.cone_angle = 0.0f;
             ir.analytic_lights.push_back(al);
         } else if (record.light.type == "spot") {
-            diagnostics.push_back(Warning(scene, "LightSource",
-                "LightSource type 'spot' is not yet supported in M1 Slice 3 and was ignored"));
+            AnalyticLight al;
+            al.kind = AnalyticLightKind::Spot;
+
+            const Point3f from_local = Point3FromParam(FindParam(record.light.params, "from"),
+                                                       Point3f{0.0f, 0.0f, 0.0f});
+            const Point3f to_local = Point3FromParam(FindParam(record.light.params, "to"),
+                                                     Point3f{0.0f, 0.0f, 1.0f});
+            al.position = TransformPoint(record.light_to_world, from_local);
+
+            Vec3f dir_local{to_local.x - from_local.x, to_local.y - from_local.y, to_local.z - from_local.z};
+            if (LengthSquared(dir_local) == 0.0f) {
+                diagnostics.push_back(Warning(scene, "LightSource.spot",
+                    "spot light has zero direction; defaulting to (0,0,1)"));
+                dir_local = Vec3f{0.0f, 0.0f, 1.0f};
+            }
+            const Vec3f dir_world = TransformVector(record.light_to_world, dir_local);
+            al.direction = Normalize(dir_world);
+
+            const Color3f I = RgbParam(FindParam(record.light.params, "I"), Color3f{1.0f, 1.0f, 1.0f});
+            Color3f scale{1.0f, 1.0f, 1.0f};
+            const PbrtParam* scale_param = FindParam(record.light.params, "scale");
+            if (scale_param != nullptr) {
+                if (scale_param->floats.size() >= 3) {
+                    scale = Color3f{scale_param->floats[0], scale_param->floats[1], scale_param->floats[2]};
+                } else if (!scale_param->floats.empty()) {
+                    const float s = scale_param->floats[0];
+                    scale = Color3f{s, s, s};
+                }
+            }
+            al.intensity = Color3f{I.x * scale.x, I.y * scale.y, I.z * scale.z};
+
+            const float cone_deg = FloatParam(FindParam(record.light.params, "coneangle"), 30.0f);
+            const float delta_deg = FloatParam(FindParam(record.light.params, "conedeltaangle"), 5.0f);
+            const float outer_rad = cone_deg * Pi / 180.0f;
+            const float inner_rad = std::max(0.0f, (cone_deg - delta_deg)) * Pi / 180.0f;
+            al.cone_angle = std::cos(outer_rad);
+            al.cone_cos_inner = std::cos(inner_rad);
+
+            ir.analytic_lights.push_back(al);
         } else {
             diagnostics.push_back(Warning(scene, "LightSource",
                 "unsupported LightSource type: " + record.light.type));

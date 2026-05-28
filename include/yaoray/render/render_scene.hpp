@@ -156,7 +156,10 @@ struct AnalyticLight {
     Point3f position;
     Vec3f direction;
     Color3f intensity;
-    float cone_angle = 0.0f;
+    // For Spot lights: store the cosines of the inner and outer cone half-angles.
+    // `cone_angle` stores cos(outer_half_angle); `cone_cos_inner` stores cos(inner).
+    float cone_angle = 0.0f;        // = cos(coneangle_radians) for spot
+    float cone_cos_inner = 0.0f;    // = cos((coneangle - conedeltaangle)_radians) for spot
 };
 
 // --- Film settings ---

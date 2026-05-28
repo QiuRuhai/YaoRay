@@ -1,5 +1,6 @@
 #include "yr_test.hpp"
 
+#include <cmath>
 #include <cstdint>
 
 #include <yaoray/pbrt/pbrt_scene.hpp>
@@ -192,4 +193,52 @@ YR_TEST(scene_compiler_compiles_lightsource_distant) {
     YR_EXPECT_NEAR(al.intensity.x, 2.5f, 1.0e-5);
     YR_EXPECT_NEAR(al.intensity.y, 2.5f, 1.0e-5);
     YR_EXPECT_NEAR(al.intensity.z, 2.5f, 1.0e-5);
+}
+
+YR_TEST(scene_compiler_compiles_lightsource_spot) {
+    yr::PbrtScene pbrt;
+    pbrt.source_path = "test.pbrt";
+    pbrt.source_root = ".";
+    pbrt.film.type = "rgb";
+    pbrt.film.params.push_back(yr::PbrtParam{"integer", "xresolution", {}, {16}, {}, {}});
+    pbrt.film.params.push_back(yr::PbrtParam{"integer", "yresolution", {}, {16}, {}, {}});
+    pbrt.camera.type = "perspective";
+    pbrt.camera.params.push_back(yr::PbrtParam{"float", "fov", {45.0f}, {}, {}, {}});
+    pbrt.camera_transform = yr::Mat4f{};
+    pbrt.integrator.type = "path";
+    pbrt.sampler.type = "independent";
+
+    yr::PbrtLightRecord lr;
+    lr.light.type = "spot";
+    lr.light.params.push_back(yr::PbrtParam{"point3", "from", {0.0f, 5.0f, 0.0f}, {}, {}, {}});
+    lr.light.params.push_back(yr::PbrtParam{"point3", "to",   {0.0f, 0.0f, 0.0f}, {}, {}, {}});
+    lr.light.params.push_back(yr::PbrtParam{"rgb", "I", {10.0f, 10.0f, 10.0f}, {}, {}, {}});
+    lr.light.params.push_back(yr::PbrtParam{"float", "coneangle", {30.0f}, {}, {}, {}});
+    lr.light.params.push_back(yr::PbrtParam{"float", "conedeltaangle", {5.0f}, {}, {}, {}});
+    lr.light_to_world = yr::Mat4f{};
+    pbrt.lights.push_back(lr);
+
+    yr::PbrtShapeRecord shape;
+    shape.shape.type = "sphere";
+    shape.shape.params.push_back(yr::PbrtParam{"float", "radius", {0.5f}, {}, {}, {}});
+    shape.object_to_world = yr::Mat4f{};
+    pbrt.shapes.push_back(shape);
+
+    const yr::SceneCompileResult result = yr::CompilePbrtScene(pbrt);
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene->analytic_lights.size(), std::size_t{1});
+
+    const yr::AnalyticLight& al = result.scene->analytic_lights[0];
+    YR_EXPECT_TRUE(al.kind == yr::AnalyticLightKind::Spot);
+    // position = from = (0, 5, 0)
+    YR_EXPECT_NEAR(al.position.x, 0.0f, 1.0e-5);
+    YR_EXPECT_NEAR(al.position.y, 5.0f, 1.0e-5);
+    YR_EXPECT_NEAR(al.position.z, 0.0f, 1.0e-5);
+    // direction = normalize(to - from) = (0, -1, 0)
+    YR_EXPECT_NEAR(al.direction.x, 0.0f, 1.0e-5);
+    YR_EXPECT_NEAR(al.direction.y, -1.0f, 1.0e-5);
+    YR_EXPECT_NEAR(al.direction.z, 0.0f, 1.0e-5);
+    // cone_angle = cos(30°), cone_cos_inner = cos(25°).
+    YR_EXPECT_NEAR(al.cone_angle, std::cos(0.5236f), 1.0e-4);
+    YR_EXPECT_NEAR(al.cone_cos_inner, std::cos(0.4363f), 1.0e-4);
 }
