@@ -229,7 +229,9 @@ ShadowVisibility TraceShadowVisibility(
         if (surface_hit.exhausted) {
             return ShadowVisibility{false, Color3f{}};
         }
-        if (!surface_hit.hit || surface_hit.geometry_hit.triangle_index < 0) {
+        const bool is_miss = !surface_hit.hit ||
+            (surface_hit.geometry_hit.triangle_index < 0 && surface_hit.geometry_hit.sphere_index < 0);
+        if (is_miss) {
             if (medium.active) {
                 if (!finite_segment) {
                     return ShadowVisibility{false, Color3f{}};
@@ -253,7 +255,10 @@ ShadowVisibility TraceShadowVisibility(
             }
         }
 
-        if (!IsValidMaterialIndex(scene, scene.primitives[surface_hit.geometry_hit.primitive_index].material_index)) {
+        // For sphere hits, the material was already resolved in the surface layer; validate
+        // the triangle primitive material only for triangle hits.
+        if (surface_hit.geometry_hit.primitive_index >= 0 &&
+            !IsValidMaterialIndex(scene, scene.primitives[surface_hit.geometry_hit.primitive_index].material_index)) {
             return ShadowVisibility{false, Color3f{}};
         }
 
@@ -460,6 +465,45 @@ Color3f EstimateDirectLight(
         radiance = radiance * inverse_light_sample_count;
     }
 
+    // Analytic (non-area, non-environment) lights — deltas, no MIS vs BSDF.
+    for (const AnalyticLight& light : scene.analytic_lights) {
+        AnalyticLightSample sample;
+        if (light.kind == AnalyticLightKind::Point) {
+            sample = SampleAnalyticPoint(light, hit_point);
+        } else if (light.kind == AnalyticLightKind::Distant) {
+            sample = SampleAnalyticDistant(light, hit_point);
+        } else if (light.kind == AnalyticLightKind::Spot) {
+            sample = SampleAnalyticSpot(light, hit_point);
+        } else {
+            continue;
+        }
+        if (!sample.valid || IsNearBlack(sample.radiance)) {
+            continue;
+        }
+        const float cos_surface = std::max(0.0f, Dot(normal, sample.wi));
+        if (cos_surface <= 0.0f) {
+            continue;
+        }
+        const Color3f bsdf = EvaluateBsdf(material, wo, sample.wi, normal);
+        if (IsNearBlack(bsdf)) {
+            continue;
+        }
+        const Point3f shadow_origin = hit_point + normal * SurfaceBias(hit_point);
+        ++stats.shadow_rays;
+        const ShadowVisibility visibility = TraceShadowVisibility(
+            prepared_scene,
+            Ray3f{shadow_origin, sample.wi},
+            sample.distance - SurfaceBias(hit_point),
+            stats
+        );
+        if (!visibility.visible) {
+            ++stats.occluded_shadow_rays;
+            continue;
+        }
+        const Color3f visible_radiance = Multiply(visibility.transmittance, sample.radiance);
+        radiance = radiance + Multiply(bsdf, visible_radiance) * cos_surface;
+    }
+
     radiance = radiance + EstimateDirectEnvironmentLight(prepared_scene, material, hit_point, normal, wo, sampler, stats);
     return radiance;
 }
@@ -484,7 +528,9 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
             &trace_stats
         );
         AccumulateTraceStats(stats, trace_stats);
-        if (!surface_hit.hit || surface_hit.geometry_hit.triangle_index < 0 || surface_hit.exhausted) {
+        const bool is_miss = !surface_hit.hit ||
+            (surface_hit.geometry_hit.triangle_index < 0 && surface_hit.geometry_hit.sphere_index < 0);
+        if (is_miss || surface_hit.exhausted) {
             ++stats.misses;
             const float environment_weight = EnvironmentHitMisWeight(scene, previous_bounce, ray.direction);
             radiance = radiance + Multiply(throughput, EnvironmentColor(scene, ray.direction)) * environment_weight;
@@ -497,7 +543,10 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
             break;
         }
 
-        if (!IsValidMaterialIndex(scene, scene.primitives[surface_hit.geometry_hit.primitive_index].material_index)) {
+        // For sphere hits, the surface layer already resolved the material; for triangle hits
+        // validate via the primitive table. Either way, surface_hit.sample.material is correct.
+        if (surface_hit.geometry_hit.primitive_index >= 0 &&
+            !IsValidMaterialIndex(scene, scene.primitives[surface_hit.geometry_hit.primitive_index].material_index)) {
             radiance = radiance + Multiply(throughput, Color3f{1.0f, 0.0f, 1.0f});
             break;
         }
@@ -507,7 +556,9 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
         const RenderMaterial& material = surface_hit.sample.material;
         const Vec3f normal = surface_hit.sample.shading_normal;
 
-        if (!IsNearBlack(material.emission)) {
+        // Emissive contribution. For sphere hits, sphere emission is out of M1 Slice 1 scope,
+        // so we guard LocateTriangle with triangle_index >= 0.
+        if (!IsNearBlack(material.emission) && surface_hit.geometry_hit.triangle_index >= 0) {
             const TriangleRef hit_tri = LocateTriangle(scene, surface_hit.geometry_hit.triangle_index);
             const Vec3f light_geo_normal = GeometricNormal(scene, hit_tri);
             const float emission_weight = EmissiveHitMisWeight(scene, previous_bounce, hit_point, light_geo_normal);

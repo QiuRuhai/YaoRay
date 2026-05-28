@@ -1,5 +1,8 @@
 #include <yaoray/render/shading.hpp>
 
+#include <algorithm>
+#include <cmath>
+
 namespace yr {
 
 TriangleRef LocateTriangle(const RenderSceneIR& scene, int flat_triangle_index) {
@@ -100,6 +103,51 @@ Vec3f ResolveShadingNormal(
         return Normalize(geometric_normal);
     }
     return normal;
+}
+
+SphereHit IntersectSphere(Point3f center, float radius, const Ray3f& ray, float t_min, float t_max) {
+    const Vec3f oc{ray.origin.x - center.x, ray.origin.y - center.y, ray.origin.z - center.z};
+    const float a = Dot(ray.direction, ray.direction);
+    const float b = 2.0f * Dot(oc, ray.direction);
+    const float c = Dot(oc, oc) - radius * radius;
+    const float disc = b * b - 4.0f * a * c;
+    if (disc < 0.0f) {
+        return SphereHit{false, 0.0f};
+    }
+    const float sqrt_disc = std::sqrt(disc);
+    const float inv_2a = 0.5f / a;
+    const float t0 = (-b - sqrt_disc) * inv_2a;
+    if (t0 > t_min && t0 < t_max) {
+        return SphereHit{true, t0};
+    }
+    const float t1 = (-b + sqrt_disc) * inv_2a;
+    if (t1 > t_min && t1 < t_max) {
+        return SphereHit{true, t1};
+    }
+    return SphereHit{false, 0.0f};
+}
+
+Bounds3f SphereBounds(Point3f center, float radius) {
+    const Point3f lo{center.x - radius, center.y - radius, center.z - radius};
+    const Point3f hi{center.x + radius, center.y + radius, center.z + radius};
+    return Bounds3f{lo, hi};
+}
+
+Vec3f SphereNormal(Point3f center, float radius, Point3f surface_point) {
+    (void)radius;  // accepted for caller convenience; not required for correctness.
+    return Normalize(Vec3f{
+        surface_point.x - center.x,
+        surface_point.y - center.y,
+        surface_point.z - center.z
+    });
+}
+
+Vec2f SphereUv(Vec3f outward_normal) {
+    constexpr float Pi = 3.14159265358979323846f;
+    const float clamped_y = std::clamp(outward_normal.y, -1.0f, 1.0f);
+    const float u = (std::atan2(outward_normal.x, outward_normal.z) + Pi) / (2.0f * Pi);
+    const float v = (Pi - std::acos(clamped_y)) / Pi;
+    return Vec2f{u, v};
 }
 
 } // namespace yr

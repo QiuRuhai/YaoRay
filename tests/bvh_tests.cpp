@@ -117,3 +117,56 @@ YR_TEST(bvh_traversal_returns_miss_for_empty_bvh) {
     YR_EXPECT_EQ(stats.node_tests, std::uint64_t{0});
     YR_EXPECT_EQ(stats.triangle_tests, std::uint64_t{0});
 }
+
+YR_TEST(bvh_intersect_finds_sphere_when_no_triangles) {
+    yr::RenderSceneIR scene;
+    yr::RenderSphere sphere;
+    sphere.center = yr::Point3f{0.0f, 0.0f, 0.0f};
+    sphere.radius = 1.0f;
+    sphere.material_index = 0;
+    scene.spheres.push_back(sphere);
+    scene.materials.push_back(yr::RenderMaterial{});
+
+    const yr::BvhBuildResult build = yr::BuildBvh(scene);
+    YR_EXPECT_TRUE(build.errors.empty());
+
+    yr::BvhTraceStats stats;
+    const yr::Ray3f ray{yr::Point3f{0.0f, 0.0f, 3.0f}, yr::Vec3f{0.0f, 0.0f, -1.0f}};
+    const yr::BvhHit hit = yr::IntersectBvh(scene, build.bvh, ray, stats);
+
+    YR_EXPECT_TRUE(hit.hit);
+    YR_EXPECT_EQ(hit.sphere_index, 0);
+    YR_EXPECT_EQ(hit.triangle_index, -1);
+    YR_EXPECT_NEAR(hit.t, 2.0f, 1.0e-5);
+}
+
+YR_TEST(bvh_intersect_picks_closer_of_sphere_and_triangle) {
+    yr::RenderSceneIR scene;
+
+    // Triangle at z = -1 (further from camera at z=3).
+    scene.vertices = {
+        yr::RenderVertex{yr::Point3f{-1.0f, -1.0f, -1.0f}, yr::Vec3f{0.0f, 0.0f, 1.0f}, {}, {}, 1.0f},
+        yr::RenderVertex{yr::Point3f{ 1.0f, -1.0f, -1.0f}, yr::Vec3f{0.0f, 0.0f, 1.0f}, {}, {}, 1.0f},
+        yr::RenderVertex{yr::Point3f{ 0.0f,  1.0f, -1.0f}, yr::Vec3f{0.0f, 0.0f, 1.0f}, {}, {}, 1.0f},
+    };
+    scene.indices = {0, 1, 2};
+    scene.primitives.push_back(yr::RenderPrimitive{0, 3, 0, true, false, false});
+
+    // Sphere at z = 0 (closer to camera).
+    yr::RenderSphere sphere;
+    sphere.center = yr::Point3f{0.0f, 0.0f, 0.0f};
+    sphere.radius = 0.5f;
+    sphere.material_index = 0;
+    scene.spheres.push_back(sphere);
+    scene.materials.push_back(yr::RenderMaterial{});
+
+    const yr::BvhBuildResult build = yr::BuildBvh(scene);
+    yr::BvhTraceStats stats;
+    const yr::Ray3f ray{yr::Point3f{0.0f, 0.0f, 3.0f}, yr::Vec3f{0.0f, 0.0f, -1.0f}};
+    const yr::BvhHit hit = yr::IntersectBvh(scene, build.bvh, ray, stats);
+
+    YR_EXPECT_TRUE(hit.hit);
+    YR_EXPECT_EQ(hit.sphere_index, 0);
+    YR_EXPECT_EQ(hit.triangle_index, -1);
+    YR_EXPECT_NEAR(hit.t, 2.5f, 1.0e-5);
+}

@@ -82,6 +82,7 @@ add_executable(yaoray_tests
     tests/version_tests.cpp
     tests/core_tests.cpp
     tests/bvh_tests.cpp
+    tests/sphere_tests.cpp
     tests/film_tests.cpp
     tests/render_scene_tests.cpp
     tests/pbrt_tests.cpp
@@ -97,6 +98,13 @@ add_executable(yaoray_tests
     tests/cpu_tile_scheduler_tests.cpp
     tests/cpu_sampler_tests.cpp
     tests/cpu_path_tracer_tests.cpp
+    tests/analytic_light_tests.cpp
+    tests/material_degradation_tests.cpp
+    tests/scene_compiler_texture_tests.cpp
+    tests/scene_compiler_environment_tests.cpp
+    tests/scene_compiler_wrap_mode_tests.cpp
+    tests/scene_compiler_normal_map_tests.cpp
+    tests/scene_compiler_tangent_tests.cpp
 )
 target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_pbrt yaoray_render yaoray_assets yaoray_backends)
 target_compile_definitions(yaoray_tests PRIVATE YAORAY_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
@@ -169,5 +177,34 @@ if(BUILD_TESTING)
         EXPECT_REGEX
             "Integrator: path"
             "Rendered image:"
+    )
+    add_yaoray_cli_render_test(yaoray_cli_render_pbrt_cornell_box
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/scenes/pbrt/cornell_box_pbrt/cornell_box_pbrt_smoke.pbrt"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/scenes/pbrt/cornell_box_pbrt/out/cornell_box_pbrt_smoke.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: path"
+            "Rendered image:"
+            "Hits: [^0]"
+    )
+    add_yaoray_cli_render_test(yaoray_cli_render_pbrt_material_studio
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/scenes/pbrt/material_studio/material_studio_smoke.pbrt"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/scenes/pbrt/material_studio/out/material_studio_smoke.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: path"
+            "Rendered image:"
+            "Hits: [^0]"
+            "Compiled textures: [^0]"
+    )
+    add_yaoray_cli_render_test(yaoray_cli_render_pbrt_texture_test
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/scenes/pbrt/texture_test/texture_test_smoke.pbrt"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/scenes/pbrt/texture_test/out/texture_test_smoke.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: path"
+            "Rendered image:"
+            "Hits: [1-9]"
+            "Compiled textures: [1-9]"
     )
 endif()

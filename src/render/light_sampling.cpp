@@ -106,4 +106,92 @@ float PdfEmissiveLightSolidAngle(
     return area_pdf * dist_sq / cos_theta;
 }
 
+AnalyticLightSample SampleAnalyticPoint(const AnalyticLight& light, Point3f shading_point) {
+    AnalyticLightSample s;
+    const Vec3f delta{
+        light.position.x - shading_point.x,
+        light.position.y - shading_point.y,
+        light.position.z - shading_point.z
+    };
+    const float dist_sq = Dot(delta, delta);
+    if (dist_sq <= 0.0f) {
+        return s;
+    }
+    s.distance = std::sqrt(dist_sq);
+    s.wi = Normalize(delta);
+    s.radiance = Color3f{
+        light.intensity.x / dist_sq,
+        light.intensity.y / dist_sq,
+        light.intensity.z / dist_sq
+    };
+    s.is_delta = true;
+    s.valid = true;
+    return s;
+}
+
+AnalyticLightSample SampleAnalyticDistant(const AnalyticLight& light, Point3f shading_point) {
+    (void)shading_point;  // Distant lights are direction-only; position is irrelevant.
+    AnalyticLightSample s;
+    // The compiler stores `direction` as the propagation direction of light (from
+    // the source toward the scene). At any shading point, wi points back at the
+    // light source, i.e. opposite of the propagation direction.
+    Vec3f wi{-light.direction.x, -light.direction.y, -light.direction.z};
+    if (LengthSquared(wi) == 0.0f) {
+        return s;
+    }
+    s.wi = Normalize(wi);
+    s.distance = 1.0e6f;             // Effectively infinite for shadow-ray t_max.
+    s.radiance = light.intensity;   // For a Dirac-in-direction delta, this is the
+                                     // radiance directly.
+    s.is_delta = true;
+    s.valid = true;
+    return s;
+}
+
+AnalyticLightSample SampleAnalyticSpot(const AnalyticLight& light, Point3f shading_point) {
+    AnalyticLightSample s;
+    const Vec3f delta{
+        light.position.x - shading_point.x,
+        light.position.y - shading_point.y,
+        light.position.z - shading_point.z
+    };
+    const float dist_sq = Dot(delta, delta);
+    if (dist_sq <= 0.0f) {
+        return s;
+    }
+    const float dist = std::sqrt(dist_sq);
+    const Vec3f wi = Vec3f{delta.x / dist, delta.y / dist, delta.z / dist};
+
+    // Angle between the light's cone axis (light.direction, propagating from
+    // light into scene) and the direction FROM light to shading point (-wi).
+    // The cosine of that angle determines the falloff.
+    const Vec3f axis = LengthSquared(light.direction) > 0.0f
+        ? Normalize(light.direction)
+        : Vec3f{0.0f, 0.0f, 1.0f};
+    const float cos_angle = -Dot(wi, axis);  // (-wi) . axis
+
+    float falloff;
+    if (cos_angle >= light.cone_cos_inner) {
+        falloff = 1.0f;
+    } else if (cos_angle <= light.cone_angle) {
+        falloff = 0.0f;
+    } else {
+        // Smoothstep between cone_angle (outer cos, lower) and cone_cos_inner (higher).
+        const float t = (cos_angle - light.cone_angle) /
+                        (light.cone_cos_inner - light.cone_angle);
+        falloff = t * t * (3.0f - 2.0f * t);
+    }
+
+    s.wi = wi;
+    s.distance = dist;
+    s.radiance = Color3f{
+        light.intensity.x * falloff / dist_sq,
+        light.intensity.y * falloff / dist_sq,
+        light.intensity.z * falloff / dist_sq
+    };
+    s.is_delta = true;
+    s.valid = true;
+    return s;
+}
+
 } // namespace yr

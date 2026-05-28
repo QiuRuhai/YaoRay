@@ -1,5 +1,7 @@
 #pragma once
 
+#include <yaoray/core/bounds.hpp>
+#include <yaoray/core/ray.hpp>
 #include <yaoray/core/vec.hpp>
 #include <yaoray/render/render_scene.hpp>
 
@@ -24,5 +26,15 @@ Vec3f ResolveShadingNormal(
     float bary_u,
     float bary_v,
     Vec3f geometric_normal);
+
+struct SphereHit {
+    bool hit = false;
+    float t = 0.0f;
+};
+
+SphereHit IntersectSphere(Point3f center, float radius, const Ray3f& ray, float t_min, float t_max);
+Bounds3f SphereBounds(Point3f center, float radius);
+Vec3f SphereNormal(Point3f center, float radius, Point3f surface_point);
+Vec2f SphereUv(Vec3f outward_normal);
 
 } // namespace yr

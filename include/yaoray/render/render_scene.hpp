@@ -133,6 +133,14 @@ struct RenderPrimitive {
     bool has_tangents = false;
 };
 
+struct RenderSphere {
+    Point3f center{0.0f, 0.0f, 0.0f};
+    float radius = 1.0f;
+    int material_index = 0;
+    int area_light_index = -1;   // -1 if no area light
+    bool flip_normals = false;
+};
+
 // --- Lights ---
 
 struct EmissivePrimitive {
@@ -148,7 +156,10 @@ struct AnalyticLight {
     Point3f position;
     Vec3f direction;
     Color3f intensity;
-    float cone_angle = 0.0f;
+    // For Spot lights: store the cosines of the inner and outer cone half-angles.
+    // `cone_angle` stores cos(outer_half_angle); `cone_cos_inner` stores cos(inner).
+    float cone_angle = 0.0f;        // = cos(coneangle_radians) for spot
+    float cone_cos_inner = 0.0f;    // = cos((coneangle - conedeltaangle)_radians) for spot
 };
 
 // --- Film settings ---
@@ -178,6 +189,7 @@ struct RenderSceneIR {
     std::vector<RenderVertex> vertices;
     std::vector<std::uint32_t> indices;
     std::vector<RenderPrimitive> primitives;
+    std::vector<RenderSphere> spheres;
 
     std::vector<RenderMaterial> materials;
     std::vector<RenderTexture> textures;

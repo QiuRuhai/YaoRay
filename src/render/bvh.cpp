@@ -1,6 +1,7 @@
 #include <yaoray/render/bvh.hpp>
 
 #include <yaoray/render/render_scene.hpp>
+#include <yaoray/render/shading.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -240,90 +241,111 @@ BvhHit IntersectBvh(
 ) {
     BvhHit nearest;
     nearest.t = t_max;
-    if (bvh.nodes.empty()) {
-        return nearest;
-    }
 
-    std::vector<int> stack;
-    stack.push_back(0);
-    while (!stack.empty()) {
-        const int node_index = stack.back();
-        stack.pop_back();
-        if (node_index < 0 || static_cast<std::size_t>(node_index) >= bvh.nodes.size()) {
+    if (!bvh.nodes.empty()) {
+        std::vector<int> stack;
+        stack.push_back(0);
+        while (!stack.empty()) {
+            const int node_index = stack.back();
+            stack.pop_back();
+            if (node_index < 0 || static_cast<std::size_t>(node_index) >= bvh.nodes.size()) {
+                continue;
+            }
+
+            const RenderBvhNode& node = bvh.nodes[static_cast<std::size_t>(node_index)];
+            ++stats.node_tests;
+            if (!node.bounds.Intersects(ray, t_min, nearest.t)) {
+                continue;
+            }
+
+            if (node.triangle_count > 0) {
+                for (int ti = node.first_triangle; ti < node.first_triangle + node.triangle_count; ++ti) {
+                    if (ti < 0 || static_cast<std::size_t>(ti) >= bvh.triangle_indices.size()) {
+                        continue;
+                    }
+
+                    ++stats.triangle_tests;
+                    const int flat_idx = bvh.triangle_indices[static_cast<std::size_t>(ti)];
+                    if (flat_idx < 0 || static_cast<std::size_t>(flat_idx) >= bvh.triangle_to_primitive.size()) {
+                        continue;
+                    }
+
+                    auto [prim_idx, local_tri] = bvh.triangle_to_primitive[static_cast<std::size_t>(flat_idx)];
+                    if (prim_idx < 0 || static_cast<std::size_t>(prim_idx) >= scene.primitives.size()) {
+                        continue;
+                    }
+
+                    const auto& prim = scene.primitives[static_cast<std::size_t>(prim_idx)];
+                    std::uint32_t base = prim.first_index + static_cast<std::uint32_t>(local_tri) * 3;
+                    Point3f p0 = scene.vertices[scene.indices[base + 0]].position;
+                    Point3f p1 = scene.vertices[scene.indices[base + 1]].position;
+                    Point3f p2 = scene.vertices[scene.indices[base + 2]].position;
+
+                    // Moller-Trumbore intersection
+                    const Vec3f edge1 = p1 - p0;
+                    const Vec3f edge2 = p2 - p0;
+                    const Vec3f pvec = Cross(ray.direction, edge2);
+                    const float det = Dot(edge1, pvec);
+                    if (std::fabs(det) < ParallelEpsilon) {
+                        continue;
+                    }
+
+                    const float inv_det = 1.0f / det;
+                    const Vec3f tvec = ray.origin - p0;
+                    const float u = Dot(tvec, pvec) * inv_det;
+                    if (u < 0.0f || u > 1.0f) {
+                        continue;
+                    }
+
+                    const Vec3f qvec = Cross(tvec, edge1);
+                    const float v = Dot(ray.direction, qvec) * inv_det;
+                    if (v < 0.0f || u + v > 1.0f) {
+                        continue;
+                    }
+
+                    const float t = Dot(edge2, qvec) * inv_det;
+                    if (t <= t_min || t >= nearest.t) {
+                        continue;
+                    }
+
+                    nearest.hit = true;
+                    nearest.t = t;
+                    nearest.triangle_index = flat_idx;
+                    nearest.primitive_index = prim_idx;
+                    nearest.sphere_index = -1;          // defensive reset: triangle branch clears sphere slot
+                    nearest.bary_u = u;
+                    nearest.bary_v = v;
+                }
+            } else {
+                if (node.right_child >= 0) {
+                    stack.push_back(node.right_child);
+                }
+                if (node.left_child >= 0) {
+                    stack.push_back(node.left_child);
+                }
+            }
+        }
+    } // end if (!bvh.nodes.empty())
+
+    // Linear pass over analytic spheres. M1 keeps spheres out of the BVH because the
+    // expected scene-level count is small (<= ~50); revisit if profiling demands it.
+    for (std::size_t si = 0; si < scene.spheres.size(); ++si) {
+        const RenderSphere& sphere = scene.spheres[si];
+        const SphereHit s = IntersectSphere(sphere.center, sphere.radius, ray, t_min, nearest.t);
+        if (!s.hit || s.t >= nearest.t) {
             continue;
         }
+        const Point3f hit_point = ray.At(s.t);
+        const Vec3f n = SphereNormal(sphere.center, sphere.radius, hit_point);
+        const Vec2f uv = SphereUv(n);
 
-        const RenderBvhNode& node = bvh.nodes[static_cast<std::size_t>(node_index)];
-        ++stats.node_tests;
-        if (!node.bounds.Intersects(ray, t_min, nearest.t)) {
-            continue;
-        }
-
-        if (node.triangle_count > 0) {
-            for (int ti = node.first_triangle; ti < node.first_triangle + node.triangle_count; ++ti) {
-                if (ti < 0 || static_cast<std::size_t>(ti) >= bvh.triangle_indices.size()) {
-                    continue;
-                }
-
-                ++stats.triangle_tests;
-                const int flat_idx = bvh.triangle_indices[static_cast<std::size_t>(ti)];
-                if (flat_idx < 0 || static_cast<std::size_t>(flat_idx) >= bvh.triangle_to_primitive.size()) {
-                    continue;
-                }
-
-                auto [prim_idx, local_tri] = bvh.triangle_to_primitive[static_cast<std::size_t>(flat_idx)];
-                if (prim_idx < 0 || static_cast<std::size_t>(prim_idx) >= scene.primitives.size()) {
-                    continue;
-                }
-
-                const auto& prim = scene.primitives[static_cast<std::size_t>(prim_idx)];
-                std::uint32_t base = prim.first_index + static_cast<std::uint32_t>(local_tri) * 3;
-                Point3f p0 = scene.vertices[scene.indices[base + 0]].position;
-                Point3f p1 = scene.vertices[scene.indices[base + 1]].position;
-                Point3f p2 = scene.vertices[scene.indices[base + 2]].position;
-
-                // Moller-Trumbore intersection
-                const Vec3f edge1 = p1 - p0;
-                const Vec3f edge2 = p2 - p0;
-                const Vec3f pvec = Cross(ray.direction, edge2);
-                const float det = Dot(edge1, pvec);
-                if (std::fabs(det) < ParallelEpsilon) {
-                    continue;
-                }
-
-                const float inv_det = 1.0f / det;
-                const Vec3f tvec = ray.origin - p0;
-                const float u = Dot(tvec, pvec) * inv_det;
-                if (u < 0.0f || u > 1.0f) {
-                    continue;
-                }
-
-                const Vec3f qvec = Cross(tvec, edge1);
-                const float v = Dot(ray.direction, qvec) * inv_det;
-                if (v < 0.0f || u + v > 1.0f) {
-                    continue;
-                }
-
-                const float t = Dot(edge2, qvec) * inv_det;
-                if (t <= t_min || t >= nearest.t) {
-                    continue;
-                }
-
-                nearest.hit = true;
-                nearest.t = t;
-                nearest.triangle_index = flat_idx;
-                nearest.primitive_index = prim_idx;
-                nearest.bary_u = u;
-                nearest.bary_v = v;
-            }
-        } else {
-            if (node.right_child >= 0) {
-                stack.push_back(node.right_child);
-            }
-            if (node.left_child >= 0) {
-                stack.push_back(node.left_child);
-            }
-        }
+        nearest.hit = true;
+        nearest.t = s.t;
+        nearest.triangle_index = -1;
+        nearest.primitive_index = -1;
+        nearest.sphere_index = static_cast<int>(si);
+        nearest.bary_u = uv.x;
+        nearest.bary_v = uv.y;
     }
 
     return nearest;

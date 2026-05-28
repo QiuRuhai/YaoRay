@@ -58,17 +58,10 @@ macOS/Linux:
 ```bash
 ./build/yaoray --help
 ./build/yaoray --version
-./build/yaoray render scenes/examples/minimal.toml --backend cpu
-./build/yaoray render scenes/examples/obj_pyramid.toml --backend cpu
-./build/yaoray render scenes/examples/cornell_box.toml --backend cpu
-./build/yaoray render scenes/examples/cornell_box_path.toml --backend cpu
-./build/yaoray render scenes/examples/textured_quad.toml --backend cpu
-./build/yaoray render scenes/examples/gltf_textured_asset.toml --backend cpu
-./build/yaoray render scenes/examples/gltf_flight_helmet.toml --backend cpu
-./build/yaoray render scenes/examples/material_showcase.toml --backend cpu
-./build/yaoray render scenes/examples/material_v2_showcase.toml --backend cpu
-./build/yaoray render scenes/examples/hdri_lighting_showcase.toml --backend cpu
-./build/yaoray render scenes/examples/glass_showcase.toml --backend cpu
+./build/yaoray render scenes/pbrt/hello_emissive/hello_emissive.pbrt --backend cpu
+./build/yaoray render scenes/pbrt/cornell_box_pbrt/cornell_box_pbrt.pbrt --backend cpu
+./build/yaoray render scenes/pbrt/material_studio/material_studio.pbrt --backend cpu
+./build/yaoray render scenes/pbrt/texture_test/texture_test.pbrt --backend cpu
 ```
 
 Windows:
@@ -76,17 +69,10 @@ Windows:
 ```powershell
 build\Debug\yaoray.exe --help
 build\Debug\yaoray.exe --version
-build\Debug\yaoray.exe render scenes\examples\minimal.toml --backend cpu
-build\Debug\yaoray.exe render scenes\examples\obj_pyramid.toml --backend cpu
-build\Debug\yaoray.exe render scenes\examples\cornell_box.toml --backend cpu
-build\Debug\yaoray.exe render scenes\examples\cornell_box_path.toml --backend cpu
-build\Debug\yaoray.exe render scenes\examples\textured_quad.toml --backend cpu
-build\Debug\yaoray.exe render scenes\examples\gltf_textured_asset.toml --backend cpu
-build\Debug\yaoray.exe render scenes\examples\gltf_flight_helmet.toml --backend cpu
-build\Debug\yaoray.exe render scenes\examples\material_showcase.toml --backend cpu
-build\Debug\yaoray.exe render scenes\examples\material_v2_showcase.toml --backend cpu
-build\Debug\yaoray.exe render scenes\examples\hdri_lighting_showcase.toml --backend cpu
-build\Debug\yaoray.exe render scenes\examples\glass_showcase.toml --backend cpu
+build\Debug\yaoray.exe render scenes\pbrt\hello_emissive\hello_emissive.pbrt --backend cpu
+build\Debug\yaoray.exe render scenes\pbrt\cornell_box_pbrt\cornell_box_pbrt.pbrt --backend cpu
+build\Debug\yaoray.exe render scenes\pbrt\material_studio\material_studio.pbrt --backend cpu
+build\Debug\yaoray.exe render scenes\pbrt\texture_test\texture_test.pbrt --backend cpu
 ```
 
 The `render` command currently parses, compiles backend-neutral render input, lets the selected backend prepare runtime data, and renders deterministic CPU images to PNG or ASCII PPM based on `film.output`. `render.integrator = "debug_direct"` is the default direct-lighting debug renderer for fast smoke tests.

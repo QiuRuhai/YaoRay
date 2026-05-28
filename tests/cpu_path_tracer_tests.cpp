@@ -138,3 +138,144 @@ YR_TEST(cpu_path_tracer_emissive_surface_contributes_radiance) {
     YR_EXPECT_NEAR(center.y, 0.5, 1e-6);
     YR_EXPECT_NEAR(center.z, 0.75, 1e-6);
 }
+
+YR_TEST(cpu_path_tracer_renders_sphere_in_an_emissive_room) {
+    yr::RenderSceneIR scene;
+    scene.width = 32;
+    scene.height = 32;
+    scene.spp = 8;
+    scene.max_depth = 3;
+    scene.camera.origin = yr::Point3f{0.0f, 0.0f, 3.0f};
+    scene.camera.forward = yr::Vec3f{0.0f, 0.0f, -1.0f};
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Vec3f{0.0f, 1.0f, 0.0f};
+    scene.camera.fov_y_radians = 1.04719758f;
+
+    // Diffuse sphere material.
+    yr::RenderMaterial diffuse;
+    diffuse.kind = yr::RenderMaterialKind::Diffuse;
+    diffuse.reflectance.value = yr::Color3f{0.8f, 0.4f, 0.2f};
+    scene.materials.push_back(diffuse);
+
+    // Emissive material for a ceiling quad.
+    yr::RenderMaterial emissive;
+    emissive.kind = yr::RenderMaterialKind::Diffuse;
+    emissive.emission = yr::Color3f{5.0f, 5.0f, 5.0f};
+    scene.materials.push_back(emissive);
+
+    yr::RenderSphere sphere;
+    sphere.center = yr::Point3f{0.0f, 0.0f, 0.0f};
+    sphere.radius = 0.5f;
+    sphere.material_index = 0;
+    scene.spheres.push_back(sphere);
+
+    // Big emissive ceiling at y = 2.
+    scene.vertices = {
+        yr::RenderVertex{yr::Point3f{-2.0f, 2.0f, -2.0f}, yr::Vec3f{0.0f, -1.0f, 0.0f}, {}, {}, 1.0f},
+        yr::RenderVertex{yr::Point3f{ 2.0f, 2.0f, -2.0f}, yr::Vec3f{0.0f, -1.0f, 0.0f}, {}, {}, 1.0f},
+        yr::RenderVertex{yr::Point3f{ 2.0f, 2.0f,  2.0f}, yr::Vec3f{0.0f, -1.0f, 0.0f}, {}, {}, 1.0f},
+        yr::RenderVertex{yr::Point3f{-2.0f, 2.0f,  2.0f}, yr::Vec3f{0.0f, -1.0f, 0.0f}, {}, {}, 1.0f},
+    };
+    scene.indices = {0, 1, 2,  0, 2, 3};
+    scene.primitives.push_back(yr::RenderPrimitive{0, 6, 1, true, false, false});
+
+    yr::EmissivePrimitive ep;
+    ep.primitive_index = 0;
+    ep.radiance = yr::Color3f{5.0f, 5.0f, 5.0f};
+    ep.area = 16.0f;
+    scene.emissive_primitives.push_back(ep);
+
+    const yr::CpuPathTraceResult result = RunPathTrace(std::move(scene));
+    YR_EXPECT_TRUE(result.ok);
+    YR_EXPECT_TRUE(result.stats.hits > 0);
+
+    // The center pixel must see the sphere (not the ceiling and not a miss).
+    const yr::Color3f center = result.film.LinearPixel(16, 16);
+    YR_EXPECT_TRUE(center.x > 0.0f);
+    // The sphere material is orange (0.8, 0.4, 0.2). After reflecting the white
+    // ceiling light, the pixel should keep a clear orange tint — green and blue
+    // should both be noticeably below red. If the sphere were not hit and the
+    // ray fell through to the white ceiling, this check would fail.
+    YR_EXPECT_TRUE(center.y < center.x);
+    YR_EXPECT_TRUE(center.z < center.x);
+}
+
+YR_TEST(cpu_path_tracer_lights_a_sphere_with_a_point_light) {
+    yr::RenderSceneIR scene;
+    scene.width = 32;
+    scene.height = 32;
+    scene.spp = 8;
+    scene.max_depth = 2;  // direct only (no need for indirect to see the light)
+    scene.camera.origin = yr::Point3f{0.0f, 0.0f, 3.0f};
+    scene.camera.forward = yr::Vec3f{0.0f, 0.0f, -1.0f};
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Vec3f{0.0f, 1.0f, 0.0f};
+    scene.camera.fov_y_radians = 1.04719758f;
+
+    yr::RenderMaterial diffuse;
+    diffuse.kind = yr::RenderMaterialKind::Diffuse;
+    diffuse.reflectance.value = yr::Color3f{0.8f, 0.8f, 0.8f};
+    scene.materials.push_back(diffuse);
+
+    yr::RenderSphere sphere;
+    sphere.center = yr::Point3f{0.0f, 0.0f, 0.0f};
+    sphere.radius = 0.5f;
+    sphere.material_index = 0;
+    scene.spheres.push_back(sphere);
+
+    yr::AnalyticLight light;
+    light.kind = yr::AnalyticLightKind::Point;
+    light.position = yr::Point3f{0.0f, 2.0f, 1.0f};
+    light.intensity = yr::Color3f{40.0f, 40.0f, 40.0f};
+    scene.analytic_lights.push_back(light);
+
+    const yr::CpuPathTraceResult result = RunPathTrace(std::move(scene));
+    YR_EXPECT_TRUE(result.ok);
+    YR_EXPECT_TRUE(result.stats.hits > 0);
+
+    // The pixel at the sphere center must receive non-zero direct illumination.
+    const yr::Color3f center = result.film.LinearPixel(16, 16);
+    YR_EXPECT_TRUE(center.x > 0.0f);
+    YR_EXPECT_TRUE(center.y > 0.0f);
+    YR_EXPECT_TRUE(center.z > 0.0f);
+}
+
+YR_TEST(cpu_path_tracer_lights_a_sphere_with_a_distant_light) {
+    yr::RenderSceneIR scene;
+    scene.width = 32;
+    scene.height = 32;
+    scene.spp = 8;
+    scene.max_depth = 2;
+    scene.camera.origin = yr::Point3f{0.0f, 0.0f, 3.0f};
+    scene.camera.forward = yr::Vec3f{0.0f, 0.0f, -1.0f};
+    scene.camera.right = yr::Vec3f{1.0f, 0.0f, 0.0f};
+    scene.camera.up = yr::Vec3f{0.0f, 1.0f, 0.0f};
+    scene.camera.fov_y_radians = 1.04719758f;
+
+    yr::RenderMaterial diffuse;
+    diffuse.kind = yr::RenderMaterialKind::Diffuse;
+    diffuse.reflectance.value = yr::Color3f{0.8f, 0.8f, 0.8f};
+    scene.materials.push_back(diffuse);
+
+    yr::RenderSphere sphere;
+    sphere.center = yr::Point3f{0.0f, 0.0f, 0.0f};
+    sphere.radius = 0.5f;
+    sphere.material_index = 0;
+    scene.spheres.push_back(sphere);
+
+    // Strong distant light from above so the top of the sphere is well-lit.
+    yr::AnalyticLight light;
+    light.kind = yr::AnalyticLightKind::Distant;
+    light.direction = yr::Vec3f{0.0f, -1.0f, 0.0f};  // propagating down
+    light.intensity = yr::Color3f{5.0f, 5.0f, 5.0f};
+    scene.analytic_lights.push_back(light);
+
+    const yr::CpuPathTraceResult result = RunPathTrace(std::move(scene));
+    YR_EXPECT_TRUE(result.ok);
+    YR_EXPECT_TRUE(result.stats.hits > 0);
+    // The top of the sphere (pixel near (16, 13)) should be brighter than the
+    // bottom (pixel near (16, 19)) under a downward-shining distant light.
+    const yr::Color3f top = result.film.LinearPixel(16, 13);
+    const yr::Color3f bottom = result.film.LinearPixel(16, 19);
+    YR_EXPECT_TRUE(top.x > bottom.x);
+}

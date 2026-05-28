@@ -1,0 +1,102 @@
+# YaoRay M1 Slice 2 — material studio, low-resolution smoke variant for CTest.
+#
+# Five spheres of different BSDFs on a wide diffuse ground plane,
+# illuminated by an HDRI sky. Exercises:
+#   - Shape "sphere"                            (Slice 1)
+#   - Texture "imagemap"                        (Slice 2)
+#   - LightSource "infinite"                    (Slice 2)
+#   - Material texture binding via TexParam     (Slice 2)
+#   - Materials: diffuse, conductor, dielectric,
+#     coateddiffuse, coatedconductor
+
+LookAt 0 1.0 4.5  0 0.4 0  0 1 0
+Camera "perspective" "float fov" [38]
+Sampler "independent" "integer pixelsamples" [4]
+Integrator "path" "integer maxdepth" [6]
+Film "rgb"
+    "integer xresolution" [80]
+    "integer yresolution" [40]
+    "string filename" ["out/material_studio_smoke.png"]
+
+WorldBegin
+
+# --- environment light (HDRI sky) -------------------------------------
+LightSource "infinite"
+    "string filename" ["env/sky.hdr"]
+    "rgb L" [1 1 1]
+    "float scale" [1]
+
+# --- materials --------------------------------------------------------
+MakeNamedMaterial "ground"
+    "string type" ["diffuse"]
+    "rgb reflectance" [0.6 0.6 0.6]
+
+MakeNamedMaterial "matte_red"
+    "string type" ["diffuse"]
+    "rgb reflectance" [0.7 0.15 0.12]
+
+MakeNamedMaterial "gold"
+    "string type" ["conductor"]
+    "rgb eta" [0.18 0.42 1.37]
+    "rgb k"   [3.98 2.41 1.60]
+    "float uroughness" [0.05]
+    "float vroughness" [0.05]
+
+MakeNamedMaterial "clear_glass"
+    "string type" ["dielectric"]
+    "float eta" [1.5]
+
+MakeNamedMaterial "porcelain"
+    "string type" ["coateddiffuse"]
+    "rgb reflectance" [0.92 0.92 0.92]
+    "float eta" [1.46]
+    "float roughness" [0.06]
+
+MakeNamedMaterial "car_paint"
+    "string type" ["coatedconductor"]
+    "rgb conductor.eta" [1.30 0.45 0.10]
+    "rgb conductor.k"   [4.20 2.30 1.10]
+    "float conductor.roughness" [0.25]
+    "float eta" [1.5]
+    "float roughness" [0.04]
+
+# --- ground -----------------------------------------------------------
+AttributeBegin
+NamedMaterial "ground"
+Shape "trianglemesh"
+    "point3 P" [-4 0 -3   4 0 -3   4 0 3   -4 0 3]
+    "integer indices" [0 1 2  0 2 3]
+AttributeEnd
+
+# --- five spheres in a row --------------------------------------------
+AttributeBegin
+NamedMaterial "matte_red"
+Translate -2.0 0.35 0.0
+Shape "sphere" "float radius" [0.35]
+AttributeEnd
+
+AttributeBegin
+NamedMaterial "gold"
+Translate -1.0 0.35 0.0
+Shape "sphere" "float radius" [0.35]
+AttributeEnd
+
+AttributeBegin
+NamedMaterial "clear_glass"
+Translate 0.0 0.35 0.0
+Shape "sphere" "float radius" [0.35]
+AttributeEnd
+
+AttributeBegin
+NamedMaterial "porcelain"
+Translate 1.0 0.35 0.0
+Shape "sphere" "float radius" [0.35]
+AttributeEnd
+
+AttributeBegin
+NamedMaterial "car_paint"
+Translate 2.0 0.35 0.0
+Shape "sphere" "float radius" [0.35]
+AttributeEnd
+
+WorldEnd

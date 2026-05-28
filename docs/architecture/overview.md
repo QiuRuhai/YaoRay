@@ -1,55 +1,90 @@
 # YaoRay Architecture Overview
 
-YaoRay uses a layered renderer architecture. The current implementation has frontend scene loading, shared semantic scene data, a shared asset resource layer, backend-neutral render IR, and backend-prepared runtime data.
+YaoRay is a physically-based offline path tracer that consumes PBRT v4
+scene files and produces HDR images via a multi-threaded CPU backend.
+A CUDA backend is planned for M2+.
 
-Scene frontends load authoring formats into `SceneWorld`, the shared high-level scene boundary. TOML still parses into `SceneDescription` first and then adapts into `SceneWorld`; PBRT parses directly into `SceneWorld`. This keeps TOML as one frontend rather than the long-term canonical scene entry point.
+## Two-Layer Pipeline
 
-The semantic layer describes the scene in terms people can author and debug: cameras, lights, assets, instances, material overrides, render settings, and Film settings. `SceneWorld` is the compiler-facing semantic model, while `SceneDescription` remains the TOML frontend's parser output.
+```text
+PBRT v4 scene  ──CompilePbrtScene──▶  RenderSceneIR  ──Backend.Prepare──▶  Renderable
+   (.pbrt)                              (flat tables)                       (BVH + buffers)
+```
 
-The render layer compiles that semantic scene into backend-neutral input. The current `yaoray_render` slice provides `RenderSceneIR` with render settings, camera data, environment data, area lights, materials, textures, table-shaped geometry (`vertices`, `indices`, and `primitives`), and a temporary flat-triangle compatibility view. Rendering is dispatched through a two-stage backend interface: each backend first prepares backend-owned runtime data from a `RenderSceneIR` value, then renders from that prepared scene without app-layer knowledge of CPU BVHs, CUDA buffers, or future OptiX handles. Prepared scenes own the render input they need, so rendering does not depend on caller-owned `RenderSceneIR` lifetime after preparation.
+The PBRT layer parses a `.pbrt` file into `PbrtScene` — a faithful
+representation of the directives and parameters as written. The render
+layer consumes `PbrtScene` and emits `RenderSceneIR`, a flat,
+GPU-friendly layout: indexed vertices, primitives, materials,
+textures, and lights. The CPU backend's `Prepare` step turns
+`RenderSceneIR` into a `CpuPreparedScene` (BVH + texture cache + light
+distributions); `Render` then ray-traces against that prepared scene.
 
-The CPU backend prepares `CpuPreparedScene` from `RenderSceneIR` by building the CPU `RenderBvh`. The BVH is no longer part of shared compiler output, which keeps later CUDA or OptiX acceleration structures out of the render IR.
+This is the two-layer design introduced by the M0 architecture reset,
+which dropped the older three-layer `TOML + SceneWorld + frontends`
+pipeline along with OBJ and glTF loaders.
 
-Backends expose a small capability record so tests and future app code can distinguish runnable CPU support from controlled backend stubs. CPU currently reports debug, path, offline progress, and texture-backed material support; CUDA is present as a named backend but does not yet report runnable rendering support.
+## Supported PBRT v4 Surface (M1)
 
-Current implemented slices:
+**Geometry:** `trianglemesh` (P / N / uv / S), `plymesh`, `sphere`.
 
-- project structure, tests, core math primitives, Film accumulation, and CLI shell
-- TOML scene parsing, validation diagnostics, and `yaoray render` command shell
-- initial backend-neutral `RenderSceneIR` compilation with temporary `builtin:triangle` asset support
-- CPU rendering with deterministic area-light direct lighting and BVH shadow rays
-- PNG output for renderable scenes, with PPM still available for debug/test output
-- two-stage render backend interface with CPU `CpuPreparedScene` rendering and a named CUDA not-implemented backend placeholder
-- shared `AssetResource` import for OBJ and static glTF/GLB assets through the `yaoray_assets` module
-- direct PBRT scene loading through `yaoray_pbrt`, including minimal camera/film/material support, `Include`, transform stacks, `trianglemesh`, and `plymesh`
-- unified scene frontend dispatch through `yaoray_frontends`, so `yaoray render` accepts both `.toml` and `.pbrt`
-- CPU backend BVH preparation over compiled render triangles
-- TOML named diffuse, emissive, mirror, metal, plastic, and dielectric/glass materials with instance-level material binding
-- scene-authored inline quad assets and a Cornell Box example based on Cornell measured geometry
-- render integrator selection with a deterministic CPU path tracer v0
-- deterministic CPU path tracer tile threading with actual thread and throughput reporting
-- Radiance `.hdr` environment maps with equirectangular lookup, direct environment sampling, and CPU path-tracer MIS
+**Materials:** `diffuse` / `matte`, `conductor` / `metal`, `dielectric` /
+`glass`, `thindielectric`, `coateddiffuse`, `coatedconductor`,
+`diffusetransmission`. Texture binding via `"texture <param>" ["name"]`
+on `reflectance`, `eta`, `k`, `uroughness`, `vroughness`, and the
+coating-layer parameters. Normal maps via `"string normalmap"`.
 
-The CPU backend supports two integrators. `debug_direct` is the simple reference path through camera rays, alpha-aware visible-surface tracing, BVH traversal, triangle intersection, deterministic center-sampled area-light direct lighting, alpha-aware BVH shadow rays, Film accumulation, tone mapping, and PNG/PPM output; it remains single-threaded for reference debugging, ignores `render.sampler` and `render.light_samples`, and does not recursively reflect mirror materials. `path` is the CPU path tracer: it adds deterministic multi-sample camera jitter, diffuse and glossy bounce sampling, perfect mirror scattering, dielectric glass scattering, Beer-Lambert absorption for one active thick dielectric medium, transparent colored direct-light visibility through dielectric glass, alpha-mask visibility for camera/indirect/shadow rays, emissive hits, random or stratified XZ-rectangle area-light sampling, direct area-light MIS, HDRI environment lookup, HDRI direct environment sampling through a luminance-weighted equirectangular distribution, BSDF-to-environment MIS, Russian roulette, glTF/OBJ texture-backed material sampling, optional sample radiance clamping, and row-major tile threading. It is still a v0 integrator without user-configurable roulette parameters, denoising, adaptive sampling, Sobol/CMJ/blue-noise sampling, spectral rendering, arbitrary oriented area lights, alpha blending, or final-quality material models.
+**Materials with documented degradation:** `subsurface` (→ diffuse with
+declared reflectance), `measured` (→ default conductor), `hair` (→ grey
+diffuse), `mix` (→ approximate diffuse). Each emits a named Warning at
+compile time.
 
-Material scattering for `path` is routed through a small render-level BSDF API that currently implements Lambertian diffuse, perfect mirror, GGX-style metal, simple plastic behavior, and dielectric glass reflection/transmission with smooth, rough, and thin variants through data-driven `MaterialKind` dispatch. Thick dielectric paths can opt into Beer-Lambert absorption through render material fields; this is a single active medium approximation, not a nested medium stack.
+**Lights:** `LightSource "infinite"` (HDRI environment with importance
+sampling), `LightSource "point"`, `LightSource "distant"`,
+`LightSource "spot"`, `AreaLightSource "diffuse"`.
 
-Direct-light MIS is split into render-level helpers and CPU path tracer orchestration. `yaoray_render` owns `PowerHeuristic()`, current XZ-rectangle area-light sampling and solid-angle PDF math, plus HDRI environment evaluation, equirectangular mapping, importance distribution, sampling, and PDF helpers. The CPU path tracer owns random sample generation, shadow visibility, previous-bounce state, and path throughput. Shadow visibility is a straight-line transmittance query: opaque materials block, while dielectric glass can transmit and tint direct area-light or environment-light samples without producing true refractive caustics.
+**Textures:** `Texture "imagemap"` (PNG / JPEG / TGA / BMP / HDR / PFM),
+`Texture "constant"`. Wrap modes: `repeat` and `clamp` (`black`
+degrades to clamp). Color space auto-detected from extension, explicit
+`"string encoding"` overrides.
 
-The asset layer imports OBJ, PLY, and static glTF/GLB files into `AssetResource`, preserving source asset geometry, textures, and material fields without owning render material kinds. OBJ import preserves vertex normals, UV coordinates, and basic MTL diffuse data (`Kd` and PNG `map_Kd`). PLY import supports ASCII and binary little-endian triangle or quad meshes with positions, optional normals, and optional UVs. glTF/GLB import preserves default or first scenes, node hierarchy transforms, `TRIANGLES` primitives, positions, optional normals, optional UVs, imported tangents, indexed and non-indexed geometry, base-color RGBA factors and textures, metallic/roughness factors and textures, normal texture scale, occlusion texture strength, emissive factors and textures, alpha mode/cutoff metadata, double-sided metadata, and sampler wrap modes. Embedded image buffers and `data:` image URIs are intentionally rejected for now.
+## Backend
 
-The render compiler consumes `AssetResource` from the default asset scene. It recursively traverses from the default asset scene's root nodes, composes node and instance transforms, lowers imported material fields into current diffuse/metal/plastic render material compatibility behavior, maps textures to render-owned RGBA textures, and expands mesh primitives into table-shaped geometry plus the current flat world-space triangle compatibility view in `RenderSceneIR`. Texture cache keys include file path, sampler wrap state, and intended color-space usage, so one PNG can be loaded as sRGB color data and linear non-color data when needed. glTF tangents are preserved when present; otherwise the compiler generates tangents from positions, normals, and UVs. Degenerate triangles in imported assets are skipped with a warning so real sample assets such as FlightHelmet compile, while hand-authored inline quads still report degeneracy as an authoring error. `instance.material` remains a whole-instance override for imported assets.
+A single-threaded reference renderer
+(`src/backends/cpu/cpu_debug_renderer.cpp`) plus a production
+multi-threaded path tracer
+(`src/backends/cpu/cpu_path_tracer.cpp`) with:
 
-The initial table geometry writer mirrors the compatibility triangle stream with one three-index primitive per render triangle. It establishes a GPU-packable contract without changing CPU traversal yet; vertex sharing and CPU table-native BVH preparation remain follow-up work.
+- Median-split BVH over the triangle table, plus a linear pass over
+  analytic spheres after the BVH walk.
+- Multiple importance sampling combining BSDF, area-light, and
+  environment-light samples.
+- Delta-light handling (no MIS vs BSDF) for point, distant, and spot.
+- Russian-roulette path termination starting at depth 3.
+- ACES, Reinhard, and identity tone mappers.
 
-The CPU backend owns final material sampling policy through `ResolveCpuMaterialSample()`: it interpolates UVs, multiplies base-color texture alpha by the factor alpha, reads metallic and roughness from the glTF metallic-roughness texture channels, resolves emissive textures, and transforms normal-map samples through the triangle TBN basis. Alpha mask visibility lives in CPU surface tracing rather than the BVH, which keeps the acceleration structure geometry-only for future CUDA or OptiX parity.
+## Showcase Scenes
 
-Imported asset limitations remain intentional: smoothing groups, glTF animation, skinning, morph targets, cameras, lights, sparse accessors, mesh compression, embedded image buffers, `data:` image URIs, texture transform extensions, occlusion darkening, alpha blending, material extensions, exact glTF PBR shading, mipmaps, and full material-library semantics remain future work. `docs/assets/khronos-sample-assets.md` records the small Khronos compatibility fixtures, committed FlightHelmet validation asset, and license notes.
+| Scene | Purpose |
+|---|---|
+| `scenes/pbrt/hello_emissive/` | Smallest end-to-end demo: trianglemesh + area light (M0 sanity). |
+| `scenes/pbrt/cornell_box_pbrt/` | Slice 1 — `Shape "sphere"` and `LightSource "point"`. |
+| `scenes/pbrt/material_studio/` | Slice 2 — HDRI environment + material parameter textures. |
+| `scenes/pbrt/texture_test/` | Slice 3 — wrap modes and normal-map data path. |
+| `scenes/pbrt/dining_room/README.md` | Slice 4 — Bitterli's PBRT v4 dining-room (downloaded; gitignored). |
 
-Inline quad assets let TOML scenes define small measured or hand-authored quad meshes directly. The Cornell Box example uses this path so the official measured vertices stay visible in the scene file. Its materials are current RGB diffuse/emissive approximations; spectral matching remains future work.
+The first four scenes are committed and exercised by CTest. The
+dining-room asset is large and CC-BY-licensed by its author, so the
+repo links to the download workflow rather than redistributing.
 
-The path-traced Cornell example is separate from the debug Cornell scene. The debug scene remains a fast geometry and pipeline smoke test; the path scene is for manual visual review of indirect diffuse lighting.
+## What's not in M1
 
-The material showcase scenes are Cornell-style manual previews for material behavior. `textured_quad.toml` verifies that OBJ UVs, MTL `map_Kd`, PNG loading, and CPU diffuse texture sampling work end to end. `gltf_textured_asset.toml` verifies that a small real glTF asset can travel through scene parsing, glTF loading, texture loading, scene compilation, CPU BVH preparation, and CPU path rendering. `gltf_flight_helmet.toml` verifies the committed FlightHelmet glTF compatibility target with external textures, tangents, normal maps, and metallic-roughness maps. `material_showcase.toml` uses inline quads and the CPU path tracer to show diffuse surfaces, emissive light panels, and a perfect mirror block. `material_v2_showcase.toml` adds polished metal, rough metal, and plastic preview objects. `hdri_lighting_showcase.toml` verifies that an HDRI environment can illuminate diffuse geometry and appear through mirror paths. `glass_showcase.toml` uses mesh spheres, a thin pane, and high-contrast backdrop cards to verify absorbing blue glass, rough amber glass, and thin glass through the CPU path tracer. Bistro is documented as a local-only large-scene benchmark in `docs/assets/bistro-local-benchmark.md`; Breakfast is documented as the first local PBRT benchmark in `docs/assets/pbrt-breakfast-local-benchmark.md`. Both are intentionally not committed. Texture Quality v1 still has no mipmaps, anisotropic filtering, user-facing filter controls, alpha blending, texture transforms, occlusion shading, or CUDA texture sampling parity. HDRI environment lighting does not yet include mipmapped rough-specular lookup, portal lights, sun/sky, LDR environment color-space controls, EXR I/O, or CUDA parity. Dielectric rendering remains a surface model with only a single active absorbing medium: nested medium stacks, caustic-specific algorithms, glTF glass extension import, and CUDA parity remain future work.
-
-Spectral rendering, advanced texture import, full imported material files, advanced BVH split methods, HDR output, more complete CPU path tracing, real CUDA rendering, and final-quality image output will be added in focused implementation plans. The full Integrator API refactor should wait until configurable integrator settings, a unified light interface, or CUDA path tracing make the current path loop too crowded.
+- Spectral rendering (RGB only).
+- Volumetrics / media.
+- Adaptive sampling.
+- CUDA backend.
+- IES light profiles.
+- Subdivision surfaces, displacement, hair primitives, curves.
+- Alternative samplers (`halton` / `sobol` / `pmj02bn`); they parse
+  but degrade to `independent` at compile time.
+- True black-border wrap (degrades to clamp).
+- Auto-tangent generation when trianglemesh has `uv` but no `S`.

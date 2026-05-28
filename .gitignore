@@ -8,6 +8,9 @@ out/
 .worktrees/
 .claude/worktrees/
 
+# Large CC-BY assets downloaded locally (e.g. Bitterli's dining-room).
+external/assets/
+
 # Local IDE state
 .vs/
 .vscode/
