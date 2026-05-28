@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -157,6 +158,252 @@ int BuildRecursive(
     return node_index;
 }
 
+constexpr int kSahBucketCount = 12;
+constexpr float kSahTraversalCost = 0.5f;
+
+struct SahBucket {
+    int count = 0;
+    Bounds3f bounds;
+};
+
+float SurfaceArea(const Bounds3f& bounds) {
+    if (bounds.min.x > bounds.max.x ||
+        bounds.min.y > bounds.max.y ||
+        bounds.min.z > bounds.max.z) {
+        return 0.0f;
+    }
+    const Vec3f e = Extent(bounds);
+    return 2.0f * (e.x * e.y + e.y * e.z + e.z * e.x);
+}
+
+int CentroidToBucket(float centroid_axis, float bounds_min_axis, float extent_axis) {
+    // Map centroid_axis in [bounds_min_axis, bounds_min_axis + extent_axis]
+    // to bucket in [0, kSahBucketCount). Caller guarantees extent_axis > 0.
+    const float t = (centroid_axis - bounds_min_axis) / extent_axis;
+    int bucket = static_cast<int>(t * static_cast<float>(kSahBucketCount));
+    if (bucket < 0) bucket = 0;
+    if (bucket >= kSahBucketCount) bucket = kSahBucketCount - 1;
+    return bucket;
+}
+
+// Returns true and populates *out_axis, *out_split_idx, *out_cost if a valid
+// SAH split is found. Returns false when every axis has near-zero centroid
+// extent (degenerate input) or every candidate split would leave one side
+// empty.
+bool ChooseBestSahSplit(
+    const std::vector<BvhPrimRef>& prims,
+    int begin,
+    int end,
+    const Bounds3f& node_bounds,
+    const Bounds3f& centroid_bounds,
+    int* out_axis,
+    int* out_split_idx,
+    float* out_cost
+) {
+    const float parent_area = SurfaceArea(node_bounds);
+    if (parent_area <= 0.0f) {
+        return false;
+    }
+    const Vec3f centroid_extent = Extent(centroid_bounds);
+
+    float best_cost = std::numeric_limits<float>::infinity();
+    int best_axis = -1;
+    int best_split = -1;
+
+    for (int axis = 0; axis < 3; ++axis) {
+        const float extent_axis =
+            (axis == 0) ? centroid_extent.x :
+            (axis == 1) ? centroid_extent.y : centroid_extent.z;
+        if (extent_axis < ParallelEpsilon) {
+            continue;
+        }
+        const float min_axis = AxisValue(centroid_bounds.min, axis);
+
+        SahBucket buckets[kSahBucketCount];
+        for (int i = begin; i < end; ++i) {
+            const BvhPrimRef& p = prims[static_cast<std::size_t>(i)];
+            const int b = CentroidToBucket(AxisValue(p.centroid, axis), min_axis, extent_axis);
+            buckets[b].count += 1;
+            buckets[b].bounds = UnionBounds(buckets[b].bounds, p.bounds);
+        }
+
+        // Forward sweep: prefix counts + prefix bounds (left side of each split).
+        SahBucket left[kSahBucketCount];
+        left[0] = buckets[0];
+        for (int i = 1; i < kSahBucketCount; ++i) {
+            left[i].count = left[i - 1].count + buckets[i].count;
+            left[i].bounds = UnionBounds(left[i - 1].bounds, buckets[i].bounds);
+        }
+
+        // Backward sweep: suffix counts + suffix bounds (right side of each split).
+        SahBucket right[kSahBucketCount];
+        right[kSahBucketCount - 1] = buckets[kSahBucketCount - 1];
+        for (int i = kSahBucketCount - 2; i >= 0; --i) {
+            right[i].count = right[i + 1].count + buckets[i].count;
+            right[i].bounds = UnionBounds(right[i + 1].bounds, buckets[i].bounds);
+        }
+
+        // Evaluate splits between bucket split_idx and split_idx + 1.
+        for (int split_idx = 0; split_idx < kSahBucketCount - 1; ++split_idx) {
+            const int n_left = left[split_idx].count;
+            const int n_right = right[split_idx + 1].count;
+            if (n_left == 0 || n_right == 0) {
+                continue;
+            }
+            const float cost =
+                kSahTraversalCost +
+                (static_cast<float>(n_left) * SurfaceArea(left[split_idx].bounds) +
+                 static_cast<float>(n_right) * SurfaceArea(right[split_idx + 1].bounds)) /
+                parent_area;
+            if (cost < best_cost) {
+                best_cost = cost;
+                best_axis = axis;
+                best_split = split_idx;
+            }
+        }
+    }
+
+    if (best_axis < 0) {
+        return false;
+    }
+    *out_axis = best_axis;
+    *out_split_idx = best_split;
+    *out_cost = best_cost;
+    return true;
+}
+
+int BuildRecursiveSah(
+    std::vector<BvhPrimRef>& prims,
+    int begin,
+    int end,
+    int depth,
+    int max_leaf_triangles,
+    RenderBvh& bvh,
+    std::vector<std::string>& errors
+) {
+    if (begin >= end) {
+        errors.push_back("BVH build produced an empty primitive range");
+        return -1;
+    }
+
+    const int node_index = static_cast<int>(bvh.nodes.size());
+    bvh.nodes.push_back(RenderBvhNode{});
+
+    Bounds3f node_bounds;
+    Bounds3f centroid_bounds;
+    for (int i = begin; i < end; ++i) {
+        node_bounds = UnionBounds(node_bounds, prims[static_cast<std::size_t>(i)].bounds);
+        centroid_bounds = Union(centroid_bounds, prims[static_cast<std::size_t>(i)].centroid);
+    }
+
+    if (!IsFinite(node_bounds) || !IsFinite(centroid_bounds)) {
+        errors.push_back("BVH build encountered non-finite primitive bounds");
+        return -1;
+    }
+
+    const int primitive_count = end - begin;
+
+    // Leaf criterion (a): small enough -> leaf regardless of SAH cost.
+    if (primitive_count <= max_leaf_triangles) {
+        const int first_triangle = static_cast<int>(bvh.triangle_indices.size());
+        for (int i = begin; i < end; ++i) {
+            bvh.triangle_indices.push_back(prims[static_cast<std::size_t>(i)].flat_index);
+        }
+        bvh.nodes[static_cast<std::size_t>(node_index)] = RenderBvhNode{
+            node_bounds, -1, -1, first_triangle, primitive_count
+        };
+        bvh.max_depth = std::max(bvh.max_depth, depth);
+        return node_index;
+    }
+
+    int best_axis = -1;
+    int best_split = -1;
+    float best_cost = std::numeric_limits<float>::infinity();
+    const bool found_split = ChooseBestSahSplit(
+        prims, begin, end, node_bounds, centroid_bounds,
+        &best_axis, &best_split, &best_cost
+    );
+
+    // Leaf criterion (b): SAH says splitting is more expensive than leafing.
+    const float leaf_cost = static_cast<float>(primitive_count);
+    if (found_split && best_cost >= leaf_cost) {
+        const int first_triangle = static_cast<int>(bvh.triangle_indices.size());
+        for (int i = begin; i < end; ++i) {
+            bvh.triangle_indices.push_back(prims[static_cast<std::size_t>(i)].flat_index);
+        }
+        bvh.nodes[static_cast<std::size_t>(node_index)] = RenderBvhNode{
+            node_bounds, -1, -1, first_triangle, primitive_count
+        };
+        bvh.max_depth = std::max(bvh.max_depth, depth);
+        return node_index;
+    }
+
+    int mid = -1;
+    if (found_split) {
+        // Partition by bucket assignment along best_axis.
+        const Vec3f centroid_extent = Extent(centroid_bounds);
+        const float extent_axis =
+            (best_axis == 0) ? centroid_extent.x :
+            (best_axis == 1) ? centroid_extent.y : centroid_extent.z;
+        const float min_axis = AxisValue(centroid_bounds.min, best_axis);
+        const int split_idx = best_split;
+
+        auto partition_iter = std::partition(
+            prims.begin() + begin, prims.begin() + end,
+            [best_axis, min_axis, extent_axis, split_idx](const BvhPrimRef& p) {
+                return CentroidToBucket(AxisValue(p.centroid, best_axis), min_axis, extent_axis) <= split_idx;
+            }
+        );
+        mid = static_cast<int>(partition_iter - prims.begin());
+
+        if (mid == begin || mid == end) {
+            // Defensive: SAH should never pick a split that leaves a side
+            // empty (the n_left==0 / n_right==0 skip in ChooseBestSahSplit
+            // filters that), but float rounding in bucket mapping could
+            // collapse the partition. Fall back to median.
+            mid = begin + primitive_count / 2;
+            std::nth_element(
+                prims.begin() + begin, prims.begin() + mid, prims.begin() + end,
+                [best_axis](const BvhPrimRef& a, const BvhPrimRef& b) {
+                    return AxisValue(a.centroid, best_axis) < AxisValue(b.centroid, best_axis);
+                }
+            );
+        }
+    } else {
+        // No valid SAH split anywhere -> degenerate centroid bounds. Force an
+        // even partition along the longest centroid axis (extent may be tiny
+        // or zero; the nth_element is a no-op when all centroids are equal,
+        // and the index-based midpoint still partitions deterministically).
+        const int axis = LongestAxis(centroid_bounds);
+        mid = begin + primitive_count / 2;
+        std::nth_element(
+            prims.begin() + begin, prims.begin() + mid, prims.begin() + end,
+            [axis](const BvhPrimRef& a, const BvhPrimRef& b) {
+                return AxisValue(a.centroid, axis) < AxisValue(b.centroid, axis);
+            }
+        );
+    }
+
+    if (mid <= begin || mid >= end) {
+        errors.push_back("BVH SAH split produced an empty child range");
+        return -1;
+    }
+
+    const int left_child = BuildRecursiveSah(
+        prims, begin, mid, depth + 1, max_leaf_triangles, bvh, errors);
+    const int right_child = BuildRecursiveSah(
+        prims, mid, end, depth + 1, max_leaf_triangles, bvh, errors);
+    if (left_child < 0 || right_child < 0) {
+        return -1;
+    }
+
+    bvh.nodes[static_cast<std::size_t>(node_index)] = RenderBvhNode{
+        node_bounds, left_child, right_child, 0, 0
+    };
+    bvh.max_depth = std::max(bvh.max_depth, depth);
+    return node_index;
+}
+
 } // namespace
 
 BvhBuildResult BuildBvh(const RenderSceneIR& scene, const BvhBuildOptions& options) {
@@ -164,11 +411,6 @@ BvhBuildResult BuildBvh(const RenderSceneIR& scene, const BvhBuildOptions& optio
 
     if (options.max_leaf_triangles < 1) {
         result.errors.push_back("BVH max_leaf_triangles must be at least 1");
-        return result;
-    }
-
-    if (options.split_method == BvhSplitMethod::SahBucketBinning) {
-        result.errors.push_back("SahBucketBinning builder not yet implemented");
         return result;
     }
 
@@ -220,15 +462,31 @@ BvhBuildResult BuildBvh(const RenderSceneIR& scene, const BvhBuildOptions& optio
     }
     result.bvh.total_triangles = flat_tri;
 
-    const int root = BuildRecursive(
-        prims,
-        0,
-        static_cast<int>(prims.size()),
-        1,
-        options.max_leaf_triangles,
-        result.bvh,
-        result.errors
-    );
+    int root = -1;
+    switch (options.split_method) {
+        case BvhSplitMethod::SahBucketBinning:
+            root = BuildRecursiveSah(
+                prims,
+                0,
+                static_cast<int>(prims.size()),
+                1,
+                options.max_leaf_triangles,
+                result.bvh,
+                result.errors
+            );
+            break;
+        case BvhSplitMethod::LongestAxisMedian:
+            root = BuildRecursive(
+                prims,
+                0,
+                static_cast<int>(prims.size()),
+                1,
+                options.max_leaf_triangles,
+                result.bvh,
+                result.errors
+            );
+            break;
+    }
     if (root != 0 || !result.errors.empty()) {
         result.bvh = RenderBvh{};
     }
