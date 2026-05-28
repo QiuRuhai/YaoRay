@@ -294,3 +294,66 @@ YR_TEST(bvh_sah_respects_max_leaf_triangles) {
     YR_EXPECT_EQ(result.bvh.nodes[0].left_child, -1);
     YR_EXPECT_EQ(result.bvh.nodes[0].right_child, -1);
 }
+
+YR_TEST(bvh_parallel_matches_serial_byte_for_byte) {
+    // Same scene, two builds: one forced serial (thread_count=1), one
+    // forced parallel with a lowered subtree-threshold so the 12-triangle
+    // cluster scene actually engages the parallel code path. The two
+    // builds must produce bitwise-identical RenderBvh output.
+    yr::RenderSceneIR scene = MakeClusteredTriangleScene();
+
+    yr::BvhBuildOptions serial_opts;
+    serial_opts.split_method = yr::BvhSplitMethod::SahBucketBinning;
+    serial_opts.thread_count = 1;
+    serial_opts.parallel_min_subtree_size = 4;
+    const yr::BvhBuildResult serial = yr::BuildBvh(scene, serial_opts);
+
+    yr::BvhBuildOptions parallel_opts;
+    parallel_opts.split_method = yr::BvhSplitMethod::SahBucketBinning;
+    parallel_opts.thread_count = 4;
+    parallel_opts.parallel_min_subtree_size = 4;
+    const yr::BvhBuildResult parallel = yr::BuildBvh(scene, parallel_opts);
+
+    YR_EXPECT_TRUE(serial.errors.empty());
+    YR_EXPECT_TRUE(parallel.errors.empty());
+    YR_EXPECT_EQ(serial.bvh.nodes.size(), parallel.bvh.nodes.size());
+    YR_EXPECT_EQ(serial.bvh.triangle_indices.size(), parallel.bvh.triangle_indices.size());
+    YR_EXPECT_EQ(serial.bvh.max_depth, parallel.bvh.max_depth);
+    YR_EXPECT_EQ(serial.bvh.total_triangles, parallel.bvh.total_triangles);
+
+    for (std::size_t i = 0; i < serial.bvh.nodes.size(); ++i) {
+        const yr::RenderBvhNode& s = serial.bvh.nodes[i];
+        const yr::RenderBvhNode& p = parallel.bvh.nodes[i];
+        YR_EXPECT_EQ(s.bounds.min.x, p.bounds.min.x);
+        YR_EXPECT_EQ(s.bounds.min.y, p.bounds.min.y);
+        YR_EXPECT_EQ(s.bounds.min.z, p.bounds.min.z);
+        YR_EXPECT_EQ(s.bounds.max.x, p.bounds.max.x);
+        YR_EXPECT_EQ(s.bounds.max.y, p.bounds.max.y);
+        YR_EXPECT_EQ(s.bounds.max.z, p.bounds.max.z);
+        YR_EXPECT_EQ(s.left_child, p.left_child);
+        YR_EXPECT_EQ(s.right_child, p.right_child);
+        YR_EXPECT_EQ(s.first_triangle, p.first_triangle);
+        YR_EXPECT_EQ(s.triangle_count, p.triangle_count);
+    }
+    for (std::size_t i = 0; i < serial.bvh.triangle_indices.size(); ++i) {
+        YR_EXPECT_EQ(serial.bvh.triangle_indices[i], parallel.bvh.triangle_indices[i]);
+    }
+}
+
+YR_TEST(bvh_parallel_handles_below_threshold_serially) {
+    // With parallel_min_subtree_size larger than the scene, the parallel
+    // builder must fall through to the serial path on the first call and
+    // still produce a valid BVH. This verifies the fast-path early-out
+    // doesn't break small-scene behavior.
+    yr::RenderSceneIR scene = MakeClusteredTriangleScene();  // 12 triangles
+
+    yr::BvhBuildOptions options;
+    options.split_method = yr::BvhSplitMethod::SahBucketBinning;
+    options.thread_count = 8;
+    options.parallel_min_subtree_size = 1024;  // > 12, so no parallel
+    const yr::BvhBuildResult result = yr::BuildBvh(scene, options);
+
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_EQ(result.bvh.total_triangles, 12);
+    YR_EXPECT_TRUE(!result.bvh.nodes.empty());
+}

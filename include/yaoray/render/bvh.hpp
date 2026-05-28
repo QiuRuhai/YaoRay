@@ -17,6 +17,14 @@ enum class BvhSplitMethod { LongestAxisMedian, SahBucketBinning };
 struct BvhBuildOptions {
     BvhSplitMethod split_method = BvhSplitMethod::SahBucketBinning;
     int max_leaf_triangles = 4;
+    // Number of worker threads for parallel BVH construction.
+    // 0 = auto (std::thread::hardware_concurrency()).
+    // 1 = serial (no threading).
+    // >=2 = parallel with up to that many threads.
+    int thread_count = 0;
+    // Subtrees smaller than this many primitives build serially even when
+    // parallel construction is active.
+    int parallel_min_subtree_size = 1024;
 };
 
 struct RenderBvhNode {
