@@ -282,23 +282,115 @@ void CompileConstantTexture(
     bindings.constant_values[name] = value;
 }
 
+// Compile-time fold for PBRT v4 "scale" textures. The scale wraps an inner
+// texture (folded constant OR real RenderTexture) and multiplies every value
+// by a single scalar. We resolve the inner binding, multiply each channel,
+// and register the result as an ordinary binding -- no backend changes
+// required because the output is indistinguishable from a regular constant
+// or imagemap from the consumer's POV. PBRT v4 also permits an "rgb scale"
+// 3-component scaling vector, but every scale wrapper used by Pavilion (and
+// most modern scenes) uses scalar scaling, so we take only floats[0].
+void CompileScaleTexture(
+    const std::string& name,
+    const PbrtEntity& entity,
+    const PbrtScene& scene,
+    RenderSceneIR& ir,
+    TextureBindings& bindings,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    // Scale factor: default to 1.0 (passes inner through unchanged).
+    float scale = 1.0f;
+    const PbrtParam* scale_param = FindParam(entity.params, "scale");
+    if (scale_param != nullptr && !scale_param->floats.empty()) {
+        scale = scale_param->floats[0];
+    }
+
+    // Inner texture reference is required.
+    const PbrtParam* tex_param = FindParam(entity.params, "tex");
+    if (tex_param == nullptr || tex_param->strings.empty()) {
+        diagnostics.push_back(Warning(scene, "Texture." + name,
+            "scale texture missing inner 'tex' reference; degrading to neutral constant"));
+        bindings.name_to_index[name] = -1;
+        bindings.constant_values[name] = Color3f{1.0f, 1.0f, 1.0f};
+        return;
+    }
+    const std::string inner_name = tex_param->strings[0];
+
+    // Resolve the inner binding produced by an earlier pass.
+    auto it = bindings.name_to_index.find(inner_name);
+    if (it == bindings.name_to_index.end()) {
+        diagnostics.push_back(Warning(scene, "Texture." + name,
+            "scale texture references unknown inner texture '" + inner_name +
+            "'; degrading to neutral constant"));
+        bindings.name_to_index[name] = -1;
+        bindings.constant_values[name] = Color3f{1.0f, 1.0f, 1.0f};
+        return;
+    }
+
+    if (it->second < 0) {
+        // Inner is a folded constant: produce a new folded constant.
+        auto cv = bindings.constant_values.find(inner_name);
+        const Color3f inner_value = (cv != bindings.constant_values.end())
+            ? cv->second
+            : Color3f{1.0f, 1.0f, 1.0f};
+        bindings.name_to_index[name] = -1;
+        bindings.constant_values[name] = inner_value * scale;
+        return;
+    }
+
+    // Inner is a real RenderTexture: clone the texels and scale the RGB
+    // channels. Alpha is preserved so masked textures (if any) keep their
+    // coverage. The clone's color_space / filter / wrap modes are copied
+    // verbatim; we are scaling in the inner's color space (this matches
+    // PBRT's behaviour of applying scale post-decode).
+    const RenderTexture& inner_tex = ir.textures[static_cast<std::size_t>(it->second)];
+    RenderTexture scaled_tex = inner_tex;
+    for (Color4f& texel : scaled_tex.texels) {
+        texel.x *= scale;
+        texel.y *= scale;
+        texel.z *= scale;
+    }
+    bindings.name_to_index[name] = static_cast<int>(ir.textures.size());
+    ir.textures.push_back(std::move(scaled_tex));
+}
+
 TextureBindings CompileTextures(
     const PbrtScene& scene,
     RenderSceneIR& ir,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
     TextureBindings bindings;
+
+    // Pass 1: leaf textures with no inter-texture dependencies.
     for (const auto& [name, entity] : scene.named_textures) {
         if (entity.type == "imagemap") {
             CompileImagemapTexture(name, entity, scene, ir, bindings, diagnostics);
         } else if (entity.type == "constant") {
             CompileConstantTexture(name, entity, bindings);
-        } else {
+        }
+    }
+
+    // Pass 2: scale wrappers, which need Pass 1's bindings to look up the
+    // inner texture they reference.
+    for (const auto& [name, entity] : scene.named_textures) {
+        if (entity.type == "scale") {
+            CompileScaleTexture(name, entity, scene, ir, bindings, diagnostics);
+        }
+    }
+
+    // Pass 3: anything else still gets the catch-all unsupported warning,
+    // so unimplemented classes (checkerboard, mix, marble, ...) remain
+    // grep-friendly in the diagnostics output.
+    for (const auto& [name, entity] : scene.named_textures) {
+        if (entity.type != "imagemap" &&
+            entity.type != "constant" &&
+            entity.type != "scale") {
             diagnostics.push_back(Warning(scene, "Texture." + name,
                 "unsupported texture class '" + entity.type + "' is ignored in M1; "
                 "callers will see the parameter fall back to its inline constant"));
         }
     }
+
     return bindings;
 }
 
