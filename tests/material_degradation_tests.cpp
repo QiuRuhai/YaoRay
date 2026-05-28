@@ -96,3 +96,33 @@ YR_TEST(material_degradation_unknown_kind_still_emits_catch_all_warning) {
     YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, yr::DiagnosticSeverity::Warning,
                                        "totally_made_up_kind"));
 }
+
+YR_TEST(material_degradation_mix_uses_declared_reflectance) {
+    yr::PbrtScene pbrt = MinimalSceneWithMaterial("mix");
+    // Override the material to include a specific reflectance — mix mirrors
+    // subsurface's "preserve declared reflectance if present" pattern.
+    yr::PbrtEntity mat;
+    mat.type = "mix";
+    mat.params.push_back(yr::PbrtParam{"rgb", "reflectance", {0.3f, 0.6f, 0.9f}, {}, {}, {}});
+    pbrt.named_materials["test_mat"] = mat;
+
+    const yr::SceneCompileResult result = yr::CompilePbrtScene(pbrt);
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_EQ(result.scene->materials.size(), std::size_t{1});
+    const yr::RenderMaterial& m = result.scene->materials[0];
+    YR_EXPECT_TRUE(m.kind == yr::RenderMaterialKind::Diffuse);
+    YR_EXPECT_NEAR(m.reflectance.value.x, 0.3f, 1.0e-6);
+    YR_EXPECT_NEAR(m.reflectance.value.y, 0.6f, 1.0e-6);
+    YR_EXPECT_NEAR(m.reflectance.value.z, 0.9f, 1.0e-6);
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, yr::DiagnosticSeverity::Warning, "mix"));
+}
+
+YR_TEST(material_degradation_mix_without_reflectance_defaults_to_grey) {
+    const yr::PbrtScene pbrt = MinimalSceneWithMaterial("mix");
+    const yr::SceneCompileResult result = yr::CompilePbrtScene(pbrt);
+    YR_EXPECT_TRUE(result.scene.has_value());
+    const yr::RenderMaterial& m = result.scene->materials[0];
+    YR_EXPECT_TRUE(m.kind == yr::RenderMaterialKind::Diffuse);
+    YR_EXPECT_NEAR(m.reflectance.value.x, 0.5f, 1.0e-6);
+    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, yr::DiagnosticSeverity::Warning, "mix"));
+}
