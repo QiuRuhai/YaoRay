@@ -12,10 +12,10 @@ namespace yr {
 
 struct RenderSceneIR;
 
-enum class BvhSplitMethod { LongestAxisMedian };
+enum class BvhSplitMethod { LongestAxisMedian, SahBucketBinning };
 
 struct BvhBuildOptions {
-    BvhSplitMethod split_method = BvhSplitMethod::LongestAxisMedian;
+    BvhSplitMethod split_method = BvhSplitMethod::SahBucketBinning;
     int max_leaf_triangles = 4;
 };
 

@@ -36,6 +36,26 @@ void AddTriangle(yr::RenderSceneIR& scene, float x_offset) {
     scene.primitives.push_back(yr::RenderPrimitive{base, 3, 0, true, false, false});
 }
 
+yr::RenderSceneIR MakeClusteredTriangleScene() {
+    // Three clusters of 4 triangles each, along the X axis at x = 0, 5, 10.
+    // SAH should isolate one cluster on the first split (4 vs 8 partition),
+    // producing a smaller tree than the median-split builder's balanced
+    // 6-vs-6 partition.
+    yr::RenderSceneIR scene = MakeSingleTriangleScene(0.0f);
+    AddTriangle(scene, 0.05f);
+    AddTriangle(scene, 0.10f);
+    AddTriangle(scene, 0.15f);
+    AddTriangle(scene, 5.00f);
+    AddTriangle(scene, 5.05f);
+    AddTriangle(scene, 5.10f);
+    AddTriangle(scene, 5.15f);
+    AddTriangle(scene, 10.00f);
+    AddTriangle(scene, 10.05f);
+    AddTriangle(scene, 10.10f);
+    AddTriangle(scene, 10.15f);
+    return scene;  // 12 triangles total
+}
+
 bool HasErrorContaining(const yr::BvhBuildResult& result, const char* text) {
     for (const std::string& error : result.errors) {
         if (error.find(text) != std::string::npos) {
@@ -169,4 +189,108 @@ YR_TEST(bvh_intersect_picks_closer_of_sphere_and_triangle) {
     YR_EXPECT_EQ(hit.sphere_index, 0);
     YR_EXPECT_EQ(hit.triangle_index, -1);
     YR_EXPECT_NEAR(hit.t, 2.5f, 1.0e-5);
+}
+
+YR_TEST(bvh_sah_builds_valid_bvh_for_five_triangles) {
+    yr::RenderSceneIR scene = MakeSingleTriangleScene(0.0f);
+    AddTriangle(scene, 1.0f);
+    AddTriangle(scene, 2.0f);
+    AddTriangle(scene, 3.0f);
+    AddTriangle(scene, 4.0f);
+
+    yr::BvhBuildOptions options;
+    options.split_method = yr::BvhSplitMethod::SahBucketBinning;
+    const yr::BvhBuildResult result = yr::BuildBvh(scene, options);
+
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_EQ(result.bvh.total_triangles, 5);
+    YR_EXPECT_TRUE(!result.bvh.nodes.empty());
+    YR_EXPECT_TRUE(result.bvh.max_depth >= 1);
+}
+
+YR_TEST(bvh_sah_chooses_better_split_than_median_for_clusters) {
+    // Asymmetric input: SAH isolates a 4-triangle cluster on the first
+    // split, producing fewer total nodes than median's balanced 6-vs-6
+    // split. Expected: SAH = 5 nodes, median = 7 nodes.
+    yr::RenderSceneIR scene = MakeClusteredTriangleScene();
+
+    yr::BvhBuildOptions sah_options;
+    sah_options.split_method = yr::BvhSplitMethod::SahBucketBinning;
+    const yr::BvhBuildResult sah = yr::BuildBvh(scene, sah_options);
+
+    yr::BvhBuildOptions median_options;
+    median_options.split_method = yr::BvhSplitMethod::LongestAxisMedian;
+    const yr::BvhBuildResult median = yr::BuildBvh(scene, median_options);
+
+    YR_EXPECT_TRUE(sah.errors.empty());
+    YR_EXPECT_TRUE(median.errors.empty());
+    YR_EXPECT_EQ(sah.bvh.total_triangles, 12);
+    YR_EXPECT_EQ(median.bvh.total_triangles, 12);
+    YR_EXPECT_TRUE(sah.bvh.nodes.size() < median.bvh.nodes.size());
+}
+
+YR_TEST(bvh_sah_and_median_return_same_hit_for_simple_ray) {
+    // Both split methods must produce a BVH that, traced with the same
+    // ray, returns the same hit. Geometry organization may differ but
+    // the per-pixel intersection result must not.
+    yr::RenderSceneIR scene = MakeClusteredTriangleScene();
+
+    yr::BvhBuildOptions sah_options;
+    sah_options.split_method = yr::BvhSplitMethod::SahBucketBinning;
+    const yr::BvhBuildResult sah = yr::BuildBvh(scene, sah_options);
+
+    yr::BvhBuildOptions median_options;
+    median_options.split_method = yr::BvhSplitMethod::LongestAxisMedian;
+    const yr::BvhBuildResult median = yr::BuildBvh(scene, median_options);
+
+    // Ray straight down through the middle cluster at x = 5.
+    const yr::Ray3f ray{yr::Point3f{5.0f, 0.0f, 1.0f}, yr::Vec3f{0.0f, 0.0f, -1.0f}};
+    yr::BvhTraceStats sah_stats;
+    yr::BvhTraceStats median_stats;
+    const yr::BvhHit sah_hit = yr::IntersectBvh(scene, sah.bvh, ray, sah_stats);
+    const yr::BvhHit median_hit = yr::IntersectBvh(scene, median.bvh, ray, median_stats);
+
+    YR_EXPECT_TRUE(sah_hit.hit);
+    YR_EXPECT_TRUE(median_hit.hit);
+    YR_EXPECT_NEAR(sah_hit.t, median_hit.t, 1e-6f);
+    // Both must select the same triangle (the closest-t resolution
+    // should agree even though the BVH organization differs).
+    YR_EXPECT_EQ(sah_hit.triangle_index, median_hit.triangle_index);
+}
+
+YR_TEST(bvh_sah_handles_degenerate_centroid_bounds) {
+    // 8 triangles all at the same centroid -> centroid bounds is
+    // degenerate on every axis -> SAH cannot find a valid split.
+    // Builder must still produce a valid BVH via the median fallback.
+    yr::RenderSceneIR scene;
+    for (int i = 0; i < 8; ++i) {
+        AddTriangle(scene, 0.0f);
+    }
+
+    yr::BvhBuildOptions options;
+    options.split_method = yr::BvhSplitMethod::SahBucketBinning;
+    const yr::BvhBuildResult result = yr::BuildBvh(scene, options);
+
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_EQ(result.bvh.total_triangles, 8);
+    YR_EXPECT_TRUE(!result.bvh.nodes.empty());
+}
+
+YR_TEST(bvh_sah_respects_max_leaf_triangles) {
+    // With max_leaf_triangles = 4 and 3 well-separated triangles, SAH
+    // must produce a single leaf (count <= max_leaf_triangles triggers
+    // the leaf criterion regardless of SAH cost).
+    yr::RenderSceneIR scene = MakeSingleTriangleScene(0.0f);
+    AddTriangle(scene, 1.0f);
+    AddTriangle(scene, 2.0f);
+
+    yr::BvhBuildOptions options;
+    options.split_method = yr::BvhSplitMethod::SahBucketBinning;
+    const yr::BvhBuildResult result = yr::BuildBvh(scene, options);
+
+    YR_EXPECT_TRUE(result.errors.empty());
+    YR_EXPECT_EQ(result.bvh.nodes.size(), std::size_t{1});
+    YR_EXPECT_EQ(result.bvh.nodes[0].triangle_count, 3);
+    YR_EXPECT_EQ(result.bvh.nodes[0].left_child, -1);
+    YR_EXPECT_EQ(result.bvh.nodes[0].right_child, -1);
 }
