@@ -33,8 +33,7 @@ SceneDiagnostic Warning(const PbrtScene& scene, std::string field, std::string m
 SceneDiagnostic MaterialFallbackWarning(const PbrtScene& scene, const std::string& declared_kind) {
     return Warning(scene,
         "Material",
-        "material kind '" + declared_kind + "' is not supported in M1 Slice 1; falling back to 'diffuse'. "
-        "(Slice 4 will replace this catch-all with a per-kind substitution table.)");
+        "material kind '" + declared_kind + "' is not directly supported; applying degradation policy substitution.");
 }
 
 const PbrtParam* FindParam(const std::vector<PbrtParam>& params, const std::string& name) {
@@ -505,11 +504,35 @@ int CompileMaterial(
             material.reflectance = TexParam3fFromParams(params, "reflectance",
                 material.reflectance.value, bindings, scene, diagnostics);
         }
-    } else {
+    } else if (type == "subsurface") {
         diagnostics.push_back(MaterialFallbackWarning(scene, type));
         material.kind = RenderMaterialKind::Diffuse;
         material.reflectance = TexParam3fFromParams(params, "reflectance",
             Color3f{0.5f, 0.5f, 0.5f}, bindings, scene, diagnostics);
+    } else if (type == "measured") {
+        diagnostics.push_back(MaterialFallbackWarning(scene, type));
+        material.kind = RenderMaterialKind::Conductor;
+        material.eta.value = Color3f{0.2f, 0.2f, 0.2f};
+        material.k.value = Color3f{1.0f, 1.0f, 1.0f};
+        material.uroughness.value = 0.0f;
+        material.vroughness.value = 0.0f;
+    } else if (type == "hair") {
+        diagnostics.push_back(MaterialFallbackWarning(scene, type));
+        material.kind = RenderMaterialKind::Diffuse;
+        material.reflectance.value = Color3f{0.5f, 0.5f, 0.5f};
+    } else if (type == "mix") {
+        diagnostics.push_back(MaterialFallbackWarning(scene, type));
+        material.kind = RenderMaterialKind::Diffuse;
+        // PBRT v4 mix material references two named materials, which we don't
+        // resolve recursively in M1. Use the inline-reflectance param if the
+        // mix declares one; otherwise default grey.
+        material.reflectance = TexParam3fFromParams(params, "reflectance",
+            Color3f{0.5f, 0.5f, 0.5f}, bindings, scene, diagnostics);
+    } else {
+        // Catch-all: any other unrecognized kind.
+        diagnostics.push_back(MaterialFallbackWarning(scene, type));
+        material.kind = RenderMaterialKind::Diffuse;
+        material.reflectance.value = Color3f{0.5f, 0.5f, 0.5f};
     }
 
     CompileNormalMap(params, scene, ir, material, diagnostics);
