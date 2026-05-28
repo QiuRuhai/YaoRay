@@ -28,6 +28,10 @@ yr::RenderTexture MakeEnvironmentTexture() {
 yr::RenderSceneIR MakeHdriScene() {
     yr::RenderSceneIR scene;
     scene.environment.active = true;
+    // Default radiance to neutral white so existing tests focus on the
+    // texture * strength behaviour; tests that exercise L*scale weighting
+    // override .radiance explicitly.
+    scene.environment.radiance = yr::Color3f{1.0f, 1.0f, 1.0f};
     scene.environment.strength = 2.0f;
     scene.environment.texture_index = 0;
     scene.environment.distribution_index = 0;
@@ -76,6 +80,48 @@ YR_TEST(environment_evaluates_hdri_with_strength) {
     YR_EXPECT_TRUE(color.x > 8.0f);
     YR_EXPECT_NEAR(color.x, color.y, 1e-5);
     YR_EXPECT_NEAR(color.y, color.z, 1e-5);
+}
+
+// Regression: the active-texture branch of EvaluateEnvironment must apply
+// scene.environment.radiance (which the scene compiler populates from PBRT's
+// LightSource "infinite" `L * scale` parameters). Prior to the fix the
+// active branch returned `SampleTexture(texture, uv) * strength`, dropping
+// `radiance` and rendering HDRI environments at raw texture brightness
+// regardless of the scene's L and scale overrides. The inactive-texture
+// branch always used `radiance * strength` correctly, so the two paths are
+// now consistent.
+YR_TEST(environment_active_branch_applies_radiance_modulation) {
+    yr::RenderSceneIR scene;
+
+    // Single-texel white texture so SampleTexture deterministically returns
+    // Color3f{1, 1, 1} no matter which uv we feed it.
+    yr::RenderTexture texture;
+    texture.width = 1;
+    texture.height = 1;
+    texture.wrap_s = yr::TextureWrap::Repeat;
+    texture.wrap_t = yr::TextureWrap::ClampToEdge;
+    texture.color_space = yr::TextureColorSpace::Linear;
+    texture.texels.push_back(yr::Color4f{1.0f, 1.0f, 1.0f, 1.0f});
+    scene.textures.push_back(std::move(texture));
+    scene.environment_distributions.push_back(yr::BuildEnvironmentDistribution(scene.textures[0]));
+
+    scene.environment.active = true;
+    // Asymmetric per-channel radiance so a missing multiply is detected on
+    // any channel (luminance-only checks would miss this).
+    scene.environment.radiance = yr::Color3f{2.0f, 3.0f, 4.0f};
+    scene.environment.strength = 1.0f;
+    scene.environment.texture_index = 0;
+    scene.environment.distribution_index = 0;
+
+    const yr::Color3f color = yr::EvaluateEnvironment(
+        scene,
+        yr::Vec3f{0.0f, 1.0f, 0.0f}
+    );
+
+    // Expected: texture(1,1,1) * radiance(2,3,4) * strength(1) = (2, 3, 4).
+    YR_EXPECT_NEAR(color.x, 2.0, 1e-5);
+    YR_EXPECT_NEAR(color.y, 3.0, 1e-5);
+    YR_EXPECT_NEAR(color.z, 4.0, 1e-5);
 }
 
 YR_TEST(environment_distribution_prefers_bright_texel) {

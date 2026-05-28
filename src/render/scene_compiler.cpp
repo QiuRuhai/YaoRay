@@ -83,6 +83,16 @@ void CompileFilm(const PbrtScene& scene, RenderSceneIR& ir) {
     } else {
         ir.film.output = scene.source_root / "out" / (scene.source_path.stem().string() + ".png");
     }
+
+    // PBRT v4 Film "float iso" — sensor/film sensitivity. Default 100.
+    // Maps to exposure stops via log2(iso / 100) so that ISO 100 = no scaling,
+    // ISO 200 = +1 stop (2x), ISO 400 = +2 stops (4x), ISO 500 ≈ +2.32 stops,
+    // etc. Routed into the existing ApplyExposure pipeline (tone_mapping.cpp)
+    // via FilmSettings::exposure.
+    const float iso = FloatParam(FindParam(params, "iso"), 100.0f);
+    if (iso > 0.0f) {
+        ir.film.exposure = std::log2(iso / 100.0f);
+    }
 }
 
 void CompileCamera(const PbrtScene& scene, RenderSceneIR& ir) {
@@ -222,7 +232,7 @@ bool CompileImagemapTexture(
     });
 
     TextureLoadResult load;
-    if (ext == ".hdr" || ext == ".pfm") {
+    if (ext == ".hdr" || ext == ".pfm" || ext == ".exr") {
         load = LoadHdrTexture(resolved);
     } else if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
                ext == ".tga" || ext == ".bmp") {
