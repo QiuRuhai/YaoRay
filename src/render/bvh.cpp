@@ -167,6 +167,11 @@ BvhBuildResult BuildBvh(const RenderSceneIR& scene, const BvhBuildOptions& optio
         return result;
     }
 
+    if (options.split_method == BvhSplitMethod::SahBucketBinning) {
+        result.errors.push_back("SahBucketBinning builder not yet implemented");
+        return result;
+    }
+
     // Build flat triangle list from table geometry
     std::vector<BvhPrimRef> prims;
     int flat_tri = 0;
