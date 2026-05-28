@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <limits>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace yr {
@@ -407,6 +408,143 @@ int BuildSubtreeSerial(
     return node_index;
 }
 
+// Merges a thread-local subtree's BVH into the parent BVH at the current
+// position. Rewrites child indices (+= base_node_offset) and first_triangle
+// offsets (+= base_tri_offset). Returns the merged subtree's root index in
+// the parent BVH (= base_node_offset).
+int MergeSubtree(const RenderBvh& subtree, RenderBvh& bvh) {
+    const int base_node_offset = static_cast<int>(bvh.nodes.size());
+    const int base_tri_offset = static_cast<int>(bvh.triangle_indices.size());
+
+    bvh.nodes.reserve(bvh.nodes.size() + subtree.nodes.size());
+    for (const RenderBvhNode& node : subtree.nodes) {
+        RenderBvhNode adjusted = node;
+        if (adjusted.triangle_count > 0) {
+            adjusted.first_triangle += base_tri_offset;
+        } else {
+            if (adjusted.left_child >= 0) {
+                adjusted.left_child += base_node_offset;
+            }
+            if (adjusted.right_child >= 0) {
+                adjusted.right_child += base_node_offset;
+            }
+        }
+        bvh.nodes.push_back(adjusted);
+    }
+
+    bvh.triangle_indices.reserve(bvh.triangle_indices.size() + subtree.triangle_indices.size());
+    for (int idx : subtree.triangle_indices) {
+        bvh.triangle_indices.push_back(idx);
+    }
+
+    bvh.max_depth = std::max(bvh.max_depth, subtree.max_depth);
+    return base_node_offset;
+}
+
+template <typename ChooserFn>
+int BuildSubtreeParallel(
+    std::vector<BvhPrimRef>& prims,
+    int begin,
+    int end,
+    int depth,
+    int max_leaf_triangles,
+    int parallel_min_subtree_size,
+    int fork_budget,
+    ChooserFn chooser,
+    RenderBvh& bvh,
+    std::vector<std::string>& errors
+) {
+    const int primitive_count = end - begin;
+
+    // Below threshold or out of budget -> fall back to the serial builder.
+    if (primitive_count <= parallel_min_subtree_size || fork_budget <= 1) {
+        return BuildSubtreeSerial(
+            prims, begin, end, depth, max_leaf_triangles, chooser, bvh, errors);
+    }
+
+    if (begin >= end) {
+        errors.push_back("BVH build produced an empty primitive range");
+        return -1;
+    }
+
+    const int node_index = static_cast<int>(bvh.nodes.size());
+    bvh.nodes.push_back(RenderBvhNode{});
+
+    Bounds3f node_bounds;
+    Bounds3f centroid_bounds;
+    if (!ComputeRangeBounds(prims, begin, end, &node_bounds, &centroid_bounds, errors)) {
+        return -1;
+    }
+
+    const SplitDecision decision =
+        chooser(prims, begin, end, node_bounds, centroid_bounds, max_leaf_triangles);
+
+    // The chooser may still decide to make a leaf even at large sizes
+    // (e.g., SAH cost >= leaf cost). Honor that.
+    if (decision.kind == SplitDecision::Kind::MakeLeaf) {
+        EmitLeafNode(prims, begin, end, node_bounds, depth, node_index, bvh);
+        return node_index;
+    }
+
+    const int mid = decision.mid;
+    if (mid <= begin || mid >= end) {
+        errors.push_back("BVH split produced an empty child range");
+        return -1;
+    }
+
+    // Spawn one thread per child. Each builds into its own thread-local BVH.
+    // The prims vector slot is shared but the children touch disjoint ranges
+    // [begin, mid) and [mid, end), so no synchronization is needed.
+    RenderBvh left_subtree;
+    RenderBvh right_subtree;
+    std::vector<std::string> left_errors;
+    std::vector<std::string> right_errors;
+
+    const int left_budget = (fork_budget + 1) / 2;
+    const int right_budget = fork_budget - left_budget;
+
+    std::thread left_thread([&] {
+        BuildSubtreeParallel(
+            prims, begin, mid, depth + 1, max_leaf_triangles,
+            parallel_min_subtree_size, left_budget,
+            chooser, left_subtree, left_errors);
+    });
+    std::thread right_thread([&] {
+        BuildSubtreeParallel(
+            prims, mid, end, depth + 1, max_leaf_triangles,
+            parallel_min_subtree_size, right_budget,
+            chooser, right_subtree, right_errors);
+    });
+
+    left_thread.join();
+    right_thread.join();
+
+    // Aggregate errors in left-first order (matches serial DFS error order).
+    errors.insert(errors.end(), left_errors.begin(), left_errors.end());
+    errors.insert(errors.end(), right_errors.begin(), right_errors.end());
+    if (!left_errors.empty() || !right_errors.empty()) {
+        return -1;
+    }
+    if (left_subtree.nodes.empty() || right_subtree.nodes.empty()) {
+        errors.push_back("BVH parallel subtree returned empty");
+        return -1;
+    }
+
+    // Merge left first, then right -- deterministic DFS order.
+    const int left_child = MergeSubtree(left_subtree, bvh);
+    const int right_child = MergeSubtree(right_subtree, bvh);
+
+    bvh.nodes[static_cast<std::size_t>(node_index)] = RenderBvhNode{
+        node_bounds,
+        left_child,
+        right_child,
+        0,
+        0
+    };
+    bvh.max_depth = std::max(bvh.max_depth, depth);
+    return node_index;
+}
+
 } // namespace
 
 BvhBuildResult BuildBvh(const RenderSceneIR& scene, const BvhBuildOptions& options) {
@@ -473,31 +611,49 @@ BvhBuildResult BuildBvh(const RenderSceneIR& scene, const BvhBuildOptions& optio
     }
     result.bvh.total_triangles = flat_tri;
 
+    // Resolve effective thread count: 0 means auto-detect.
+    int effective_thread_count = options.thread_count;
+    if (effective_thread_count == 0) {
+        effective_thread_count = static_cast<int>(std::thread::hardware_concurrency());
+        if (effective_thread_count <= 0) {
+            effective_thread_count = 1;  // defensive: hardware_concurrency may return 0
+        }
+    }
+
+    auto run_builder = [&](auto chooser) -> int {
+        if (effective_thread_count <= 1) {
+            return BuildSubtreeSerial(
+                prims,
+                0,
+                static_cast<int>(prims.size()),
+                1,
+                options.max_leaf_triangles,
+                chooser,
+                result.bvh,
+                result.errors
+            );
+        }
+        return BuildSubtreeParallel(
+            prims,
+            0,
+            static_cast<int>(prims.size()),
+            1,
+            options.max_leaf_triangles,
+            options.parallel_min_subtree_size,
+            effective_thread_count,
+            chooser,
+            result.bvh,
+            result.errors
+        );
+    };
+
     int root = -1;
     switch (options.split_method) {
         case BvhSplitMethod::SahBucketBinning:
-            root = BuildSubtreeSerial(
-                prims,
-                0,
-                static_cast<int>(prims.size()),
-                1,
-                options.max_leaf_triangles,
-                ChooseSahSplit,
-                result.bvh,
-                result.errors
-            );
+            root = run_builder(ChooseSahSplit);
             break;
         case BvhSplitMethod::LongestAxisMedian:
-            root = BuildSubtreeSerial(
-                prims,
-                0,
-                static_cast<int>(prims.size()),
-                1,
-                options.max_leaf_triangles,
-                ChooseMedianSplit,
-                result.bvh,
-                result.errors
-            );
+            root = run_builder(ChooseMedianSplit);
             break;
     }
     if (root != 0 || !result.errors.empty()) {
