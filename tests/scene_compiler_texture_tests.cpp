@@ -106,7 +106,7 @@ YR_TEST(scene_compiler_constant_texture_does_not_allocate_render_texture) {
     YR_EXPECT_EQ(result.scene->textures.size(), std::size_t{0});
 }
 
-YR_TEST(scene_compiler_imagemap_missing_file_emits_error_diagnostic) {
+YR_TEST(scene_compiler_imagemap_missing_file_emits_warning_diagnostic) {
     yr::PbrtScene pbrt = MinimalScene();
 
     yr::PbrtEntity tex;
@@ -115,8 +115,22 @@ YR_TEST(scene_compiler_imagemap_missing_file_emits_error_diagnostic) {
     pbrt.named_textures["broken"] = tex;
 
     const yr::SceneCompileResult result = yr::CompilePbrtScene(pbrt);
-    // Missing texture is an Error — compilation fails.
-    YR_EXPECT_TRUE(yr::HasSceneErrors(result.diagnostics));
+    // Missing texture is a Warning (degradation policy) — compilation succeeds
+    // and the binding is replaced with a folded neutral constant.
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
+    bool found_warning = false;
+    for (const yr::SceneDiagnostic& d : result.diagnostics) {
+        if (d.severity == yr::DiagnosticSeverity::Warning &&
+            d.field.find("broken") != std::string::npos &&
+            d.message.find("imagemap load failed") != std::string::npos) {
+            found_warning = true;
+            break;
+        }
+    }
+    YR_EXPECT_TRUE(found_warning);
+    // Folded constant => no RenderTexture entry.
+    YR_EXPECT_EQ(result.scene->textures.size(), std::size_t{0});
 }
 
 YR_TEST(scene_compiler_binds_imagemap_to_diffuse_reflectance) {

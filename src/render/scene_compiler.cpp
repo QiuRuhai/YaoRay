@@ -234,8 +234,17 @@ bool CompileImagemapTexture(
     }
 
     if (!load.ok) {
-        diagnostics.push_back(Error(scene, "Texture." + name, load.error));
-        return false;
+        // Degradation policy: a missing or unreadable imagemap is a non-fatal
+        // compatibility issue, not a scene-file bug. Demote the diagnostic from
+        // Error to Warning and substitute a folded neutral-grey constant so the
+        // rest of the compile (materials, samplers, geometry, BVH) can proceed
+        // and surface any downstream issues. Matches the existing M1 material
+        // fallback philosophy (see MaterialFallbackWarning above).
+        diagnostics.push_back(Warning(scene, "Texture." + name,
+            "imagemap load failed (" + load.error + "); degrading to neutral constant (0.5, 0.5, 0.5)"));
+        bindings.name_to_index[name] = -1;            // -1 == folded constant.
+        bindings.constant_values[name] = Color3f{0.5f, 0.5f, 0.5f};
+        return true;
     }
     load.texture.color_space = color_space;
 
