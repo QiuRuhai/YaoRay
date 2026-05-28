@@ -133,7 +133,18 @@ Color3f EvaluateEnvironment(const RenderSceneIR& scene, Vec3f direction) {
 
     const RenderTexture& texture = scene.textures[static_cast<std::size_t>(scene.environment.texture_index)];
     const Vec2f uv = DirectionToEnvironmentUv(direction, scene.environment.rotation_radians);
-    return SampleTexture(texture, uv) * scene.environment.strength;
+    const Color3f sampled = SampleTexture(texture, uv);
+    // Element-wise modulate by `environment.radiance` (the scene compiler
+    // populates this from PBRT's LightSource "infinite" `L * scale`), then
+    // scale by `environment.strength`. Color3f has no Color3f*Color3f
+    // operator, so we spell the Hadamard product explicitly. Matches the
+    // !active branch (`radiance * strength`) so the two paths agree.
+    const Color3f modulated{
+        sampled.x * scene.environment.radiance.x,
+        sampled.y * scene.environment.radiance.y,
+        sampled.z * scene.environment.radiance.z
+    };
+    return modulated * scene.environment.strength;
 }
 
 bool HasSampleableEnvironment(const RenderSceneIR& scene) {

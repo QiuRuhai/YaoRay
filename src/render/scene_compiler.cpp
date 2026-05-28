@@ -222,7 +222,7 @@ bool CompileImagemapTexture(
     });
 
     TextureLoadResult load;
-    if (ext == ".hdr" || ext == ".pfm") {
+    if (ext == ".hdr" || ext == ".pfm" || ext == ".exr") {
         load = LoadHdrTexture(resolved);
     } else if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
                ext == ".tga" || ext == ".bmp") {
