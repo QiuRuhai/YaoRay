@@ -50,8 +50,9 @@ A single-threaded reference renderer
 multi-threaded path tracer
 (`src/backends/cpu/cpu_path_tracer.cpp`) with:
 
-- Median-split BVH over the triangle table, plus a linear pass over
-  analytic spheres after the BVH walk.
+- SAH-binned BVH (12 buckets, c_T = 0.5) with deterministic parallel
+  top-down construction, plus a linear pass over analytic spheres
+  after the BVH walk.
 - Multiple importance sampling combining BSDF, area-light, and
   environment-light samples.
 - Delta-light handling (no MIS vs BSDF) for point, distant, and spot.
@@ -67,10 +68,12 @@ multi-threaded path tracer
 | `scenes/pbrt/material_studio/` | HDRI environment + each supported BSDF on a row of spheres. |
 | `scenes/pbrt/texture_test/` | Texture wrap modes + normal-map data path. |
 | `scenes/pbrt/dining_room/README.md` | Bitterli's PBRT v4 dining-room (downloaded; gitignored). |
+| `scenes/pbrt/barcelona_pavilion/README.md` | mmp's PBRT v4 Barcelona Pavilion — M2 anchor scene (downloaded via `git lfs`; gitignored). |
 
 The first four scenes are committed and exercised by CTest. The
-dining-room asset is large and CC-BY-licensed by its author, so the
-repo links to the download workflow rather than redistributing.
+dining-room and Pavilion assets are large and live under permissive
+licenses elsewhere, so the repo links to download workflows rather
+than redistributing.
 
 ## Not currently supported
 
@@ -88,12 +91,12 @@ repo links to the download workflow rather than redistributing.
 ## Roadmap
 
 ```
-M1 (done) ──▶ M2 (Large Scenes) ──▶ M3 (Advanced Materials) ──▶ M4 (CUDA) ──▶ M5+ (by interest)
+M1+M2 (done) ──▶ M3 (Advanced Materials) ──▶ M4 (CUDA) ──▶ M5+ (by interest)
 ```
 
 | Milestone | Anchor scene | Headline | Status |
 |---|---|---|---|
-| **M2** | `barcelona-pavilion` (mmp PBRT v4) | SAH BVH + parallel BVH build; dining-room renders ≥ 2× faster | planned |
+| **M2** | `barcelona-pavilion` (mmp PBRT v4) | SAH BVH + parallel BVH build; dining-room renders ≥ 2× faster | done |
 | **M3** | TBD — `ganesha` / `sportscar` / `killeroo-coated` | Real `subsurface` + `measured` + nested `layered` materials | sketch |
 | **M4** | `dining-room` < 10 s, `barcelona-pavilion` < 1 min | CUDA backend filling the existing `RenderBackendKind::Cuda` slot | sketch |
 | **M5+** | by interest | Denoiser, EXR, volumetrics, hair, subdivision, spectral, polish | exploratory |
