@@ -102,6 +102,10 @@ add_executable(yaoray_tests
     tests/material_degradation_tests.cpp
     tests/scene_compiler_texture_tests.cpp
     tests/scene_compiler_environment_tests.cpp
+    tests/scene_compiler_imagemap_degrade_tests.cpp
+    tests/scene_compiler_plymesh_degrade_tests.cpp
+    tests/scene_compiler_envmap_degrade_tests.cpp
+    tests/scene_compiler_scale_texture_tests.cpp
     tests/scene_compiler_wrap_mode_tests.cpp
     tests/scene_compiler_normal_map_tests.cpp
     tests/scene_compiler_tangent_tests.cpp

@@ -10,11 +10,11 @@ This repository is a rewrite of the previous ToyRender experiment. The old code 
 
 ## Current Status
 
-The M1 milestone is complete. The renderer handles:
+M1 and M2 are complete. The renderer handles:
 
 - A two-layer pipeline: `PbrtScene → RenderSceneIR → Backend`.
-- A multi-threaded CPU path tracer with median-split BVH, MIS over BSDF / area-light / environment samples, Russian-roulette termination, ACES/Reinhard/identity tone mapping, and PNG output.
-- Real PBRT v4 scenes including Benedikt Bitterli's CC-BY converted assets (see the [showcase](#showcase-scenes) below).
+- A multi-threaded CPU path tracer with SAH-binned BVH (parallel construction, deterministic), MIS over BSDF / area-light / environment samples, Russian-roulette termination, ACES/Reinhard/identity tone mapping, and PNG output.
+- Real PBRT v4 scenes including Benedikt Bitterli's CC-BY dining-room and Matt Pharr's Barcelona Pavilion (see the [showcase](#showcase-scenes) below).
 
 See `docs/architecture/overview.md` for the supported PBRT v4 directive surface and what's planned for M2+.
 
@@ -73,6 +73,7 @@ The output PNG lands at the path declared in the scene's `Film "string filename"
 | `scenes/pbrt/material_studio/` | HDRI environment + each supported BSDF on a row of spheres. |
 | `scenes/pbrt/texture_test/` | Texture wrap modes + normal-map data path validation. |
 | `scenes/pbrt/dining_room/` | Bitterli's PBRT v4 dining-room (asset downloaded separately; see the per-scene README for the curl/unzip workflow). |
+| `scenes/pbrt/barcelona_pavilion/` | mmp's PBRT v4 Barcelona Pavilion — M2 anchor scene (asset downloaded separately via `git lfs`; see the per-scene README for the sparse-checkout workflow). |
 
 ## Architecture
 
