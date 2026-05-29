@@ -40,6 +40,17 @@ yr::PbrtScene MakeSceneWithCoatedConductor() {
 
 } // namespace
 
+YR_TEST(scene_compiler_coatedconductor_reads_nsamples) {
+    yr::PbrtScene pbrt = MakeSceneWithCoatedConductor();
+    pbrt.named_materials["coated_test"].params.push_back(
+        yr::PbrtParam{"integer", "nsamples", {}, {4}, {}, {}});
+    const yr::SceneCompileResult result = yr::CompilePbrtScene(pbrt);
+    YR_EXPECT_TRUE(result.scene.has_value());
+    YR_EXPECT_TRUE(!result.scene->materials.empty());
+    const yr::RenderMaterial& m = result.scene->materials.front();
+    YR_EXPECT_EQ(m.coat_nsamples, 4);
+}
+
 YR_TEST(scene_compiler_coatedconductor_reads_thickness) {
     const yr::PbrtScene pbrt = MakeSceneWithCoatedConductor();
     const yr::SceneCompileResult result = yr::CompilePbrtScene(pbrt);

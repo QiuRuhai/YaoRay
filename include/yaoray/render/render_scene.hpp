@@ -111,6 +111,7 @@ struct RenderMaterial {
                                                  // walk; no PBRT scene param maps to
                                                  // it in 2a (defaults to clear).
     int coat_maxdepth = 10;                       // walk bounce cap
+    int coat_nsamples = 1;   // PBRT nsamples: stochastic f/pdf walks averaged per call
 
     int normal_map = -1;
     float normal_scale = 1.0f;

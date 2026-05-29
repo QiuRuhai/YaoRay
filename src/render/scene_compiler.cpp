@@ -607,6 +607,7 @@ int CompileMaterial(
             0.0f, bindings, scene, diagnostics);
         material.coat_thickness = FloatParam(FindParam(params, "thickness"), 0.01f);
         material.coat_maxdepth = IntParam(FindParam(params, "maxdepth"), 10);
+        material.coat_nsamples = std::max(1, IntParam(FindParam(params, "nsamples"), 1));
     } else if (type == "coatedconductor") {
         material.kind = RenderMaterialKind::CoatedConductor;
         material.eta = TexParam3fFromParams(params, "conductor.eta",
@@ -638,6 +639,7 @@ int CompileMaterial(
             0.0f, bindings, scene, diagnostics);
         material.coat_thickness = FloatParam(FindParam(params, "thickness"), 0.01f);
         material.coat_maxdepth = IntParam(FindParam(params, "maxdepth"), 10);
+        material.coat_nsamples = std::max(1, IntParam(FindParam(params, "nsamples"), 1));
     } else if (type == "diffusetransmission") {
         material.kind = RenderMaterialKind::DiffuseTransmission;
         material.reflectance = TexParam3fFromParams(params, "reflectance",
