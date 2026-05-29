@@ -352,7 +352,7 @@ BsdfSample SampleGgxReflection(Vec3f wo, Vec3f normal, Vec2f sample, Color3f f0,
 
 } // namespace
 
-Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal) {
+Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, [[maybe_unused]] Rng& rng) {
     switch (material.kind) {
         case RenderMaterialKind::Diffuse:
         case RenderMaterialKind::CoatedDiffuse:
@@ -391,7 +391,7 @@ Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f n
     return Color3f{};
 }
 
-float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal) {
+float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, [[maybe_unused]] Rng& rng) {
     switch (material.kind) {
         case RenderMaterialKind::Diffuse:
         case RenderMaterialKind::CoatedDiffuse:
@@ -425,7 +425,7 @@ float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal) 
     return 0.0f;
 }
 
-BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Vec2f sample) {
+BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Vec2f sample, [[maybe_unused]] Rng& rng) {
     switch (material.kind) {
         case RenderMaterialKind::Diffuse:
         case RenderMaterialKind::CoatedDiffuse:
@@ -438,7 +438,7 @@ BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Ve
             return BsdfSample{
                 wi,
                 material.reflectance.value,
-                PdfBsdf(material, wo, wi, normal),
+                PdfBsdf(material, wo, wi, normal, rng),
                 true,
                 false
             };
@@ -520,11 +520,11 @@ BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Ve
                     half_vector = -half_vector;
                 }
                 const Vec3f wi = Reflect(-wo, half_vector);
-                const float pdf = PdfBsdf(material, wo, wi, normal);
+                const float pdf = PdfBsdf(material, wo, wi, normal, rng);
                 if (pdf <= 0.0f) {
                     return BsdfSample{};
                 }
-                const Color3f f = EvaluateBsdf(material, wo, wi, normal);
+                const Color3f f = EvaluateBsdf(material, wo, wi, normal, rng);
                 const float cos_i = AbsDot(normal, wi);
                 return BsdfSample{wi, f * (cos_i / pdf), pdf, true, false};
             }
@@ -538,11 +538,11 @@ BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Ve
             if (!Refract(wo, half_vector, frame.eta, wi)) {
                 return BsdfSample{Reflect(-wo, half_vector), material.reflectance.value, 1.0f, true, true};
             }
-            const float pdf = PdfBsdf(material, wo, wi, normal);
+            const float pdf = PdfBsdf(material, wo, wi, normal, rng);
             if (pdf <= 0.0f) {
                 return BsdfSample{};
             }
-            const Color3f f = EvaluateBsdf(material, wo, wi, normal);
+            const Color3f f = EvaluateBsdf(material, wo, wi, normal, rng);
             const float cos_i = AbsDot(normal, wi);
             return BsdfSample{wi, f * (cos_i / pdf), pdf, true, false};
         }

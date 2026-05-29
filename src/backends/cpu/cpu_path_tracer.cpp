@@ -5,6 +5,7 @@
 #include <yaoray/backends/cpu/cpu_surface.hpp>
 #include <yaoray/backends/cpu/cpu_tile_scheduler.hpp>
 #include <yaoray/core/ray.hpp>
+#include <yaoray/core/rng.hpp>
 #include <yaoray/render/bvh.hpp>
 #include <yaoray/render/bsdf.hpp>
 #include <yaoray/render/environment.hpp>
@@ -346,6 +347,7 @@ Color3f EstimateDirectEnvironmentLight(
     Vec3f normal,
     Vec3f wo,
     CpuSampler& sampler,
+    Rng& rng,
     CpuPathTraceStats& stats
 ) {
     const RenderSceneIR& scene = prepared_scene.Scene();
@@ -368,7 +370,7 @@ Color3f EstimateDirectEnvironmentLight(
             continue;
         }
 
-        const Color3f bsdf = EvaluateBsdf(material, wo, wi, normal);
+        const Color3f bsdf = EvaluateBsdf(material, wo, wi, normal, rng);
         if (IsNearBlack(bsdf)) {
             continue;
         }
@@ -382,7 +384,7 @@ Color3f EstimateDirectEnvironmentLight(
             continue;
         }
 
-        const float pdf_bsdf = PdfBsdf(material, wo, wi, normal);
+        const float pdf_bsdf = PdfBsdf(material, wo, wi, normal, rng);
         const float mis_weight = PowerHeuristic(light_sample_count, sample.pdf_solid_angle, 1, pdf_bsdf);
         const Color3f visible_radiance = Multiply(visibility.transmittance, sample.radiance);
         radiance = radiance + Multiply(bsdf, visible_radiance) * (cos_surface * mis_weight / sample.pdf_solid_angle);
@@ -398,6 +400,7 @@ Color3f EstimateDirectLight(
     Vec3f normal,
     Vec3f wo,
     CpuSampler& sampler,
+    Rng& rng,
     CpuPathTraceStats& stats
 ) {
     const RenderSceneIR& scene = prepared_scene.Scene();
@@ -452,12 +455,12 @@ Color3f EstimateDirectLight(
                 continue;
             }
 
-            const Color3f bsdf = EvaluateBsdf(material, wo, wi, normal);
+            const Color3f bsdf = EvaluateBsdf(material, wo, wi, normal, rng);
             if (IsNearBlack(bsdf)) {
                 continue;
             }
 
-            const float pdf_bsdf = PdfBsdf(material, wo, wi, normal);
+            const float pdf_bsdf = PdfBsdf(material, wo, wi, normal, rng);
             const float mis_weight = PowerHeuristic(light_sample_count, pdf_light, 1, pdf_bsdf);
             const Color3f visible_radiance = Multiply(visibility.transmittance, sample->radiance);
             radiance = radiance + Multiply(bsdf, visible_radiance) * (cos_surface * mis_weight / pdf_light);
@@ -484,7 +487,7 @@ Color3f EstimateDirectLight(
         if (cos_surface <= 0.0f) {
             continue;
         }
-        const Color3f bsdf = EvaluateBsdf(material, wo, sample.wi, normal);
+        const Color3f bsdf = EvaluateBsdf(material, wo, sample.wi, normal, rng);
         if (IsNearBlack(bsdf)) {
             continue;
         }
@@ -504,11 +507,11 @@ Color3f EstimateDirectLight(
         radiance = radiance + Multiply(bsdf, visible_radiance) * cos_surface;
     }
 
-    radiance = radiance + EstimateDirectEnvironmentLight(prepared_scene, material, hit_point, normal, wo, sampler, stats);
+    radiance = radiance + EstimateDirectEnvironmentLight(prepared_scene, material, hit_point, normal, wo, sampler, rng, stats);
     return radiance;
 }
 
-Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler& sampler, CpuPathTraceStats& stats) {
+Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler& sampler, Rng& rng, CpuPathTraceStats& stats) {
     const RenderSceneIR& scene = prepared_scene.Scene();
     Color3f radiance;
     Color3f throughput{1.0f, 1.0f, 1.0f};
@@ -567,14 +570,14 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
         }
 
         if (!IsDeltaBsdf(material)) {
-            radiance = radiance + Multiply(throughput, EstimateDirectLight(prepared_scene, material, hit_point, normal, wo, sampler, stats));
+            radiance = radiance + Multiply(throughput, EstimateDirectLight(prepared_scene, material, hit_point, normal, wo, sampler, rng, stats));
         }
 
         if (depth + 1 >= max_depth) {
             break;
         }
 
-        const BsdfSample bsdf_sample = SampleBsdf(material, wo, normal, sampler.Next2D());
+        const BsdfSample bsdf_sample = SampleBsdf(material, wo, normal, sampler.Next2D(), rng);
         if (!bsdf_sample.valid || IsNearBlack(bsdf_sample.weight)) {
             break;
         }
@@ -647,9 +650,14 @@ CpuPathTraceResult RenderCpuPathTrace(const CpuPreparedScene& prepared_scene, co
                         samples_per_pixel,
                         DirectLightSampleCount(scene)
                     };
+                    // Distinct RNG stream for stochastic BSDF evaluation
+                    // (M3 LayeredBxDF). Salted so it does not correlate with
+                    // CpuSampler's stratified dimensions. No consumer in
+                    // Slice 1; load-bearing from Slice 2 on.
+                    Rng bsdf_rng{SeedForPixelSample(scene.seed, x, y, sample) ^ 0x9E3779B97F4A7C15ULL};
                     const Vec2f pixel_sample = sampler.NextPixel2D();
                     const Ray3f ray = MakeCameraRay(scene, x, y, pixel_sample.x, pixel_sample.y);
-                    Color3f sample_radiance = TracePath(prepared_scene, ray, sampler, stats);
+                    Color3f sample_radiance = TracePath(prepared_scene, ray, sampler, bsdf_rng, stats);
                     sample_radiance = ClampMaxComponent(sample_radiance, scene.radiance_clamp);
                     result.film.AddSample(x, y, sample_radiance);
                 }

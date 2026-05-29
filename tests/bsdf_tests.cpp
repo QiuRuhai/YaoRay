@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include <yaoray/core/rng.hpp>
 #include <yaoray/render/bsdf.hpp>
 #include <yaoray/render/render_scene.hpp>
 
@@ -65,8 +66,9 @@ YR_TEST(bsdf_diffuse_evaluate_returns_lambertian_brdf) {
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.0f, 0.25f, 1.0f});
     const yr::Vec3f wi = yr::Normalize(yr::Vec3f{0.5f, 0.0f, 1.0f});
+    yr::Rng rng{1u};
 
-    const yr::Color3f value = yr::EvaluateBsdf(material, wo, wi, normal);
+    const yr::Color3f value = yr::EvaluateBsdf(material, wo, wi, normal, rng);
 
     YR_EXPECT_NEAR(value.x, 0.6 / Pi, 1e-6);
     YR_EXPECT_NEAR(value.y, 0.3 / Pi, 1e-6);
@@ -80,9 +82,10 @@ YR_TEST(bsdf_diffuse_evaluate_rejects_below_surface_directions) {
     const yr::Vec3f wi_above{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo_above{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wi_below{0.0f, 0.0f, -1.0f};
+    yr::Rng rng{1u};
 
-    YR_EXPECT_TRUE(IsBlack(yr::EvaluateBsdf(material, wo_below, wi_above, normal)));
-    YR_EXPECT_TRUE(IsBlack(yr::EvaluateBsdf(material, wo_above, wi_below, normal)));
+    YR_EXPECT_TRUE(IsBlack(yr::EvaluateBsdf(material, wo_below, wi_above, normal, rng)));
+    YR_EXPECT_TRUE(IsBlack(yr::EvaluateBsdf(material, wo_above, wi_below, normal, rng)));
 }
 
 YR_TEST(bsdf_diffuse_pdf_uses_cosine_weighted_hemisphere_density) {
@@ -90,8 +93,9 @@ YR_TEST(bsdf_diffuse_pdf_uses_cosine_weighted_hemisphere_density) {
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wi = yr::Normalize(yr::Vec3f{0.0f, 1.0f, 1.0f});
+    yr::Rng rng{1u};
 
-    const float pdf = yr::PdfBsdf(material, wo, wi, normal);
+    const float pdf = yr::PdfBsdf(material, wo, wi, normal, rng);
 
     YR_EXPECT_NEAR(pdf, yr::Dot(normal, wi) / Pi, 1e-6);
 }
@@ -100,8 +104,9 @@ YR_TEST(bsdf_diffuse_sample_returns_albedo_weight_and_positive_pdf) {
     const yr::RenderMaterial material = DiffuseMaterial();
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo{0.0f, 0.0f, 1.0f};
+    yr::Rng rng{1u};
 
-    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.25f, 0.5f});
+    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.25f, 0.5f}, rng);
 
     YR_EXPECT_TRUE(sample.valid);
     YR_EXPECT_TRUE(!sample.specular);
@@ -116,8 +121,9 @@ YR_TEST(bsdf_polished_conductor_samples_delta_reflection) {
     const yr::RenderMaterial material = ConductorMaterial(0.0f);
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo = yr::Normalize(yr::Vec3f{-0.25f, 0.0f, 1.0f});
+    yr::Rng rng{1u};
 
-    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.0f, 0.0f});
+    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.0f, 0.0f}, rng);
 
     YR_EXPECT_TRUE(yr::IsDeltaBsdf(material));
     YR_EXPECT_TRUE(sample.valid);
@@ -129,8 +135,8 @@ YR_TEST(bsdf_polished_conductor_samples_delta_reflection) {
     YR_EXPECT_NEAR(sample.weight.y, 0.72, 1e-6);
     YR_EXPECT_NEAR(sample.weight.z, 0.32, 1e-6);
     YR_EXPECT_NEAR(sample.pdf, 1.0, 1e-6);
-    YR_EXPECT_TRUE(IsBlack(yr::EvaluateBsdf(material, wo, sample.wi, normal)));
-    YR_EXPECT_NEAR(yr::PdfBsdf(material, wo, sample.wi, normal), 0.0, 1e-6);
+    YR_EXPECT_TRUE(IsBlack(yr::EvaluateBsdf(material, wo, sample.wi, normal, rng)));
+    YR_EXPECT_NEAR(yr::PdfBsdf(material, wo, sample.wi, normal, rng), 0.0, 1e-6);
 }
 
 YR_TEST(bsdf_rough_conductor_has_finite_non_delta_response) {
@@ -138,10 +144,11 @@ YR_TEST(bsdf_rough_conductor_has_finite_non_delta_response) {
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.0f, 0.25f, 1.0f});
     const yr::Vec3f wi = yr::Normalize(yr::Vec3f{0.25f, 0.0f, 1.0f});
+    yr::Rng rng{1u};
 
-    const yr::Color3f value = yr::EvaluateBsdf(material, wo, wi, normal);
-    const float pdf = yr::PdfBsdf(material, wo, wi, normal);
-    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.25f, 0.5f});
+    const yr::Color3f value = yr::EvaluateBsdf(material, wo, wi, normal, rng);
+    const float pdf = yr::PdfBsdf(material, wo, wi, normal, rng);
+    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.25f, 0.5f}, rng);
 
     YR_EXPECT_TRUE(!yr::IsDeltaBsdf(material));
     YR_EXPECT_TRUE(value.x > 0.0f);
@@ -161,18 +168,20 @@ YR_TEST(bsdf_smooth_conductor_is_delta_and_has_no_finite_brdf_pdf) {
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wi{0.0f, 0.0f, 1.0f};
+    yr::Rng rng{1u};
 
     YR_EXPECT_TRUE(yr::IsDeltaBsdf(material));
-    YR_EXPECT_TRUE(IsBlack(yr::EvaluateBsdf(material, wo, wi, normal)));
-    YR_EXPECT_NEAR(yr::PdfBsdf(material, wo, wi, normal), 0.0, 1e-6);
+    YR_EXPECT_TRUE(IsBlack(yr::EvaluateBsdf(material, wo, wi, normal, rng)));
+    YR_EXPECT_NEAR(yr::PdfBsdf(material, wo, wi, normal, rng), 0.0, 1e-6);
 }
 
 YR_TEST(bsdf_smooth_dielectric_refracts_at_normal_incidence) {
     const yr::RenderMaterial material = DielectricMaterial(0.0f);
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo{0.0f, 0.0f, 1.0f};
+    yr::Rng rng{1u};
 
-    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.5f, 0.25f});
+    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.5f, 0.25f}, rng);
 
     YR_EXPECT_TRUE(yr::IsDeltaBsdf(material));
     YR_EXPECT_TRUE(sample.valid);
@@ -184,8 +193,8 @@ YR_TEST(bsdf_smooth_dielectric_refracts_at_normal_incidence) {
     YR_EXPECT_NEAR(sample.weight.y, 1.0, 1e-6);
     YR_EXPECT_NEAR(sample.weight.z, 1.0, 1e-6);
     YR_EXPECT_NEAR(sample.pdf, 1.0, 1e-6);
-    YR_EXPECT_TRUE(IsBlack(yr::EvaluateBsdf(material, wo, sample.wi, normal)));
-    YR_EXPECT_NEAR(yr::PdfBsdf(material, wo, sample.wi, normal), 0.0, 1e-6);
+    YR_EXPECT_TRUE(IsBlack(yr::EvaluateBsdf(material, wo, sample.wi, normal, rng)));
+    YR_EXPECT_NEAR(yr::PdfBsdf(material, wo, sample.wi, normal, rng), 0.0, 1e-6);
 }
 
 YR_TEST(bsdf_smooth_dielectric_reflects_when_fresnel_sample_selects_reflection) {
@@ -193,8 +202,9 @@ YR_TEST(bsdf_smooth_dielectric_reflects_when_fresnel_sample_selects_reflection) 
     material.reflectance = yr::TexParam3f{{0.8f, 0.9f, 1.0f}};
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo = yr::Normalize(yr::Vec3f{-0.25f, 0.0f, 1.0f});
+    yr::Rng rng{1u};
 
-    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.0f, 0.25f});
+    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.0f, 0.25f}, rng);
 
     YR_EXPECT_TRUE(sample.valid);
     YR_EXPECT_TRUE(sample.specular);
@@ -210,8 +220,9 @@ YR_TEST(bsdf_smooth_dielectric_total_internal_reflection_reflects) {
     const yr::RenderMaterial material = DielectricMaterial(0.0f);
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.9f, 0.0f, -0.4358899f});
+    yr::Rng rng{1u};
 
-    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.9f, 0.25f});
+    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.9f, 0.25f}, rng);
 
     YR_EXPECT_TRUE(sample.valid);
     YR_EXPECT_TRUE(sample.specular);
@@ -224,9 +235,10 @@ YR_TEST(bsdf_rough_dielectric_has_finite_reflection_response) {
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.0f, 0.25f, 1.0f});
     const yr::Vec3f wi = yr::Normalize(yr::Vec3f{0.25f, 0.0f, 1.0f});
+    yr::Rng rng{1u};
 
-    const yr::Color3f value = yr::EvaluateBsdf(material, wo, wi, normal);
-    const float pdf = yr::PdfBsdf(material, wo, wi, normal);
+    const yr::Color3f value = yr::EvaluateBsdf(material, wo, wi, normal, rng);
+    const float pdf = yr::PdfBsdf(material, wo, wi, normal, rng);
 
     YR_EXPECT_TRUE(!yr::IsDeltaBsdf(material));
     YR_EXPECT_TRUE(value.x > 0.0f);
@@ -240,9 +252,10 @@ YR_TEST(bsdf_rough_dielectric_has_finite_transmission_response) {
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.0f, 0.25f, 1.0f});
     const yr::Vec3f wi = yr::Normalize(yr::Vec3f{0.1f, -0.05f, -1.0f});
+    yr::Rng rng{1u};
 
-    const yr::Color3f value = yr::EvaluateBsdf(material, wo, wi, normal);
-    const float pdf = yr::PdfBsdf(material, wo, wi, normal);
+    const yr::Color3f value = yr::EvaluateBsdf(material, wo, wi, normal, rng);
+    const float pdf = yr::PdfBsdf(material, wo, wi, normal, rng);
 
     YR_EXPECT_TRUE(value.x > 0.0f);
     YR_EXPECT_TRUE(value.y > 0.0f);
@@ -254,9 +267,10 @@ YR_TEST(bsdf_rough_dielectric_samples_reflection_and_transmission) {
     const yr::RenderMaterial material = DielectricMaterial(0.35f);
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.0f, 0.2f, 1.0f});
+    yr::Rng rng{1u};
 
-    const yr::BsdfSample reflection = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.0f, 0.35f});
-    const yr::BsdfSample transmission = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.95f, 0.35f});
+    const yr::BsdfSample reflection = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.0f, 0.35f}, rng);
+    const yr::BsdfSample transmission = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.95f, 0.35f}, rng);
 
     YR_EXPECT_TRUE(reflection.valid);
     YR_EXPECT_TRUE(transmission.valid);
@@ -274,8 +288,9 @@ YR_TEST(bsdf_thin_dielectric_transmits_straight_through) {
     const yr::RenderMaterial material = ThinDielectricMaterial(0.0f);
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.2f, 0.0f, 1.0f});
+    yr::Rng rng{1u};
 
-    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.8f, 0.5f});
+    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.8f, 0.5f}, rng);
 
     YR_EXPECT_TRUE(yr::IsDeltaBsdf(material));
     YR_EXPECT_TRUE(sample.valid);
@@ -289,8 +304,9 @@ YR_TEST(bsdf_rough_thin_dielectric_is_non_delta_and_finite) {
     const yr::RenderMaterial material = ThinDielectricMaterial(0.3f);
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.1f, 0.0f, 1.0f});
+    yr::Rng rng{1u};
 
-    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.95f, 0.4f});
+    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.95f, 0.4f}, rng);
 
     YR_EXPECT_TRUE(!yr::IsDeltaBsdf(material));
     YR_EXPECT_TRUE(sample.valid);
@@ -304,12 +320,13 @@ YR_TEST(bsdf_unknown_material_fails_closed) {
     const yr::Vec3f normal{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wo{0.0f, 0.0f, 1.0f};
     const yr::Vec3f wi{0.0f, 0.0f, 1.0f};
+    yr::Rng rng{1u};
 
-    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.5f, 0.5f});
+    const yr::BsdfSample sample = yr::SampleBsdf(material, wo, normal, yr::Vec2f{0.5f, 0.5f}, rng);
 
     YR_EXPECT_TRUE(!yr::IsDeltaBsdf(material));
-    YR_EXPECT_TRUE(IsBlack(yr::EvaluateBsdf(material, wo, wi, normal)));
-    YR_EXPECT_NEAR(yr::PdfBsdf(material, wo, wi, normal), 0.0, 1e-6);
+    YR_EXPECT_TRUE(IsBlack(yr::EvaluateBsdf(material, wo, wi, normal, rng)));
+    YR_EXPECT_NEAR(yr::PdfBsdf(material, wo, wi, normal, rng), 0.0, 1e-6);
     YR_EXPECT_TRUE(!sample.valid);
     YR_EXPECT_NEAR(sample.pdf, 0.0, 1e-6);
 }
