@@ -631,8 +631,15 @@ int CompileMaterial(
         material.reflectance = TexParam3fFromParams(params, "reflectance",
             Color3f{0.5f, 0.5f, 0.5f}, bindings, scene, diagnostics);
         material.coating_ior = FloatParam(FindParam(params, "eta"), 1.5f);
-        material.coating_roughness = TexParam1fFromParams(params, "roughness",
-            0.0f, bindings, scene, diagnostics);
+        // PBRT v4 uses "interface.roughness" for the coat layer; fall back to
+        // the legacy "roughness" param if not found (for backwards compatibility).
+        if (FindParam(params, "interface.roughness") != nullptr) {
+            material.coating_roughness = TexParam1fFromParams(params, "interface.roughness",
+                0.0f, bindings, scene, diagnostics);
+        } else {
+            material.coating_roughness = TexParam1fFromParams(params, "roughness",
+                0.0f, bindings, scene, diagnostics);
+        }
         material.coat_thickness = FloatParam(FindParam(params, "thickness"), 0.01f);
         material.coat_maxdepth = IntParam(FindParam(params, "maxdepth"), 10);
         material.coat_nsamples = std::max(1, IntParam(FindParam(params, "nsamples"), 1));
@@ -665,8 +672,15 @@ int CompileMaterial(
         material.vroughness = TexParam1fFromParams(params, "conductor.roughness",
             material.uroughness.value, bindings, scene, diagnostics);
         material.coating_ior = FloatParam(FindParam(params, "eta"), 1.5f);
-        material.coating_roughness = TexParam1fFromParams(params, "roughness",
-            0.0f, bindings, scene, diagnostics);
+        // PBRT v4 uses "interface.roughness" for the coat layer; fall back to
+        // the legacy "roughness" param if not found (for backwards compatibility).
+        if (FindParam(params, "interface.roughness") != nullptr) {
+            material.coating_roughness = TexParam1fFromParams(params, "interface.roughness",
+                0.0f, bindings, scene, diagnostics);
+        } else {
+            material.coating_roughness = TexParam1fFromParams(params, "roughness",
+                0.0f, bindings, scene, diagnostics);
+        }
         material.coat_thickness = FloatParam(FindParam(params, "thickness"), 0.01f);
         material.coat_maxdepth = IntParam(FindParam(params, "maxdepth"), 10);
         material.coat_nsamples = std::max(1, IntParam(FindParam(params, "nsamples"), 1));
