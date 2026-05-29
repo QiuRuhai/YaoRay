@@ -244,6 +244,68 @@ YR_TEST(layered_sample_directions_are_valid) {
     }
 }
 
+static float PdfHemisphereIntegral(const yr::RenderMaterial& m, yr::Vec3f wo,
+                                   yr::Vec3f n, unsigned seed, int N) {
+    yr::Rng rng{seed};
+    double acc = 0.0; const float twoPi = 2.0f * 3.14159265358979f;
+    for (int i = 0; i < N; ++i) {
+        const yr::Vec2f u = rng.NextFloat2();
+        const float z = std::clamp(u.x, 0.0f, 1.0f);
+        const float r = std::sqrt(std::max(0.0f, 1.0f - z*z));
+        const float phi = twoPi * u.y;
+        const yr::Vec3f helper = std::fabs(n.z) < 0.999f ? yr::Vec3f{0,0,1} : yr::Vec3f{1,0,0};
+        const yr::Vec3f t = yr::Normalize(yr::Cross(helper, n));
+        const yr::Vec3f b = yr::Cross(n, t);
+        const yr::Vec3f wi = yr::Normalize(t*(r*std::cos(phi)) + b*(r*std::sin(phi)) + n*z);
+        acc += yr::PdfBsdf(m, wo, wi, n, rng);
+    }
+    return static_cast<float>(acc / N) * twoPi;
+}
+
+YR_TEST(layered_pdf_integrates_to_exit_probability) {
+    yr::RenderMaterial m = MakeCoatedDiffuse(yr::Color3f{1.0f, 1.0f, 1.0f});
+    const yr::Vec3f n = Up();
+    const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.3f, 0.0f, 1.0f});
+    const float integral = PdfHemisphereIntegral(m, wo, n, 91u, 40000);
+    YR_EXPECT_TRUE(integral >= 0.85f);
+    YR_EXPECT_TRUE(integral <= 1.05f);
+}
+
+YR_TEST(layered_pdf_is_nonnegative_and_finite) {
+    yr::RenderMaterial m = MakeCoatedDiffuse(yr::Color3f{0.6f, 0.6f, 0.6f});
+    const yr::Vec3f n = Up();
+    const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.2f, 0.1f, 1.0f});
+    yr::Rng rng{17u};
+    for (int i = 0; i < 3000; ++i) {
+        const yr::Vec3f wi = yr::Normalize(yr::Vec3f{rng.NextFloat()*2-1, rng.NextFloat()*2-1, rng.NextFloat()*0.5f+0.5f});
+        const float p = yr::PdfBsdf(m, wo, wi, n, rng);
+        YR_EXPECT_TRUE(std::isfinite(p) && p >= 0.0f);
+    }
+}
+
+YR_TEST(layered_pdf_is_deterministic_under_fixed_seed) {
+    yr::RenderMaterial m = MakeCoatedDiffuse(yr::Color3f{0.6f, 0.4f, 0.2f});
+    const yr::Vec3f n = Up();
+    const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.2f, 0.1f, 1.0f});
+    const yr::Vec3f wi = yr::Normalize(yr::Vec3f{0.1f, 0.3f, 0.9f});
+    yr::Rng ra{43u}, rb{43u};
+    YR_EXPECT_EQ(yr::PdfBsdf(m, wo, wi, n, ra), yr::PdfBsdf(m, wo, wi, n, rb));
+}
+
+YR_TEST(layered_sample_sets_real_pdf_not_proxy) {
+    yr::RenderMaterial m = MakeCoatedDiffuse(yr::Color3f{0.7f, 0.7f, 0.7f});
+    const yr::Vec3f n = Up();
+    const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.3f, 0.0f, 1.0f});
+    yr::Rng rng{61u};
+    int nonspec = 0; double pdf_acc = 0.0;
+    for (int i = 0; i < 5000; ++i) {
+        const yr::BsdfSample s = yr::SampleBsdf(m, wo, n, rng.NextFloat2(), rng);
+        if (s.valid && !s.specular) { ++nonspec; pdf_acc += s.pdf; YR_EXPECT_TRUE(s.pdf > 0.0f); }
+    }
+    YR_EXPECT_TRUE(nonspec > 0);
+    YR_EXPECT_TRUE(std::fabs(pdf_acc / std::max(1, nonspec) - 1.0) > 1e-3);   // not the 1.0 proxy
+}
+
 YR_TEST(layered_conductor_sample_is_energy_conserving_and_valid) {
     // Coated conductor (gold-ish f0), zero absorption. The base reflects only
     // its f0 fraction, so mean throughput is < 1 (not white-furnace), but it

@@ -360,19 +360,10 @@ Color3f ApplyBeerLambert(Color3f throughput, Color3f absorption, float thickness
     };
 }
 
-// Stochastic two-layer walk for coated* materials (M3 Slice 2a): a SMOOTH
-// dielectric clearcoat over a (possibly rough) diffuse/conductor base, with a
-// Beer-Lambert absorbing medium between them. Russian-roulette reflect/transmit
-// at the coat keeps throughput unbiased. The pdf is a proxy (1.0) in 2a —
-// light-sampling MIS for coated kinds is handled in 2b.
-BsdfSample SampleLayered(const RenderMaterial& material, Vec3f wo, Vec3f normal, Rng& rng,
-                         bool conductor_base) {
-    if (!IsAboveSurface(wo, normal)) {
-        return BsdfSample{};
-    }
-
-    const float ce = std::max(1.0f, material.coating_ior);
-
+// Builds the implicit base material (under the clearcoat) for a coated* kind.
+// Shared by the three layered estimators (SampleLayered, EvaluateLayered,
+// PdfLayered) so the base construction + enter-refract logic stay in lockstep.
+RenderMaterial MakeLayeredBase(const RenderMaterial& material, bool conductor_base) {
     RenderMaterial base;
     if (conductor_base) {
         base.kind = RenderMaterialKind::Conductor;
@@ -383,6 +374,29 @@ BsdfSample SampleLayered(const RenderMaterial& material, Vec3f wo, Vec3f normal,
         base.kind = RenderMaterialKind::Diffuse;
         base.reflectance = material.reflectance;
     }
+    return base;
+}
+
+// Forward declaration: SampleLayered's real exit pdf is the stochastic
+// PdfLayered estimate (defined below SampleLayered).
+float PdfLayered(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal,
+                 Rng& rng, bool conductor_base);
+
+// Stochastic two-layer walk for coated* materials (M3 Slice 2a): a SMOOTH
+// dielectric clearcoat over a (possibly rough) diffuse/conductor base, with a
+// Beer-Lambert absorbing medium between them. Russian-roulette reflect/transmit
+// at the coat keeps throughput unbiased. The non-specular exit pdf is the real
+// stochastic PdfLayered estimate (M3 Slice 2b); the coat's specular reflection
+// lobe stays a delta (pdf=1, specular=true).
+BsdfSample SampleLayered(const RenderMaterial& material, Vec3f wo, Vec3f normal, Rng& rng,
+                         bool conductor_base) {
+    if (!IsAboveSurface(wo, normal)) {
+        return BsdfSample{};
+    }
+
+    const float ce = std::max(1.0f, material.coating_ior);
+
+    const RenderMaterial base = MakeLayeredBase(material, conductor_base);
 
     // --- Top interface, entering from air (smooth Fresnel) ---
     const float cos_o = std::max(0.0f, Dot(wo, normal));
@@ -447,14 +461,116 @@ BsdfSample SampleLayered(const RenderMaterial& material, Vec3f wo, Vec3f normal,
         if (!IsAboveSurface(wexit, normal)) {
             return BsdfSample{};
         }
-        // TODO(2b): pdf is a proxy (1.0). EvaluateBsdf/PdfBsdf still alias coated
-        // kinds to their base, so this proxy feeds PowerHeuristic with a wrong
-        // (but finite) MIS weight when a coated bounce hits an emitter. Slice 2b
-        // replaces this with a real stochastic layered pdf.
-        return BsdfSample{wexit, throughput, 1.0f, true, false};
+        // Real stochastic layered pdf (M3 Slice 2b): the solid-angle density of
+        // this non-specular exit, consistent with EvaluateLayered + PdfBsdf so
+        // light-sampling MIS weights are correct. Floored at 1e-4 to keep the
+        // PowerHeuristic finite if the estimator returns ~0 for a rare exit.
+        const float exit_pdf = PdfLayered(material, wo, wexit, normal, rng, conductor_base);
+        return BsdfSample{wexit, throughput, std::max(exit_pdf, 1.0e-4f), true, false};
     }
 
     return BsdfSample{};
+}
+
+// Stochastic estimator of the solid-angle pdf of SampleLayered producing the
+// NON-specular exit wi from wo, for a coated* material (M3 Slice 2b). The coat's
+// specular reflection is a delta — excluded here (handled by the specular flag).
+// This is the pdf-analog of EvaluateLayered: it walks the same internal path
+// (refract in, scatter off the base with internal TIR between bounces) and at
+// each base interaction adds the deterministic connection's density toward wi.
+//
+// Exit-coupling derivation. Reconstructed from PBRT v4 LayeredBxDF::PDF, whose
+// smooth-top connection accumulates rInterface.PDF(-wos->wi, -wis->wi) -- the
+// BASE pdf between the refracted directions -- weighted by the path's sampling
+// throughput (our explicit `reach`), then blends a uniform floor. To express
+// that base pdf (normalized in the INTERNAL solid angle) as a density in the
+// EXTERNAL solid angle around wi, and to account for the exit transmission, the
+// connection is multiplied by the exit coupling
+//   exit_pdf_coupling = T_exit * cos(theta_wi) / (ce^2 * cos(theta_internal)),
+// where T_exit = 1 - F(theta_wi) is the exit transmittance and the remaining
+// factor is the full refraction (Snell) solid-angle Jacobian dw_int/dw_wi.
+//
+// The 1/ce^2 is REQUIRED (not cancelled): the internal walk decays `reach` by
+// the internal Fresnel reflectance f_back, which counts the whole TIR region
+// (theta > critical) as full reflection, so E[f_back] is large (~0.6) and the
+// expected base-visit count Sum P(reach k) = T_enter/(1-E[f_back]) ~= 2.4. The
+// pdf must still integrate to P(non-spec exit) ~= T_enter, so each visit's
+// integrated exit probability must equal (1 - E[f_back]). Measuring the
+// connection in the external solid angle with only T_exit*cos_wi/cos_int gives
+// per-visit <T_exit> ~= 0.91 and the series blows up to ~2.0. The external
+// hemisphere maps to only the internal critical cone, an area ratio of ce^2;
+// dividing by ce^2 restores per-visit (1/ce^2)<T_exit> ~= 0.40 ~= (1-E[f_back]),
+// and the geometric series telescopes to ~T_enter. (EvaluateLayered's f coupling
+// carries the SAME 1/ce^2, there as the medium->air radiance Jacobian.)
+// Calibration pin (white diffuse base, zero absorption): the measured
+//   integral pdf dw_wi ~= 0.906  is in [0.85, 1.05] and ~= 1 - F(wo) ~= 0.955.
+// The returned value is finally blended with a tiny uniform-hemisphere floor
+// (PBRT's Lerp(0.9, 1/(4pi), .)) for MIS robustness against near-zero estimates.
+float PdfLayered(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal,
+                 Rng& rng, bool conductor_base) {
+    if (!IsAboveSurface(wo, normal) || !IsAboveSurface(wi, normal)) {
+        return 0.0f;
+    }
+    const float ce = std::max(1.0f, material.coating_ior);
+    const RenderMaterial base = MakeLayeredBase(material, conductor_base);
+
+    Vec3f wo_t, wi_down;
+    if (!Refract(wo, normal, 1.0f / ce, wo_t)) {
+        return 0.0f;
+    }
+    if (!Refract(wi, normal, 1.0f / ce, wi_down)) {
+        return 0.0f;
+    }
+    const Vec3f wi_internal = -wi_down;
+    if (!IsAboveSurface(wi_internal, normal)) {
+        return 0.0f;
+    }
+
+    const float T_enter = 1.0f - FresnelDielectric(std::max(0.0f, Dot(wo, normal)), 1.0f, ce);
+    const float T_exit = 1.0f - FresnelDielectric(std::max(0.0f, Dot(wi, normal)), 1.0f, ce);
+    if (T_enter <= 0.0f || T_exit <= 0.0f) {
+        return 0.0f;
+    }
+
+    // Exit coupling = T_exit * Snell solid-angle Jacobian (with the 1/ce^2 that
+    // makes the multi-scatter series telescope to ~T_enter). See header.
+    const float cos_wi = std::max(0.0f, Dot(wi, normal));
+    const float cos_internal = std::max(1.0e-4f, Dot(wi_internal, normal));
+    const float exit_pdf_coupling = T_exit * cos_wi / (ce * ce * cos_internal);
+
+    const int ns = std::max(1, material.coat_nsamples);
+    double pdf_sum = 0.0;
+    for (int s = 0; s < ns; ++s) {
+        float reach = T_enter;   // probability the path reaches this base bounce
+        Vec3f w = wo_t;          // down-going inside the medium
+        for (int depth = 0; depth < material.coat_maxdepth; ++depth) {
+            const float base_pdf = PdfBsdf(base, -w, wi_internal, normal, rng);
+            pdf_sum += static_cast<double>(reach) * base_pdf * exit_pdf_coupling;
+
+            // Continue the internal walk: sample the base, then Russian-roulette
+            // reflect at the top interface (the only way to reach a deeper base
+            // bounce). A transmit leaves the coat (different exit) and ends this
+            // path's contribution.
+            const BsdfSample bs = SampleBsdf(base, -w, normal, rng.NextFloat2(), rng);
+            if (!bs.valid || !IsAboveSurface(bs.wi, normal)) {
+                break;
+            }
+            const float f_back = FresnelDielectric(std::max(0.0f, Dot(bs.wi, normal)), ce, 1.0f);
+            reach *= f_back;
+            if (reach <= 0.0f) {
+                break;
+            }
+            w = Reflect(bs.wi, normal);
+            if (IsAboveSurface(w, normal)) {
+                break;
+            }
+        }
+    }
+    const float estimate = static_cast<float>(pdf_sum / ns);
+    // PBRT's MIS-robustness floor: blend a tiny uniform-hemisphere density so a
+    // near-zero estimate never produces a degenerate (infinite) MIS weight.
+    constexpr float kUniformPdf = 1.0f / (4.0f * Pi);
+    return 0.9f * estimate + 0.1f * kUniformPdf;
 }
 
 // Stochastic estimator of the non-delta transmitted lobe f(wo, wi) for a
@@ -491,16 +607,7 @@ Color3f EvaluateLayered(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3
     }
     const float ce = std::max(1.0f, material.coating_ior);
 
-    RenderMaterial base;
-    if (conductor_base) {
-        base.kind = RenderMaterialKind::Conductor;
-        base.reflectance = material.reflectance;
-        base.uroughness = material.uroughness;
-        base.vroughness = material.vroughness;
-    } else {
-        base.kind = RenderMaterialKind::Diffuse;
-        base.reflectance = material.reflectance;
-    }
+    const RenderMaterial base = MakeLayeredBase(material, conductor_base);
 
     // Refract wo and wi into the medium. wo_t is the down-going entry ray; the
     // up-going connection that exits to wi is wi_internal = -Refract(wi,n,1/ce).
@@ -619,14 +726,13 @@ Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f n
     return Color3f{};
 }
 
-float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, [[maybe_unused]] Rng& rng) {
+float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, Rng& rng) {
     switch (material.kind) {
-        case RenderMaterialKind::Diffuse:
         case RenderMaterialKind::CoatedDiffuse:
-            // TODO(2b): coated kinds alias to their base BSDF for eval/pdf.
-            // SampleBsdf does the real layered walk, but light-sampling MIS
-            // uses these base estimates — a documented 2a inconsistency that
-            // Slice 2b closes with a stochastic layered f/pdf estimator.
+            return PdfLayered(material, wo, wi, normal, rng, /*conductor_base=*/false);
+        case RenderMaterialKind::CoatedConductor:
+            return PdfLayered(material, wo, wi, normal, rng, /*conductor_base=*/true);
+        case RenderMaterialKind::Diffuse:
         case RenderMaterialKind::DiffuseTransmission:
         case RenderMaterialKind::Mix:
             if (!IsAboveSurface(wo, normal) || !IsAboveSurface(wi, normal)) {
@@ -634,11 +740,6 @@ float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, 
             }
             return std::max(0.0f, Dot(normal, wi)) / Pi;
         case RenderMaterialKind::Conductor:
-        case RenderMaterialKind::CoatedConductor:
-            // TODO(2b): coated kinds alias to their base BSDF for eval/pdf.
-            // SampleBsdf does the real layered walk, but light-sampling MIS
-            // uses these base estimates — a documented 2a inconsistency that
-            // Slice 2b closes with a stochastic layered f/pdf estimator.
             if (material.uroughness.value <= DeltaRoughness && material.vroughness.value <= DeltaRoughness) {
                 return 0.0f;
             }
