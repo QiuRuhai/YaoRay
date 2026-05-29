@@ -1,0 +1,111 @@
+# YaoRay M3 Slice 2a — coated material showcase.
+#
+# Four spheres: bare diffuse, coateddiffuse, bare conductor, coatedconductor.
+# Lit by a distant key + a dim fill, on a diffuse ground. Exercises the
+# real two-layer LayeredBxDF (coateddiffuse / coatedconductor).
+#
+# All lighting is analytic (no external HDRI asset) so the scene commits
+# cleanly and runs standalone in CTest.
+
+LookAt 0 1.2 5  0 0.3 0  0 1 0
+Camera "perspective" "float fov" [35]
+Sampler "independent" "integer pixelsamples" [256]
+Integrator "path" "integer maxdepth" [12]
+Film "rgb"
+    "integer xresolution" [640]
+    "integer yresolution" [240]
+    "string filename" ["out/coated_showcase.png"]
+
+WorldBegin
+
+# --- key light (warm-white, from upper-left) ---
+LightSource "distant"
+    "point3 from" [-3 5 4] "point3 to" [0 0 0]
+    "rgb L" [3 3 3]
+
+# --- fill light (cool blue-white, from upper-right) ---
+LightSource "distant"
+    "point3 from" [4 2 3] "point3 to" [0 0 0]
+    "rgb L" [0.6 0.7 0.9]
+
+# --- materials ---------------------------------------------------
+MakeNamedMaterial "ground"
+    "string type" ["diffuse"]
+    "rgb reflectance" [0.5 0.5 0.5]
+
+# bare diffuse — blue base, flat Lambertian
+MakeNamedMaterial "bare_diffuse"
+    "string type" ["diffuse"]
+    "rgb reflectance" [0.2 0.5 0.8]
+
+# NOTE (M3 Slice 2a): the coat is a SMOOTH perfect-Fresnel clearcoat.
+# coating roughness is compiled but not yet consumed by the LayeredBxDF
+# walk (rough-coat GGX is a later slice), so these coats currently render
+# as a sharp specular reflection of the lights. The roughness values below
+# are authored for the eventual glossy coat.
+
+# coateddiffuse — same blue base + glossy dielectric clearcoat
+MakeNamedMaterial "coated_diffuse"
+    "string type" ["coateddiffuse"]
+    "rgb reflectance" [0.2 0.5 0.8]
+    "float roughness" [0.1]
+    "float eta" [1.5]
+    "float thickness" [0.01]
+
+# bare conductor — gold (eta/k from material_studio)
+MakeNamedMaterial "bare_conductor"
+    "string type" ["conductor"]
+    "rgb eta" [0.18 0.42 1.37]
+    "rgb k"   [3.98 2.41 1.60]
+    "float uroughness" [0.1]
+    "float vroughness" [0.1]
+
+# coatedconductor — gold base + clearcoat
+MakeNamedMaterial "coated_conductor"
+    "string type" ["coatedconductor"]
+    "rgb conductor.eta" [0.18 0.42 1.37]
+    "rgb conductor.k"   [3.98 2.41 1.60]
+    "float conductor.roughness" [0.1]
+    "float roughness" [0.1]
+    "float eta" [1.5]
+    "float thickness" [0.01]
+
+# --- ground -------------------------------------------------------
+AttributeBegin
+NamedMaterial "ground"
+Shape "trianglemesh"
+    "point3 P" [-10 0 -10  10 0 -10  10 0 10  -10 0 10]
+    "integer indices" [0 1 2  0 2 3]
+AttributeEnd
+
+# --- four spheres in a row ----------------------------------------
+
+# leftmost: bare diffuse
+AttributeBegin
+NamedMaterial "bare_diffuse"
+Translate -2.4 0.5 0
+Shape "sphere" "float radius" [0.5]
+AttributeEnd
+
+# coateddiffuse
+AttributeBegin
+NamedMaterial "coated_diffuse"
+Translate -0.8 0.5 0
+Shape "sphere" "float radius" [0.5]
+AttributeEnd
+
+# bare conductor
+AttributeBegin
+NamedMaterial "bare_conductor"
+Translate 0.8 0.5 0
+Shape "sphere" "float radius" [0.5]
+AttributeEnd
+
+# coatedconductor (rightmost)
+AttributeBegin
+NamedMaterial "coated_conductor"
+Translate 2.4 0.5 0
+Shape "sphere" "float radius" [0.5]
+AttributeEnd
+
+WorldEnd

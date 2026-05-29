@@ -103,6 +103,15 @@ struct RenderMaterial {
     float coating_ior = 1.5f;
     TexParam1f coating_roughness{0.0f};
 
+    // Layered (coated*) medium between coat and base. Beer-Lambert absorption
+    // only (no in-medium scattering). Defaults: thin clear coat.
+    float coat_thickness = 0.01f;
+    Color3f coat_absorption{0.0f, 0.0f, 0.0f};   // per-channel; 0 = clear. Consumed
+                                                 // by the LayeredBxDF Beer-Lambert
+                                                 // walk; no PBRT scene param maps to
+                                                 // it in 2a (defaults to clear).
+    int coat_maxdepth = 10;                       // walk bounce cap
+
     int normal_map = -1;
     float normal_scale = 1.0f;
 

@@ -119,8 +119,10 @@ add_executable(yaoray_tests
     tests/scene_compiler_wrap_mode_tests.cpp
     tests/scene_compiler_normal_map_tests.cpp
     tests/scene_compiler_tangent_tests.cpp
+    tests/scene_compiler_coated_tests.cpp
     tests/exr_io_tests.cpp
     tests/rng_tests.cpp
+    tests/layered_bsdf_tests.cpp
 )
 target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_pbrt yaoray_render yaoray_assets yaoray_backends)
 target_compile_definitions(yaoray_tests PRIVATE YAORAY_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
@@ -222,5 +224,14 @@ if(BUILD_TESTING)
             "Rendered image:"
             "Hits: [1-9]"
             "Compiled textures: [1-9]"
+    )
+    add_yaoray_cli_render_test(yaoray_cli_render_pbrt_coated_showcase
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/scenes/pbrt/coated_showcase/coated_showcase_smoke.pbrt"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/scenes/pbrt/coated_showcase/out/coated_showcase_smoke.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: path"
+            "Rendered image:"
+            "Hits: [^0]"
     )
 endif()

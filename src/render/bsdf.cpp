@@ -350,12 +350,123 @@ BsdfSample SampleGgxReflection(Vec3f wo, Vec3f normal, Vec2f sample, Color3f f0,
     };
 }
 
+Color3f ApplyBeerLambert(Color3f throughput, Color3f absorption, float thickness, Vec3f w, Vec3f normal) {
+    const float cos = std::max(1.0e-4f, std::fabs(Dot(w, normal)));
+    const float dist = thickness / cos;
+    return Color3f{
+        throughput.x * std::exp(-absorption.x * dist),
+        throughput.y * std::exp(-absorption.y * dist),
+        throughput.z * std::exp(-absorption.z * dist),
+    };
+}
+
+// Stochastic two-layer walk for coated* materials (M3 Slice 2a): a SMOOTH
+// dielectric clearcoat over a (possibly rough) diffuse/conductor base, with a
+// Beer-Lambert absorbing medium between them. Russian-roulette reflect/transmit
+// at the coat keeps throughput unbiased. The pdf is a proxy (1.0) in 2a —
+// light-sampling MIS for coated kinds is handled in 2b.
+BsdfSample SampleLayered(const RenderMaterial& material, Vec3f wo, Vec3f normal, Rng& rng,
+                         bool conductor_base) {
+    if (!IsAboveSurface(wo, normal)) {
+        return BsdfSample{};
+    }
+
+    const float ce = std::max(1.0f, material.coating_ior);
+
+    RenderMaterial base;
+    if (conductor_base) {
+        base.kind = RenderMaterialKind::Conductor;
+        base.reflectance = material.reflectance;        // f0 (compiler-derived)
+        base.uroughness = material.uroughness;
+        base.vroughness = material.vroughness;
+    } else {
+        base.kind = RenderMaterialKind::Diffuse;
+        base.reflectance = material.reflectance;
+    }
+
+    // --- Top interface, entering from air (smooth Fresnel) ---
+    const float cos_o = std::max(0.0f, Dot(wo, normal));
+    const float f_enter = FresnelDielectric(cos_o, 1.0f, ce);
+    if (rng.NextFloat() < f_enter) {
+        const Vec3f wr = Reflect(-wo, normal);
+        if (!IsAboveSurface(wr, normal)) {
+            return BsdfSample{};
+        }
+        return BsdfSample{wr, Color3f{1.0f, 1.0f, 1.0f}, 1.0f, true, true};
+    }
+
+    Vec3f w;
+    if (!Refract(wo, normal, 1.0f / ce, w)) {
+        const Vec3f wr = Reflect(-wo, normal);
+        return IsAboveSurface(wr, normal)
+            ? BsdfSample{wr, Color3f{1.0f, 1.0f, 1.0f}, 1.0f, true, true}
+            : BsdfSample{};
+    }
+
+    Color3f throughput{1.0f, 1.0f, 1.0f};
+
+    for (int depth = 0; depth < material.coat_maxdepth; ++depth) {
+        throughput = ApplyBeerLambert(throughput, material.coat_absorption, material.coat_thickness, w, normal);
+
+        const BsdfSample base_sample = SampleBsdf(base, -w, normal, rng.NextFloat2(), rng);
+        if (!base_sample.valid || IsBlack(base_sample.weight)) {
+            return BsdfSample{};
+        }
+        throughput = Color3f{
+            throughput.x * base_sample.weight.x,
+            throughput.y * base_sample.weight.y,
+            throughput.z * base_sample.weight.z,
+        };
+        w = base_sample.wi;
+        if (!IsAboveSurface(w, normal)) {
+            return BsdfSample{};
+        }
+
+        throughput = ApplyBeerLambert(throughput, material.coat_absorption, material.coat_thickness, w, normal);
+
+        const float cos_t = std::max(0.0f, Dot(w, normal));
+        const float f_back = FresnelDielectric(cos_t, ce, 1.0f);
+        if (rng.NextFloat() < f_back) {
+            w = Reflect(w, normal);
+            if (IsAboveSurface(w, normal)) {
+                return BsdfSample{};
+            }
+            continue;
+        }
+
+        Vec3f wexit;
+        if (!Refract(w, normal, ce, wexit)) {
+            w = Reflect(w, normal);
+            continue;
+        }
+        // Refract() expresses both incident and transmitted rays in the
+        // "crossing-to-the-opposite-side" convention, so for an up-going w it
+        // returns the geometrically-correct exit direction but pointing back
+        // down into the coat. Negate it to get the up-going air-side exit.
+        wexit = -wexit;
+        if (!IsAboveSurface(wexit, normal)) {
+            return BsdfSample{};
+        }
+        // TODO(2b): pdf is a proxy (1.0). EvaluateBsdf/PdfBsdf still alias coated
+        // kinds to their base, so this proxy feeds PowerHeuristic with a wrong
+        // (but finite) MIS weight when a coated bounce hits an emitter. Slice 2b
+        // replaces this with a real stochastic layered pdf.
+        return BsdfSample{wexit, throughput, 1.0f, true, false};
+    }
+
+    return BsdfSample{};
+}
+
 } // namespace
 
 Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, [[maybe_unused]] Rng& rng) {
     switch (material.kind) {
         case RenderMaterialKind::Diffuse:
         case RenderMaterialKind::CoatedDiffuse:
+            // TODO(2b): coated kinds alias to their base BSDF for eval/pdf.
+            // SampleBsdf does the real layered walk, but light-sampling MIS
+            // uses these base estimates — a documented 2a inconsistency that
+            // Slice 2b closes with a stochastic layered f/pdf estimator.
         case RenderMaterialKind::DiffuseTransmission:
         case RenderMaterialKind::Mix:
             if (!IsAboveSurface(wo, normal) || !IsAboveSurface(wi, normal)) {
@@ -364,6 +475,10 @@ Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f n
             return LambertianBrdf(material.reflectance.value);
         case RenderMaterialKind::Conductor:
         case RenderMaterialKind::CoatedConductor:
+            // TODO(2b): coated kinds alias to their base BSDF for eval/pdf.
+            // SampleBsdf does the real layered walk, but light-sampling MIS
+            // uses these base estimates — a documented 2a inconsistency that
+            // Slice 2b closes with a stochastic layered f/pdf estimator.
             if (material.uroughness.value <= DeltaRoughness && material.vroughness.value <= DeltaRoughness) {
                 return Color3f{};
             }
@@ -395,6 +510,10 @@ float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, 
     switch (material.kind) {
         case RenderMaterialKind::Diffuse:
         case RenderMaterialKind::CoatedDiffuse:
+            // TODO(2b): coated kinds alias to their base BSDF for eval/pdf.
+            // SampleBsdf does the real layered walk, but light-sampling MIS
+            // uses these base estimates — a documented 2a inconsistency that
+            // Slice 2b closes with a stochastic layered f/pdf estimator.
         case RenderMaterialKind::DiffuseTransmission:
         case RenderMaterialKind::Mix:
             if (!IsAboveSurface(wo, normal) || !IsAboveSurface(wi, normal)) {
@@ -403,6 +522,10 @@ float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, 
             return std::max(0.0f, Dot(normal, wi)) / Pi;
         case RenderMaterialKind::Conductor:
         case RenderMaterialKind::CoatedConductor:
+            // TODO(2b): coated kinds alias to their base BSDF for eval/pdf.
+            // SampleBsdf does the real layered walk, but light-sampling MIS
+            // uses these base estimates — a documented 2a inconsistency that
+            // Slice 2b closes with a stochastic layered f/pdf estimator.
             if (material.uroughness.value <= DeltaRoughness && material.vroughness.value <= DeltaRoughness) {
                 return 0.0f;
             }
@@ -425,10 +548,13 @@ float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, 
     return 0.0f;
 }
 
-BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Vec2f sample, [[maybe_unused]] Rng& rng) {
+BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Vec2f sample, Rng& rng) {
     switch (material.kind) {
-        case RenderMaterialKind::Diffuse:
         case RenderMaterialKind::CoatedDiffuse:
+            return SampleLayered(material, wo, normal, rng, /*conductor_base=*/false);
+        case RenderMaterialKind::CoatedConductor:
+            return SampleLayered(material, wo, normal, rng, /*conductor_base=*/true);
+        case RenderMaterialKind::Diffuse:
         case RenderMaterialKind::DiffuseTransmission:
         case RenderMaterialKind::Mix: {
             if (!IsAboveSurface(wo, normal) || IsBlack(material.reflectance.value)) {
@@ -444,7 +570,6 @@ BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Ve
             };
         }
         case RenderMaterialKind::Conductor:
-        case RenderMaterialKind::CoatedConductor:
             if (material.uroughness.value <= DeltaRoughness && material.vroughness.value <= DeltaRoughness) {
                 if (!IsAboveSurface(wo, normal) || IsBlack(material.reflectance.value)) {
                     return BsdfSample{};
