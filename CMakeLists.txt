@@ -119,6 +119,7 @@ add_executable(yaoray_tests
     tests/scene_compiler_wrap_mode_tests.cpp
     tests/scene_compiler_normal_map_tests.cpp
     tests/scene_compiler_tangent_tests.cpp
+    tests/scene_compiler_coated_tests.cpp
     tests/exr_io_tests.cpp
     tests/rng_tests.cpp
 )
