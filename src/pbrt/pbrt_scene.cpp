@@ -187,11 +187,27 @@ std::vector<PbrtParam> ReadParams(const std::vector<std::string>& tokens, std::s
 
         // Populate typed fields based on type
         if (type == "float" || type == "rgb" || type == "color" || type == "point3" ||
-            type == "point2" || type == "vector3" || type == "normal" || type == "spectrum" ||
-            type == "blackbody") {
+            type == "point2" || type == "vector3" || type == "normal" || type == "blackbody") {
             param.floats.reserve(raw_values.size());
             for (const std::string& v : raw_values) {
                 param.floats.push_back(ParseFloatToken(v).value_or(0.0f));
+            }
+        } else if (type == "spectrum") {
+            // A "spectrum" param may be either:
+            //   (a) inline numeric values: "spectrum foo" [0.4 0.5 0.6]  -> stored in floats[]
+            //   (b) an SPD filename:       "spectrum foo" ["spds/Au.eta.spd"] -> stored in strings[]
+            // Distinguish by trying to parse the first value as a float.
+            // If it fails (non-numeric string), treat the whole value list as strings
+            // so the compiler can detect and warn about unsupported SPD references.
+            if (!raw_values.empty() && !ParseFloatToken(raw_values[0]).has_value()) {
+                // Non-numeric: SPD filename reference.
+                param.strings = std::move(raw_values);
+            } else {
+                // Numeric inline spectrum values.
+                param.floats.reserve(raw_values.size());
+                for (const std::string& v : raw_values) {
+                    param.floats.push_back(ParseFloatToken(v).value_or(0.0f));
+                }
             }
         } else if (type == "integer") {
             param.ints.reserve(raw_values.size());

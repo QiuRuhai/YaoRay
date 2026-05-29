@@ -556,6 +556,32 @@ bool CompileNormalMap(
 // Material compilation
 // ---------------------------------------------------------------------------
 
+// Detect a "spectrum"-type param whose value is an SPD filename (a single non-numeric
+// string) rather than inline numeric values. The PBRT parser routes spectrum values
+// through the float parser; if the value is a filename (non-numeric), ParseFloatToken
+// returns nullopt and the float silently becomes 0.0f. After the parser fix, such
+// params store the filename in strings[] with floats[] empty.
+// This helper emits a Warning when an SPD-filename spectrum param is found, and
+// returns true so the caller can apply its own sensible fallback.
+bool WarnIfSpectrumFilename(
+    const PbrtScene& scene,
+    const std::vector<PbrtParam>& params,
+    const std::string& param_name,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const PbrtParam* p = FindParam(params, param_name);
+    if (p == nullptr) return false;
+    if (p->type != "spectrum") return false;
+    // An SPD filename lands in strings[] with floats[] empty.
+    if (!p->strings.empty() && p->floats.empty()) {
+        diagnostics.push_back(Warning(scene, "Material." + param_name,
+            "spectrum SPD file reference '" + p->strings[0] +
+            "' not supported (SPD parsing is out of scope); using metal fallback value"));
+        return true;
+    }
+    return false;
+}
+
 int CompileMaterial(
     const PbrtEntity& entity,
     const TextureBindings& bindings,
@@ -578,6 +604,8 @@ int CompileMaterial(
         }
     } else if (type == "conductor" || type == "metal") {
         material.kind = RenderMaterialKind::Conductor;
+        WarnIfSpectrumFilename(scene, params, "eta", diagnostics);
+        WarnIfSpectrumFilename(scene, params, "k", diagnostics);
         material.eta = TexParam3fFromParams(params, "eta",
             Color3f{0.2f, 0.2f, 0.2f}, bindings, scene, diagnostics);
         material.k = TexParam3fFromParams(params, "k",
@@ -610,6 +638,8 @@ int CompileMaterial(
         material.coat_nsamples = std::max(1, IntParam(FindParam(params, "nsamples"), 1));
     } else if (type == "coatedconductor") {
         material.kind = RenderMaterialKind::CoatedConductor;
+        WarnIfSpectrumFilename(scene, params, "conductor.eta", diagnostics);
+        WarnIfSpectrumFilename(scene, params, "conductor.k", diagnostics);
         material.eta = TexParam3fFromParams(params, "conductor.eta",
             Color3f{0.2f, 0.2f, 0.2f}, bindings, scene, diagnostics);
         material.k = TexParam3fFromParams(params, "conductor.k",
