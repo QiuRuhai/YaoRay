@@ -28,6 +28,9 @@ distributions); `Render` then ray-traces against that prepared scene.
 `diffusetransmission`. Texture binding via `"texture <param>" ["name"]`
 on `reflectance`, `eta`, `k`, `uroughness`, `vroughness`, and the
 coating-layer parameters. Normal maps via `"string normalmap"`.
+`coateddiffuse` and `coatedconductor` perform full stochastic two-layer
+evaluation (sample + f + pdf, MIS-consistent) via a Russian-roulette
+internal walk with Beer-Lambert absorption.
 
 **Materials with documented degradation:** `subsurface` (→ diffuse with
 declared reflectance), `measured` (→ default conductor), `hair` (→ grey
