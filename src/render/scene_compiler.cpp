@@ -853,6 +853,42 @@ bool CompileSphereShape(
     return true;
 }
 
+// Pass through a PBRT v4 Shape "loopsubdiv" as a base-mesh trianglemesh.
+// Full Loop subdivision is out of scope (M3 Slice 3); the base control mesh
+// (level 0) is used as-is. A Warning is emitted so users know the surface is
+// faceted rather than smooth. The P and indices params have the same layout as
+// trianglemesh, so CompileTriangleMeshShape handles the actual triangle emission
+// after we rewrite the shape type.
+bool CompileLoopSubdivShape(
+    const PbrtShapeRecord& record,
+    int material_index,
+    RenderSceneIR& ir,
+    const PbrtScene& scene,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const PbrtParam* p_param = FindParam(record.shape.params, "P");
+    const PbrtParam* indices_param = FindParam(record.shape.params, "indices");
+    if (p_param == nullptr || indices_param == nullptr || p_param->floats.empty() || indices_param->ints.empty()) {
+        diagnostics.push_back(Warning(scene, "Shape.loopsubdiv",
+            "loopsubdiv shape requires P and indices; skipping shape"));
+        return false;
+    }
+
+    const int levels = IntParam(FindParam(record.shape.params, "levels"), 1);
+    (void)levels;  // subdivision is not applied
+
+    diagnostics.push_back(Warning(scene, "Shape.loopsubdiv",
+        "loopsubdiv shape: subdivision levels not applied (out of scope); "
+        "rendering base control mesh as faceted trianglemesh"));
+
+    // Reuse CompileTriangleMeshShape by constructing a trianglemesh-type record
+    // that carries the same P/indices (and optional N) parameters.
+    PbrtShapeRecord tri_record = record;
+    tri_record.shape.type = "trianglemesh";
+
+    return CompileTriangleMeshShape(tri_record, material_index, ir, scene, diagnostics);
+}
+
 // Tessellate a PBRT v4 Shape "disk" into a triangle fan.
 // PBRT disk parameters:
 //   radius      — outer radius (default 1)
@@ -1146,6 +1182,8 @@ bool CompileInstances(
                 CompilePlyMeshShape(composed, mat_idx, ir, scene, diagnostics);
             } else if (composed.shape.type == "disk") {
                 CompileDiskShape(composed, mat_idx, ir, scene, diagnostics);
+            } else if (composed.shape.type == "loopsubdiv") {
+                CompileLoopSubdivShape(composed, mat_idx, ir, scene, diagnostics);
             }
         }
     }
@@ -1389,6 +1427,8 @@ SceneCompileResult CompilePbrtScene(const PbrtScene& scene) {
             CompileSphereShape(record, mat_idx, ir, scene, diagnostics);
         } else if (record.shape.type == "disk") {
             CompileDiskShape(record, mat_idx, ir, scene, diagnostics);
+        } else if (record.shape.type == "loopsubdiv") {
+            CompileLoopSubdivShape(record, mat_idx, ir, scene, diagnostics);
         } else {
             diagnostics.push_back(Warning(scene, "Shape", "unsupported shape type: " + record.shape.type));
         }
