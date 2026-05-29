@@ -463,6 +463,10 @@ Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f n
     switch (material.kind) {
         case RenderMaterialKind::Diffuse:
         case RenderMaterialKind::CoatedDiffuse:
+            // TODO(2b): coated kinds alias to their base BSDF for eval/pdf.
+            // SampleBsdf does the real layered walk, but light-sampling MIS
+            // uses these base estimates — a documented 2a inconsistency that
+            // Slice 2b closes with a stochastic layered f/pdf estimator.
         case RenderMaterialKind::DiffuseTransmission:
         case RenderMaterialKind::Mix:
             if (!IsAboveSurface(wo, normal) || !IsAboveSurface(wi, normal)) {
@@ -471,6 +475,10 @@ Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f n
             return LambertianBrdf(material.reflectance.value);
         case RenderMaterialKind::Conductor:
         case RenderMaterialKind::CoatedConductor:
+            // TODO(2b): coated kinds alias to their base BSDF for eval/pdf.
+            // SampleBsdf does the real layered walk, but light-sampling MIS
+            // uses these base estimates — a documented 2a inconsistency that
+            // Slice 2b closes with a stochastic layered f/pdf estimator.
             if (material.uroughness.value <= DeltaRoughness && material.vroughness.value <= DeltaRoughness) {
                 return Color3f{};
             }
@@ -502,6 +510,10 @@ float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, 
     switch (material.kind) {
         case RenderMaterialKind::Diffuse:
         case RenderMaterialKind::CoatedDiffuse:
+            // TODO(2b): coated kinds alias to their base BSDF for eval/pdf.
+            // SampleBsdf does the real layered walk, but light-sampling MIS
+            // uses these base estimates — a documented 2a inconsistency that
+            // Slice 2b closes with a stochastic layered f/pdf estimator.
         case RenderMaterialKind::DiffuseTransmission:
         case RenderMaterialKind::Mix:
             if (!IsAboveSurface(wo, normal) || !IsAboveSurface(wi, normal)) {
@@ -510,6 +522,10 @@ float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, 
             return std::max(0.0f, Dot(normal, wi)) / Pi;
         case RenderMaterialKind::Conductor:
         case RenderMaterialKind::CoatedConductor:
+            // TODO(2b): coated kinds alias to their base BSDF for eval/pdf.
+            // SampleBsdf does the real layered walk, but light-sampling MIS
+            // uses these base estimates — a documented 2a inconsistency that
+            // Slice 2b closes with a stochastic layered f/pdf estimator.
             if (material.uroughness.value <= DeltaRoughness && material.vroughness.value <= DeltaRoughness) {
                 return 0.0f;
             }

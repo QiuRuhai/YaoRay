@@ -22,6 +22,20 @@ yr::RenderMaterial MakeCoatedDiffuse(yr::Color3f base_reflectance) {
     return m;
 }
 
+yr::RenderMaterial MakeCoatedConductor(yr::Color3f base_f0) {
+    yr::RenderMaterial m;
+    m.kind = yr::RenderMaterialKind::CoatedConductor;
+    m.reflectance.value = base_f0;     // conductor base f0 (compiler-derived in real scenes)
+    m.uroughness.value = 0.1f;
+    m.vroughness.value = 0.1f;
+    m.coating_ior = 1.5f;
+    m.coating_roughness.value = 0.0f;
+    m.coat_thickness = 0.01f;
+    m.coat_absorption = yr::Color3f{0.0f, 0.0f, 0.0f};
+    m.coat_maxdepth = 10;
+    return m;
+}
+
 bool IsFiniteColor(yr::Color3f c) {
     return std::isfinite(c.x) && std::isfinite(c.y) && std::isfinite(c.z);
 }
@@ -111,4 +125,27 @@ YR_TEST(layered_sample_directions_are_valid) {
         YR_EXPECT_TRUE(yr::Dot(s.wi, n) > -1e-4f);
         YR_EXPECT_TRUE(s.pdf > 0.0f);
     }
+}
+
+YR_TEST(layered_conductor_sample_is_energy_conserving_and_valid) {
+    // Coated conductor (gold-ish f0), zero absorption. The base reflects only
+    // its f0 fraction, so mean throughput is < 1 (not white-furnace), but it
+    // must never gain energy and must always exit in the upper hemisphere.
+    yr::RenderMaterial m = MakeCoatedConductor(yr::Color3f{1.0f, 0.78f, 0.34f});
+    const yr::Vec3f n = Up();
+    const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.3f, 0.1f, 1.0f});
+
+    yr::Rng rng{4242u};
+    const int N = 20000;
+    yr::Color3f sum{0.0f, 0.0f, 0.0f};
+    for (int i = 0; i < N; ++i) {
+        const yr::BsdfSample s = yr::SampleBsdf(m, wo, n, rng.NextFloat2(), rng);
+        if (!s.valid) continue;
+        YR_EXPECT_TRUE(IsFiniteColor(s.weight));
+        YR_EXPECT_TRUE(yr::Dot(s.wi, n) > -1e-4f);
+        YR_EXPECT_TRUE(s.pdf > 0.0f);
+        sum = sum + s.weight;
+    }
+    const yr::Color3f mean = sum / static_cast<float>(N);
+    YR_EXPECT_TRUE(MaxComp(mean) <= 1.05f);   // no energy gain
 }
