@@ -10,7 +10,7 @@ This repository is a rewrite of the previous ToyRender experiment. The old code 
 
 ## Current Status
 
-M1 and M2 are complete. The renderer handles:
+M1 and M2 are complete. M3 is in progress: the layered-materials phase (real `coated*` stochastic evaluation) renders end-to-end with the killeroo-coated scene; the `measured` BRDF phase (sportscar) is the remaining M3 work. The renderer handles:
 
 - A two-layer pipeline: `PbrtScene → RenderSceneIR → Backend`.
 - A multi-threaded CPU path tracer with SAH-binned BVH (parallel construction, deterministic), MIS over BSDF / area-light / environment samples, Russian-roulette termination, ACES/Reinhard/identity tone mapping, and PNG output.
@@ -74,6 +74,7 @@ The output PNG lands at the path declared in the scene's `Film "string filename"
 | `scenes/pbrt/texture_test/` | Texture wrap modes + normal-map data path validation. |
 | `scenes/pbrt/dining_room/` | Bitterli's PBRT v4 dining-room (asset downloaded separately; see the per-scene README for the curl/unzip workflow). |
 | `scenes/pbrt/barcelona_pavilion/` | mmp's PBRT v4 Barcelona Pavilion — M2 anchor scene (asset downloaded separately via `git lfs`; see the per-scene README for the sparse-checkout workflow). |
+| `scenes/pbrt/killeroo_coated/` | mmp's PBRT v4 killeroo-coated — M3 layered-materials anchor (asset via `git lfs`; see the per-scene README). |
 
 ## Architecture
 
