@@ -606,7 +606,7 @@ int CompileMaterial(
         material.coating_roughness = TexParam1fFromParams(params, "roughness",
             0.0f, bindings, scene, diagnostics);
         material.coat_thickness = FloatParam(FindParam(params, "thickness"), 0.01f);
-        material.coat_maxdepth = static_cast<int>(FloatParam(FindParam(params, "maxdepth"), 10.0f));
+        material.coat_maxdepth = IntParam(FindParam(params, "maxdepth"), 10);
     } else if (type == "coatedconductor") {
         material.kind = RenderMaterialKind::CoatedConductor;
         material.eta = TexParam3fFromParams(params, "conductor.eta",
@@ -615,20 +615,18 @@ int CompileMaterial(
             Color3f{1.0f, 1.0f, 1.0f}, bindings, scene, diagnostics);
         // YaoRay's conductor BSDF uses reflectance as the Schlick f0. Derive it
         // from eta/k: f0 = ((eta-1)^2 + k^2) / ((eta+1)^2 + k^2) per channel.
+        // Use the already-written material.eta.value / material.k.value so that
+        // both fields and f0 always come from the same param lookup (same defaults).
         {
-            const Color3f cond_eta = RgbParam(FindParam(params, "conductor.eta"),
-                Color3f{0.2f, 0.92f, 1.1f});
-            const Color3f cond_k = RgbParam(FindParam(params, "conductor.k"),
-                Color3f{3.9f, 2.45f, 2.14f});
             auto schlick_f0 = [](float eta, float k) {
                 const float num = (eta - 1.0f) * (eta - 1.0f) + k * k;
                 const float den = (eta + 1.0f) * (eta + 1.0f) + k * k;
                 return den > 0.0f ? num / den : 1.0f;
             };
             material.reflectance.value = Color3f{
-                schlick_f0(cond_eta.x, cond_k.x),
-                schlick_f0(cond_eta.y, cond_k.y),
-                schlick_f0(cond_eta.z, cond_k.z),
+                schlick_f0(material.eta.value.x, material.k.value.x),
+                schlick_f0(material.eta.value.y, material.k.value.y),
+                schlick_f0(material.eta.value.z, material.k.value.z),
             };
         }
         material.uroughness = TexParam1fFromParams(params, "conductor.roughness",
@@ -639,7 +637,7 @@ int CompileMaterial(
         material.coating_roughness = TexParam1fFromParams(params, "roughness",
             0.0f, bindings, scene, diagnostics);
         material.coat_thickness = FloatParam(FindParam(params, "thickness"), 0.01f);
-        material.coat_maxdepth = static_cast<int>(FloatParam(FindParam(params, "maxdepth"), 10.0f));
+        material.coat_maxdepth = IntParam(FindParam(params, "maxdepth"), 10);
     } else if (type == "diffusetransmission") {
         material.kind = RenderMaterialKind::DiffuseTransmission;
         material.reflectance = TexParam3fFromParams(params, "reflectance",
