@@ -559,6 +559,8 @@ float PdfLayered(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f norma
                 break;
             }
             const float f_back = FresnelDielectric(std::max(0.0f, Dot(bs.wi, normal)), ce, 1.0f);
+            // Deterministic reach decay (not stochastic RR like Eval/Sample): same
+            // expectation, lower variance for the pdf estimate.
             reach *= f_back;
             if (reach <= 0.0f) {
                 break;
@@ -688,7 +690,7 @@ Color3f EvaluateLayered(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3
 
 } // namespace
 
-Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, [[maybe_unused]] Rng& rng) {
+Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, Rng& rng) {
     switch (material.kind) {
         case RenderMaterialKind::CoatedDiffuse:
             return EvaluateLayered(material, wo, wi, normal, rng, /*conductor_base=*/false);
