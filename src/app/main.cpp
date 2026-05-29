@@ -103,6 +103,11 @@ int RunRender(int argc, char** argv) {
         std::cerr << yr::FormatSceneDiagnostics(parse_result.diagnostics) << '\n';
         return 1;
     }
+    // Print parse-stage warnings unconditionally so users see ignored directives
+    // (e.g. CoordSysTransform, ReverseOrientation) even when parse succeeds.
+    if (!parse_result.diagnostics.empty()) {
+        std::cerr << yr::FormatSceneDiagnostics(parse_result.diagnostics) << '\n';
+    }
 
     // --- Compile to render IR ---
     yr::SceneCompileResult compile_result = yr::CompilePbrtScene(parse_result.scene.value());

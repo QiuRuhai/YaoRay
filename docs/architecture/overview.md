@@ -73,6 +73,7 @@ multi-threaded path tracer
 | `scenes/pbrt/texture_test/` | Texture wrap modes + normal-map data path. |
 | `scenes/pbrt/dining_room/README.md` | Bitterli's PBRT v4 dining-room (downloaded; gitignored). |
 | `scenes/pbrt/barcelona_pavilion/README.md` | mmp's PBRT v4 Barcelona Pavilion — M2 anchor scene (downloaded via `git lfs`; gitignored). |
+| `scenes/pbrt/killeroo_coated/README.md` | mmp's PBRT v4 killeroo-coated — M3 layered-materials anchor (downloaded via `git lfs`; gitignored). |
 
 The first four scenes are committed and exercised by CTest. The
 dining-room and Pavilion assets are large and live under permissive
@@ -106,7 +107,7 @@ M1 (done) ──▶ M2 (done) ──▶ M3 (in progress) ──▶ M4 ──▶ 
 |---|---|---|---|
 | **M1** | cornell_box / material_studio / texture_test / dining-room | PBRT v4 frontend + core BSDFs + textures | done |
 | **M2** | `barcelona-pavilion` (mmp PBRT v4) | SAH BVH + parallel build; dining-room renders ≥ 2× faster | done |
-| **M3** | `killeroo-coated` + `sportscar` | Advanced Materials I: stochastic layered (`coated*`) + `measured` BRDF | in progress |
+| **M3** | `killeroo-coated` + `sportscar` | Advanced Materials I: stochastic layered (`coated*`) **done** — killeroo-coated renders; `measured` BRDF (sportscar) pending | in progress |
 | **M4** | `ganesha` | Subsurface scattering (BSSRDF), replacing the diffuse degradation | planned |
 | **M5** | `dining-room` < 10 s, `barcelona-pavilion` < 1 min | CUDA backend — bit-for-bit GPU port of the frozen CPU surface | planned |
 | **M6+** | by interest | Volumetrics, hair + curves, subdivision, spectral, denoiser, adaptive sampling, sampler polish | exploratory |

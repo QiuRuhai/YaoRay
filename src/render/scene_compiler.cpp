@@ -556,6 +556,89 @@ bool CompileNormalMap(
 // Material compilation
 // ---------------------------------------------------------------------------
 
+// Small static table of representative RGB eta/k values for common metals
+// (sRGB-approximate, from standard Filament / Cycles reference data).
+// Used to approximate conductor materials that reference SPD filenames like
+// "spds/Au.eta.spd" — no SPD file is actually read; this is a documented
+// approximation so that gold reads gold rather than generic silver.
+struct MetalEtaK {
+    const char* symbol;
+    Color3f eta;  // (r, g, b)
+    Color3f k;    // (r, g, b)
+};
+
+static const MetalEtaK kKnownMetals[] = {
+    {"Au", {0.143f, 0.375f, 1.442f}, {3.983f, 2.386f, 1.603f}},  // gold
+    {"Ag", {0.155f, 0.116f, 0.138f}, {4.818f, 3.122f, 2.146f}},  // silver
+    {"Cu", {0.200f, 0.924f, 1.102f}, {3.912f, 2.448f, 2.137f}},  // copper
+    {"Al", {1.657f, 0.881f, 0.521f}, {9.224f, 6.270f, 4.837f}},  // aluminium
+};
+
+// Extract the leading element symbol from an SPD basename.
+// E.g. "spds/Au.eta.spd" → basename "Au.eta.spd" → leading token "Au".
+// Returns empty string if no dot-separated prefix is present.
+static std::string SpdBasenameSymbol(const std::string& spd_path) {
+    // Strip directory: find last '/' or '\' to get basename.
+    const std::size_t slash = spd_path.find_last_of("/\\");
+    const std::string basename = (slash == std::string::npos)
+        ? spd_path
+        : spd_path.substr(slash + 1);
+    // Take the prefix before the first '.'.
+    const std::size_t dot = basename.find('.');
+    return (dot == std::string::npos) ? basename : basename.substr(0, dot);
+}
+
+// Detect a "spectrum"-type param whose value is an SPD filename (a single non-numeric
+// string) rather than inline numeric values. The PBRT parser routes spectrum values
+// through the float parser; if the value is a filename (non-numeric), ParseFloatToken
+// returns nullopt and the float silently becomes 0.0f. After the parser fix, such
+// params store the filename in strings[] with floats[] empty.
+//
+// When an SPD-filename is detected AND the basename maps to a recognized metal symbol
+// (Au/Ag/Cu/Al), the out-parameters eta_out and k_out are set to that metal's
+// representative RGB values and the function returns true. For an unrecognized
+// basename, eta_out/k_out are set to the generic fallback (0.2 / 1.0) and the
+// function returns true. Returns false if the param is not an SPD filename at all.
+//
+// Both conductor.eta and conductor.k are detected here; when EITHER references a
+// recognized-metal SPD, BOTH eta_out and k_out are set to the complete metal row
+// so they remain consistent (a gold eta file always pairs with gold k).
+bool WarnIfSpectrumFilename(
+    const PbrtScene& scene,
+    const std::vector<PbrtParam>& params,
+    const std::string& param_name,
+    std::vector<SceneDiagnostic>& diagnostics,
+    Color3f& eta_out,
+    Color3f& k_out
+) {
+    const PbrtParam* p = FindParam(params, param_name);
+    if (p == nullptr) return false;
+    if (p->type != "spectrum") return false;
+    // An SPD filename lands in strings[] with floats[] empty.
+    if (!p->strings.empty() && p->floats.empty()) {
+        const std::string symbol = SpdBasenameSymbol(p->strings[0]);
+        for (const MetalEtaK& m : kKnownMetals) {
+            if (symbol == m.symbol) {
+                diagnostics.push_back(Warning(scene, "Material." + param_name,
+                    "spectrum SPD file reference '" + p->strings[0] +
+                    "' not supported (SPD parsing is out of scope); approximating '" +
+                    symbol + "' as representative RGB eta/k (not full SPD parsing)"));
+                eta_out = m.eta;
+                k_out = m.k;
+                return true;
+            }
+        }
+        // Unrecognized basename — use generic metal fallback.
+        diagnostics.push_back(Warning(scene, "Material." + param_name,
+            "spectrum SPD file reference '" + p->strings[0] +
+            "' not supported (SPD parsing is out of scope); using generic metal fallback value"));
+        eta_out = Color3f{0.2f, 0.2f, 0.2f};
+        k_out = Color3f{1.0f, 1.0f, 1.0f};
+        return true;
+    }
+    return false;
+}
+
 int CompileMaterial(
     const PbrtEntity& entity,
     const TextureBindings& bindings,
@@ -578,10 +661,21 @@ int CompileMaterial(
         }
     } else if (type == "conductor" || type == "metal") {
         material.kind = RenderMaterialKind::Conductor;
-        material.eta = TexParam3fFromParams(params, "eta",
-            Color3f{0.2f, 0.2f, 0.2f}, bindings, scene, diagnostics);
-        material.k = TexParam3fFromParams(params, "k",
-            Color3f{1.0f, 1.0f, 1.0f}, bindings, scene, diagnostics);
+        Color3f spd_eta{0.2f, 0.2f, 0.2f};
+        Color3f spd_k{1.0f, 1.0f, 1.0f};
+        const bool eta_is_spd = WarnIfSpectrumFilename(scene, params, "eta", diagnostics, spd_eta, spd_k);
+        const bool k_is_spd   = WarnIfSpectrumFilename(scene, params, "k",   diagnostics, spd_eta, spd_k);
+        if (eta_is_spd || k_is_spd) {
+            // SPD filename detected on at least one param — use the table-derived values
+            // directly so both eta and k come from the same metal row.
+            material.eta.value = spd_eta;
+            material.k.value   = spd_k;
+        } else {
+            material.eta = TexParam3fFromParams(params, "eta",
+                Color3f{0.2f, 0.2f, 0.2f}, bindings, scene, diagnostics);
+            material.k = TexParam3fFromParams(params, "k",
+                Color3f{1.0f, 1.0f, 1.0f}, bindings, scene, diagnostics);
+        }
         const float fallback_u = FloatParam(FindParam(params, "roughness"), 0.0f);
         material.uroughness = TexParam1fFromParams(params, "uroughness",
             fallback_u, bindings, scene, diagnostics);
@@ -603,17 +697,35 @@ int CompileMaterial(
         material.reflectance = TexParam3fFromParams(params, "reflectance",
             Color3f{0.5f, 0.5f, 0.5f}, bindings, scene, diagnostics);
         material.coating_ior = FloatParam(FindParam(params, "eta"), 1.5f);
-        material.coating_roughness = TexParam1fFromParams(params, "roughness",
-            0.0f, bindings, scene, diagnostics);
+        // PBRT v4 uses "interface.roughness" for the coat layer; fall back to
+        // the legacy "roughness" param if not found (for backwards compatibility).
+        if (FindParam(params, "interface.roughness") != nullptr) {
+            material.coating_roughness = TexParam1fFromParams(params, "interface.roughness",
+                0.0f, bindings, scene, diagnostics);
+        } else {
+            material.coating_roughness = TexParam1fFromParams(params, "roughness",
+                0.0f, bindings, scene, diagnostics);
+        }
         material.coat_thickness = FloatParam(FindParam(params, "thickness"), 0.01f);
         material.coat_maxdepth = IntParam(FindParam(params, "maxdepth"), 10);
         material.coat_nsamples = std::max(1, IntParam(FindParam(params, "nsamples"), 1));
     } else if (type == "coatedconductor") {
         material.kind = RenderMaterialKind::CoatedConductor;
-        material.eta = TexParam3fFromParams(params, "conductor.eta",
-            Color3f{0.2f, 0.2f, 0.2f}, bindings, scene, diagnostics);
-        material.k = TexParam3fFromParams(params, "conductor.k",
-            Color3f{1.0f, 1.0f, 1.0f}, bindings, scene, diagnostics);
+        Color3f spd_eta{0.2f, 0.2f, 0.2f};
+        Color3f spd_k{1.0f, 1.0f, 1.0f};
+        const bool eta_is_spd = WarnIfSpectrumFilename(scene, params, "conductor.eta", diagnostics, spd_eta, spd_k);
+        const bool k_is_spd   = WarnIfSpectrumFilename(scene, params, "conductor.k",   diagnostics, spd_eta, spd_k);
+        if (eta_is_spd || k_is_spd) {
+            // SPD filename detected on at least one param — use the table-derived values
+            // directly so both eta and k come from the same metal row.
+            material.eta.value = spd_eta;
+            material.k.value   = spd_k;
+        } else {
+            material.eta = TexParam3fFromParams(params, "conductor.eta",
+                Color3f{0.2f, 0.2f, 0.2f}, bindings, scene, diagnostics);
+            material.k = TexParam3fFromParams(params, "conductor.k",
+                Color3f{1.0f, 1.0f, 1.0f}, bindings, scene, diagnostics);
+        }
         // YaoRay's conductor BSDF uses reflectance as the Schlick f0. Derive it
         // from eta/k: f0 = ((eta-1)^2 + k^2) / ((eta+1)^2 + k^2) per channel.
         // Use the already-written material.eta.value / material.k.value so that
@@ -635,8 +747,15 @@ int CompileMaterial(
         material.vroughness = TexParam1fFromParams(params, "conductor.roughness",
             material.uroughness.value, bindings, scene, diagnostics);
         material.coating_ior = FloatParam(FindParam(params, "eta"), 1.5f);
-        material.coating_roughness = TexParam1fFromParams(params, "roughness",
-            0.0f, bindings, scene, diagnostics);
+        // PBRT v4 uses "interface.roughness" for the coat layer; fall back to
+        // the legacy "roughness" param if not found (for backwards compatibility).
+        if (FindParam(params, "interface.roughness") != nullptr) {
+            material.coating_roughness = TexParam1fFromParams(params, "interface.roughness",
+                0.0f, bindings, scene, diagnostics);
+        } else {
+            material.coating_roughness = TexParam1fFromParams(params, "roughness",
+                0.0f, bindings, scene, diagnostics);
+        }
         material.coat_thickness = FloatParam(FindParam(params, "thickness"), 0.01f);
         material.coat_maxdepth = IntParam(FindParam(params, "maxdepth"), 10);
         material.coat_nsamples = std::max(1, IntParam(FindParam(params, "nsamples"), 1));
@@ -853,6 +972,207 @@ bool CompileSphereShape(
     return true;
 }
 
+// Pass through a PBRT v4 Shape "loopsubdiv" as a base-mesh trianglemesh.
+// Full Loop subdivision is out of scope (M3 Slice 3); the base control mesh
+// (level 0) is used as-is. A Warning is emitted so users know the surface is
+// faceted rather than smooth. The P and indices params have the same layout as
+// trianglemesh, so CompileTriangleMeshShape handles the actual triangle emission
+// after we rewrite the shape type.
+bool CompileLoopSubdivShape(
+    const PbrtShapeRecord& record,
+    int material_index,
+    RenderSceneIR& ir,
+    const PbrtScene& scene,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const PbrtParam* p_param = FindParam(record.shape.params, "P");
+    const PbrtParam* indices_param = FindParam(record.shape.params, "indices");
+    if (p_param == nullptr || indices_param == nullptr || p_param->floats.empty() || indices_param->ints.empty()) {
+        diagnostics.push_back(Warning(scene, "Shape.loopsubdiv",
+            "loopsubdiv shape requires P and indices; skipping shape"));
+        return false;
+    }
+
+    // PBRT default is 3 subdivision levels; subdivision is not applied (out of scope).
+    (void)IntParam(FindParam(record.shape.params, "levels"), 3);
+
+    diagnostics.push_back(Warning(scene, "Shape.loopsubdiv",
+        "loopsubdiv shape: subdivision levels not applied (out of scope); "
+        "rendering base control mesh as faceted trianglemesh"));
+
+    // Reuse CompileTriangleMeshShape by constructing a trianglemesh-type record
+    // that carries the same P/indices (and optional N) parameters.
+    PbrtShapeRecord tri_record = record;
+    tri_record.shape.type = "trianglemesh";
+
+    return CompileTriangleMeshShape(tri_record, material_index, ir, scene, diagnostics);
+}
+
+// Tessellate a PBRT v4 Shape "disk" into a triangle fan.
+// PBRT disk parameters:
+//   radius      — outer radius (default 1)
+//   innerradius — inner radius for annulus (default 0, full disk)
+//   height      — Z-offset of the disk plane (default 0)
+//   phimax      — sweep angle in degrees (default 360; partial disks NOT implemented,
+//                 full disk always generated)
+// The disk is created in object space as a flat polygon in the XY plane at z=height,
+// then vertices are transformed by object_to_world.
+// N=32 sectors provides a good tessellation quality / triangle count balance.
+bool CompileDiskShape(
+    const PbrtShapeRecord& record,
+    int material_index,
+    RenderSceneIR& ir,
+    const PbrtScene& scene,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const float radius = FloatParam(FindParam(record.shape.params, "radius"), 1.0f);
+    const float inner_radius = FloatParam(FindParam(record.shape.params, "innerradius"), 0.0f);
+    const float height = FloatParam(FindParam(record.shape.params, "height"), 0.0f);
+
+    if (radius <= 0.0f) {
+        diagnostics.push_back(Warning(scene, "Shape.disk", "disk radius <= 0; skipping shape"));
+        return false;
+    }
+
+    const bool has_phimax = (FindParam(record.shape.params, "phimax") != nullptr);
+    if (has_phimax) {
+        diagnostics.push_back(Warning(scene, "Shape.disk",
+            "partial disk (phimax) is not supported; full disk will be used"));
+    }
+
+    // Tessellation quality: 32 sectors.
+    constexpr int kSectors = 32;
+
+    const std::uint32_t base_vertex = static_cast<std::uint32_t>(ir.vertices.size());
+    const std::uint32_t base_index = static_cast<std::uint32_t>(ir.indices.size());
+
+    // The disk normal in object space is (0, 0, 1); after transform it becomes
+    // the world-space normal (sign depends on orientation but is consistent per-vertex).
+    const Vec3f obj_normal{0.0f, 0.0f, 1.0f};
+    const Vec3f world_normal = Normalize(TransformNormal(record.object_to_world, obj_normal));
+
+    if (inner_radius <= 0.0f) {
+        // Solid disk: 1 center vertex + kSectors ring vertices.
+        // Total: kSectors + 1 vertices, kSectors triangles.
+
+        // Center vertex at (0, 0, height) in object space.
+        {
+            RenderVertex v;
+            v.position = TransformPoint(record.object_to_world, Point3f{0.0f, 0.0f, height});
+            v.normal = world_normal;
+            v.uv = Vec2f{0.5f, 0.5f};
+            ir.vertices.push_back(v);
+        }
+
+        // Ring vertices
+        for (int s = 0; s < kSectors; ++s) {
+            const float angle = 2.0f * Pi * static_cast<float>(s) / static_cast<float>(kSectors);
+            const float cos_a = std::cos(angle);
+            const float sin_a = std::sin(angle);
+            RenderVertex v;
+            v.position = TransformPoint(record.object_to_world,
+                Point3f{radius * cos_a, radius * sin_a, height});
+            v.normal = world_normal;
+            v.uv = Vec2f{0.5f + 0.5f * cos_a, 0.5f + 0.5f * sin_a};
+            ir.vertices.push_back(v);
+        }
+
+        // Indices: triangle fan from center (base_vertex) to ring pairs.
+        for (int s = 0; s < kSectors; ++s) {
+            const std::uint32_t v_center = base_vertex;
+            const std::uint32_t v_a = base_vertex + 1 + static_cast<std::uint32_t>(s);
+            const std::uint32_t v_b = base_vertex + 1 + static_cast<std::uint32_t>((s + 1) % kSectors);
+            ir.indices.push_back(v_center);
+            ir.indices.push_back(v_a);
+            ir.indices.push_back(v_b);
+        }
+    } else {
+        // Annulus: 2 rings, kSectors * 2 vertices, kSectors * 2 triangles.
+        // Inner ring at inner_radius, outer ring at radius.
+        for (int s = 0; s < kSectors; ++s) {
+            const float angle = 2.0f * Pi * static_cast<float>(s) / static_cast<float>(kSectors);
+            const float cos_a = std::cos(angle);
+            const float sin_a = std::sin(angle);
+
+            // Inner ring vertex
+            {
+                RenderVertex v;
+                v.position = TransformPoint(record.object_to_world,
+                    Point3f{inner_radius * cos_a, inner_radius * sin_a, height});
+                v.normal = world_normal;
+                v.uv = Vec2f{0.5f + 0.5f * cos_a * (inner_radius / radius),
+                              0.5f + 0.5f * sin_a * (inner_radius / radius)};
+                ir.vertices.push_back(v);
+            }
+            // Outer ring vertex
+            {
+                RenderVertex v;
+                v.position = TransformPoint(record.object_to_world,
+                    Point3f{radius * cos_a, radius * sin_a, height});
+                v.normal = world_normal;
+                v.uv = Vec2f{0.5f + 0.5f * cos_a, 0.5f + 0.5f * sin_a};
+                ir.vertices.push_back(v);
+            }
+        }
+
+        // Indices: quad strip (2 triangles per sector).
+        for (int s = 0; s < kSectors; ++s) {
+            const int next_s = (s + 1) % kSectors;
+            const std::uint32_t inner_a  = base_vertex + static_cast<std::uint32_t>(s * 2);
+            const std::uint32_t outer_a  = base_vertex + static_cast<std::uint32_t>(s * 2 + 1);
+            const std::uint32_t inner_b  = base_vertex + static_cast<std::uint32_t>(next_s * 2);
+            const std::uint32_t outer_b  = base_vertex + static_cast<std::uint32_t>(next_s * 2 + 1);
+
+            // Triangle 1: inner_a, outer_a, outer_b
+            ir.indices.push_back(inner_a);
+            ir.indices.push_back(outer_a);
+            ir.indices.push_back(outer_b);
+
+            // Triangle 2: inner_a, outer_b, inner_b
+            ir.indices.push_back(inner_a);
+            ir.indices.push_back(outer_b);
+            ir.indices.push_back(inner_b);
+        }
+    }
+
+    const std::uint32_t index_count = static_cast<std::uint32_t>(ir.indices.size()) - base_index;
+
+    RenderPrimitive prim;
+    prim.first_index = base_index;
+    prim.index_count = index_count;
+    prim.material_index = material_index;
+    prim.has_normals = true;
+    prim.has_uvs = true;
+    prim.has_tangents = false;
+    ir.primitives.push_back(prim);
+
+    // Handle area light emission (same pattern as trianglemesh)
+    if (record.area_light.has_value()) {
+        Color3f radiance = RgbParam(FindParam(record.area_light->params, "L"), Color3f{1.0f, 1.0f, 1.0f});
+
+        float total_area = 0.0f;
+        const std::size_t triangle_count = index_count / 3;
+        for (std::size_t ti = 0; ti < triangle_count; ++ti) {
+            const std::uint32_t i0 = ir.indices[base_index + ti * 3];
+            const std::uint32_t i1 = ir.indices[base_index + ti * 3 + 1];
+            const std::uint32_t i2 = ir.indices[base_index + ti * 3 + 2];
+            const Vec3f e1 = ir.vertices[i1].position - ir.vertices[i0].position;
+            const Vec3f e2 = ir.vertices[i2].position - ir.vertices[i0].position;
+            total_area += Length(Cross(e1, e2)) * 0.5f;
+        }
+
+        EmissivePrimitive ep;
+        ep.primitive_index = static_cast<int>(ir.primitives.size()) - 1;
+        ep.radiance = radiance;
+        ep.area = total_area;
+        ir.emissive_primitives.push_back(ep);
+
+        ir.materials[material_index].emission = radiance;
+    }
+
+    return true;
+}
+
 bool CompilePlyMeshShape(
     const PbrtShapeRecord& record,
     int material_index,
@@ -979,6 +1299,10 @@ bool CompileInstances(
                 CompileTriangleMeshShape(composed, mat_idx, ir, scene, diagnostics);
             } else if (composed.shape.type == "plymesh") {
                 CompilePlyMeshShape(composed, mat_idx, ir, scene, diagnostics);
+            } else if (composed.shape.type == "disk") {
+                CompileDiskShape(composed, mat_idx, ir, scene, diagnostics);
+            } else if (composed.shape.type == "loopsubdiv") {
+                CompileLoopSubdivShape(composed, mat_idx, ir, scene, diagnostics);
             }
         }
     }
@@ -1220,6 +1544,10 @@ SceneCompileResult CompilePbrtScene(const PbrtScene& scene) {
             CompilePlyMeshShape(record, mat_idx, ir, scene, diagnostics);
         } else if (record.shape.type == "sphere") {
             CompileSphereShape(record, mat_idx, ir, scene, diagnostics);
+        } else if (record.shape.type == "disk") {
+            CompileDiskShape(record, mat_idx, ir, scene, diagnostics);
+        } else if (record.shape.type == "loopsubdiv") {
+            CompileLoopSubdivShape(record, mat_idx, ir, scene, diagnostics);
         } else {
             diagnostics.push_back(Warning(scene, "Shape", "unsupported shape type: " + record.shape.type));
         }

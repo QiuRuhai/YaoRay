@@ -120,6 +120,10 @@ add_executable(yaoray_tests
     tests/scene_compiler_normal_map_tests.cpp
     tests/scene_compiler_tangent_tests.cpp
     tests/scene_compiler_coated_tests.cpp
+    tests/scene_compiler_disk_tests.cpp
+    tests/scene_compiler_loopsubdiv_tests.cpp
+    tests/scene_compiler_spectrum_spd_tests.cpp
+    tests/scene_compiler_interface_roughness_tests.cpp
     tests/exr_io_tests.cpp
     tests/rng_tests.cpp
     tests/layered_bsdf_tests.cpp
