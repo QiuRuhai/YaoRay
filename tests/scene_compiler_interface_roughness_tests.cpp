@@ -5,7 +5,6 @@
 #include <yaoray/render/render_scene.hpp>
 #include <yaoray/render/scene_compiler.hpp>
 
-#include <cstddef>
 #include <string>
 #include <vector>
 

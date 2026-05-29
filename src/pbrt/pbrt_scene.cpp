@@ -1,14 +1,12 @@
 #include <yaoray/pbrt/pbrt_scene.hpp>
 
 #include <array>
-#include <cmath>
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>

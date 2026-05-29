@@ -556,27 +556,84 @@ bool CompileNormalMap(
 // Material compilation
 // ---------------------------------------------------------------------------
 
+// Small static table of representative RGB eta/k values for common metals
+// (sRGB-approximate, from standard Filament / Cycles reference data).
+// Used to approximate conductor materials that reference SPD filenames like
+// "spds/Au.eta.spd" — no SPD file is actually read; this is a documented
+// approximation so that gold reads gold rather than generic silver.
+struct MetalEtaK {
+    const char* symbol;
+    Color3f eta;  // (r, g, b)
+    Color3f k;    // (r, g, b)
+};
+
+static const MetalEtaK kKnownMetals[] = {
+    {"Au", {0.143f, 0.375f, 1.442f}, {3.983f, 2.386f, 1.603f}},  // gold
+    {"Ag", {0.155f, 0.116f, 0.138f}, {4.818f, 3.122f, 2.146f}},  // silver
+    {"Cu", {0.200f, 0.924f, 1.102f}, {3.912f, 2.448f, 2.137f}},  // copper
+    {"Al", {1.657f, 0.881f, 0.521f}, {9.224f, 6.270f, 4.837f}},  // aluminium
+};
+
+// Extract the leading element symbol from an SPD basename.
+// E.g. "spds/Au.eta.spd" → basename "Au.eta.spd" → leading token "Au".
+// Returns empty string if no dot-separated prefix is present.
+static std::string SpdBasenameSymbol(const std::string& spd_path) {
+    // Strip directory: find last '/' or '\' to get basename.
+    const std::size_t slash = spd_path.find_last_of("/\\");
+    const std::string basename = (slash == std::string::npos)
+        ? spd_path
+        : spd_path.substr(slash + 1);
+    // Take the prefix before the first '.'.
+    const std::size_t dot = basename.find('.');
+    return (dot == std::string::npos) ? basename : basename.substr(0, dot);
+}
+
 // Detect a "spectrum"-type param whose value is an SPD filename (a single non-numeric
 // string) rather than inline numeric values. The PBRT parser routes spectrum values
 // through the float parser; if the value is a filename (non-numeric), ParseFloatToken
 // returns nullopt and the float silently becomes 0.0f. After the parser fix, such
 // params store the filename in strings[] with floats[] empty.
-// This helper emits a Warning when an SPD-filename spectrum param is found, and
-// returns true so the caller can apply its own sensible fallback.
+//
+// When an SPD-filename is detected AND the basename maps to a recognized metal symbol
+// (Au/Ag/Cu/Al), the out-parameters eta_out and k_out are set to that metal's
+// representative RGB values and the function returns true. For an unrecognized
+// basename, eta_out/k_out are set to the generic fallback (0.2 / 1.0) and the
+// function returns true. Returns false if the param is not an SPD filename at all.
+//
+// Both conductor.eta and conductor.k are detected here; when EITHER references a
+// recognized-metal SPD, BOTH eta_out and k_out are set to the complete metal row
+// so they remain consistent (a gold eta file always pairs with gold k).
 bool WarnIfSpectrumFilename(
     const PbrtScene& scene,
     const std::vector<PbrtParam>& params,
     const std::string& param_name,
-    std::vector<SceneDiagnostic>& diagnostics
+    std::vector<SceneDiagnostic>& diagnostics,
+    Color3f& eta_out,
+    Color3f& k_out
 ) {
     const PbrtParam* p = FindParam(params, param_name);
     if (p == nullptr) return false;
     if (p->type != "spectrum") return false;
     // An SPD filename lands in strings[] with floats[] empty.
     if (!p->strings.empty() && p->floats.empty()) {
+        const std::string symbol = SpdBasenameSymbol(p->strings[0]);
+        for (const MetalEtaK& m : kKnownMetals) {
+            if (symbol == m.symbol) {
+                diagnostics.push_back(Warning(scene, "Material." + param_name,
+                    "spectrum SPD file reference '" + p->strings[0] +
+                    "' not supported (SPD parsing is out of scope); approximating '" +
+                    symbol + "' as representative RGB eta/k (not full SPD parsing)"));
+                eta_out = m.eta;
+                k_out = m.k;
+                return true;
+            }
+        }
+        // Unrecognized basename — use generic metal fallback.
         diagnostics.push_back(Warning(scene, "Material." + param_name,
             "spectrum SPD file reference '" + p->strings[0] +
-            "' not supported (SPD parsing is out of scope); using metal fallback value"));
+            "' not supported (SPD parsing is out of scope); using generic metal fallback value"));
+        eta_out = Color3f{0.2f, 0.2f, 0.2f};
+        k_out = Color3f{1.0f, 1.0f, 1.0f};
         return true;
     }
     return false;
@@ -604,12 +661,21 @@ int CompileMaterial(
         }
     } else if (type == "conductor" || type == "metal") {
         material.kind = RenderMaterialKind::Conductor;
-        WarnIfSpectrumFilename(scene, params, "eta", diagnostics);
-        WarnIfSpectrumFilename(scene, params, "k", diagnostics);
-        material.eta = TexParam3fFromParams(params, "eta",
-            Color3f{0.2f, 0.2f, 0.2f}, bindings, scene, diagnostics);
-        material.k = TexParam3fFromParams(params, "k",
-            Color3f{1.0f, 1.0f, 1.0f}, bindings, scene, diagnostics);
+        Color3f spd_eta{0.2f, 0.2f, 0.2f};
+        Color3f spd_k{1.0f, 1.0f, 1.0f};
+        const bool eta_is_spd = WarnIfSpectrumFilename(scene, params, "eta", diagnostics, spd_eta, spd_k);
+        const bool k_is_spd   = WarnIfSpectrumFilename(scene, params, "k",   diagnostics, spd_eta, spd_k);
+        if (eta_is_spd || k_is_spd) {
+            // SPD filename detected on at least one param — use the table-derived values
+            // directly so both eta and k come from the same metal row.
+            material.eta.value = spd_eta;
+            material.k.value   = spd_k;
+        } else {
+            material.eta = TexParam3fFromParams(params, "eta",
+                Color3f{0.2f, 0.2f, 0.2f}, bindings, scene, diagnostics);
+            material.k = TexParam3fFromParams(params, "k",
+                Color3f{1.0f, 1.0f, 1.0f}, bindings, scene, diagnostics);
+        }
         const float fallback_u = FloatParam(FindParam(params, "roughness"), 0.0f);
         material.uroughness = TexParam1fFromParams(params, "uroughness",
             fallback_u, bindings, scene, diagnostics);
@@ -645,12 +711,21 @@ int CompileMaterial(
         material.coat_nsamples = std::max(1, IntParam(FindParam(params, "nsamples"), 1));
     } else if (type == "coatedconductor") {
         material.kind = RenderMaterialKind::CoatedConductor;
-        WarnIfSpectrumFilename(scene, params, "conductor.eta", diagnostics);
-        WarnIfSpectrumFilename(scene, params, "conductor.k", diagnostics);
-        material.eta = TexParam3fFromParams(params, "conductor.eta",
-            Color3f{0.2f, 0.2f, 0.2f}, bindings, scene, diagnostics);
-        material.k = TexParam3fFromParams(params, "conductor.k",
-            Color3f{1.0f, 1.0f, 1.0f}, bindings, scene, diagnostics);
+        Color3f spd_eta{0.2f, 0.2f, 0.2f};
+        Color3f spd_k{1.0f, 1.0f, 1.0f};
+        const bool eta_is_spd = WarnIfSpectrumFilename(scene, params, "conductor.eta", diagnostics, spd_eta, spd_k);
+        const bool k_is_spd   = WarnIfSpectrumFilename(scene, params, "conductor.k",   diagnostics, spd_eta, spd_k);
+        if (eta_is_spd || k_is_spd) {
+            // SPD filename detected on at least one param — use the table-derived values
+            // directly so both eta and k come from the same metal row.
+            material.eta.value = spd_eta;
+            material.k.value   = spd_k;
+        } else {
+            material.eta = TexParam3fFromParams(params, "conductor.eta",
+                Color3f{0.2f, 0.2f, 0.2f}, bindings, scene, diagnostics);
+            material.k = TexParam3fFromParams(params, "conductor.k",
+                Color3f{1.0f, 1.0f, 1.0f}, bindings, scene, diagnostics);
+        }
         // YaoRay's conductor BSDF uses reflectance as the Schlick f0. Derive it
         // from eta/k: f0 = ((eta-1)^2 + k^2) / ((eta+1)^2 + k^2) per channel.
         // Use the already-written material.eta.value / material.k.value so that
@@ -918,8 +993,8 @@ bool CompileLoopSubdivShape(
         return false;
     }
 
-    const int levels = IntParam(FindParam(record.shape.params, "levels"), 1);
-    (void)levels;  // subdivision is not applied
+    // PBRT default is 3 subdivision levels; subdivision is not applied (out of scope).
+    (void)IntParam(FindParam(record.shape.params, "levels"), 3);
 
     diagnostics.push_back(Warning(scene, "Shape.loopsubdiv",
         "loopsubdiv shape: subdivision levels not applied (out of scope); "
