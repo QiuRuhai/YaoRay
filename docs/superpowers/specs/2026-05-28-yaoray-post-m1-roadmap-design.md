@@ -1,7 +1,14 @@
 # YaoRay Post-M1 Roadmap — Design
 
+> **SUPERSEDED (2026-05-29).** This roadmap is no longer authoritative.
+> M2 has shipped and M3 is in progress; the remaining route was
+> re-derived in a full-rewrite brainstorming pass. See the current
+> authoritative roadmap:
+> [`2026-05-29-yaoray-roadmap-refresh-design.md`](2026-05-29-yaoray-roadmap-refresh-design.md).
+> Kept for history.
+
 **Date:** 2026-05-28
-**Status:** Approved for implementation planning
+**Status:** Superseded by `2026-05-29-yaoray-roadmap-refresh-design.md`
 **Predecessor:** `2026-05-27-yaoray-m1-dining-room-design.md` (M1)
 
 ## North Star
