@@ -27,6 +27,7 @@ bool IsFiniteColor(yr::Color3f c) {
 }
 
 float MaxComp(yr::Color3f c) { return std::max(c.x, std::max(c.y, c.z)); }
+float MinComp(yr::Color3f c) { return std::min(c.x, std::min(c.y, c.z)); }
 
 } // namespace
 
@@ -47,6 +48,11 @@ YR_TEST(layered_sample_is_energy_conserving_white_furnace) {
     }
     const yr::Color3f mean = sum / static_cast<float>(N);
     YR_EXPECT_TRUE(MaxComp(mean) <= 1.05f);
+    // Lower bound: a white (reflectance 1) coated-diffuse base with zero
+    // absorption must reflect almost all energy back out — a near-lossless
+    // coat. A regression that drops exit paths (e.g. a wrong exit-refraction
+    // sign) collapses this toward ~0.04, so guard it.
+    YR_EXPECT_TRUE(MinComp(mean) >= 0.90f);
 }
 
 YR_TEST(layered_sample_differs_from_bare_base) {

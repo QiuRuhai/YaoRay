@@ -447,6 +447,10 @@ BsdfSample SampleLayered(const RenderMaterial& material, Vec3f wo, Vec3f normal,
         if (!IsAboveSurface(wexit, normal)) {
             return BsdfSample{};
         }
+        // TODO(2b): pdf is a proxy (1.0). EvaluateBsdf/PdfBsdf still alias coated
+        // kinds to their base, so this proxy feeds PowerHeuristic with a wrong
+        // (but finite) MIS weight when a coated bounce hits an emitter. Slice 2b
+        // replaces this with a real stochastic layered pdf.
         return BsdfSample{wexit, throughput, 1.0f, true, false};
     }
 
