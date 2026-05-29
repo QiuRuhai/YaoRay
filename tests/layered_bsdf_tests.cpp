@@ -306,6 +306,32 @@ YR_TEST(layered_sample_sets_real_pdf_not_proxy) {
     YR_EXPECT_TRUE(std::fabs(pdf_acc / std::max(1, nonspec) - 1.0) > 1e-3);   // not the 1.0 proxy
 }
 
+YR_TEST(layered_mis_partition_is_consistent) {
+    // ρ_bsdf (Sample, all lobes) ≈ ρ_light (Eval integral, diffuse lobe only) + F(wo) (specular).
+    yr::RenderMaterial m = MakeCoatedDiffuse(yr::Color3f{1.0f, 1.0f, 1.0f});
+    const yr::Vec3f n = Up();
+    const yr::Vec3f wo = yr::Normalize(yr::Vec3f{0.3f, 0.0f, 1.0f});
+
+    yr::Rng rs{2024u}; double sb = 0.0; const int N = 40000;
+    for (int i = 0; i < N; ++i) { const auto s = yr::SampleBsdf(m, wo, n, rs.NextFloat2(), rs); if (s.valid) sb += MaxComp(s.weight); }
+    const float rho_bsdf = static_cast<float>(sb / N);
+
+    const float rho_light = DirectionalAlbedoViaEval(m, wo, n, 2025u, 40000);
+
+    // F(wo): dielectric Fresnel at entry, IOR 1.5 (replicate the formula; do NOT leave 0).
+    const float cos_o = yr::Dot(wo, n);
+    float F = 0.0f;
+    { const float ei = 1.0f, et = 1.5f; const float c = std::clamp(cos_o, -1.0f, 1.0f);
+      const float s2t = (ei/et)*(ei/et)*std::max(0.0f, 1.0f - c*c);
+      if (s2t < 1.0f) { const float ct = std::sqrt(1.0f - s2t);
+        const float rp = ((et*c)-(ei*ct))/((et*c)+(ei*ct));
+        const float rs2 = ((ei*c)-(et*ct))/((ei*c)+(et*ct));
+        F = 0.5f*(rp*rp + rs2*rs2); } else F = 1.0f; }
+    YR_EXPECT_TRUE(F > 0.0f);
+
+    YR_EXPECT_TRUE(std::fabs(rho_bsdf - (rho_light + F)) <= 0.06f);
+}
+
 YR_TEST(layered_conductor_sample_is_energy_conserving_and_valid) {
     // Coated conductor (gold-ish f0), zero absorption. The base reflects only
     // its f0 fraction, so mean throughput is < 1 (not white-furnace), but it

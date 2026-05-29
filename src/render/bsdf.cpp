@@ -544,6 +544,9 @@ float PdfLayered(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f norma
         float reach = T_enter;   // probability the path reaches this base bounce
         Vec3f w = wo_t;          // down-going inside the medium
         for (int depth = 0; depth < material.coat_maxdepth; ++depth) {
+            // A smooth (delta) conductor base returns base_pdf = 0 here (measure-zero
+            // connection); the estimate then collapses to the uniform MIS floor below,
+            // which is correct — such coated materials are delta and use BSDF sampling.
             const float base_pdf = PdfBsdf(base, -w, wi_internal, normal, rng);
             pdf_sum += static_cast<double>(reach) * base_pdf * exit_pdf_coupling;
 
