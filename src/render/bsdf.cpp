@@ -457,16 +457,134 @@ BsdfSample SampleLayered(const RenderMaterial& material, Vec3f wo, Vec3f normal,
     return BsdfSample{};
 }
 
+// Stochastic estimator of the non-delta transmitted lobe f(wo, wi) for a
+// coated* material (M3 Slice 2b). The coat's specular reflection is a delta —
+// it contributes 0 here (it lives only in SampleLayered). This estimates light
+// that transmits into the coat, scatters off the base (one or MORE bounces with
+// internal TIR between them — multiple scattering recovers the energy a single-
+// scatter estimator drops), and transmits back out toward wi. Reconstructed
+// from PBRT v4 LayeredBxDF::f specialized to: smooth dielectric top (perfect
+// Fresnel), Beer-Lambert-only medium (no phase function), opaque base.
+//
+// Returns f WITHOUT the cos(wi) factor (the path tracer applies the world
+// cosine separately). Both wo, wi must be above the surface.
+//
+// Connection / exit-coupling derivation. The internal up-going direction that
+// refracts out to a given above wi is wi_internal = -Refract(wi, n, 1/ce) (2a's
+// refraction-reversibility convention, pinned by the roundtrip test). At each
+// base interaction the deterministic exit connection contributes
+//   f += beta * base.f(-w, wi_internal) * Tr_exit * exit_coupling
+// where exit_coupling = T_exit / ce^2. This is PBRT v4's smooth-top connection:
+// it would call wis = top.Sample_f(wi, Transmission) and accumulate
+//   base.f(-w, wis.wi) * AbsCosTheta(wis.wi) * wis.f / wis.pdf.
+// For a smooth dielectric, DielectricBxDF::Sample_f (transmission, Radiance
+// mode) returns wis.f = T_exit / (cosTheta_t * ce^2) and wis.pdf = 1 when only
+// Transmission is requested, so AbsCosTheta(wis.wi)=cosTheta_t CANCELS the
+// 1/cosTheta_t and the connection reduces to base.f * T_exit / ce^2 -- with NO
+// surviving base cosine. The 1/ce^2 (which the scaffold's exit_coupling omitted)
+// is the medium->air radiance Jacobian; omitting it doubles the directional
+// albedo (~1.9 instead of ~1-F(wo)). Pinned by furnace-via-eval and reciprocity.
+Color3f EvaluateLayered(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal,
+                        Rng& rng, bool conductor_base) {
+    if (!IsAboveSurface(wo, normal) || !IsAboveSurface(wi, normal)) {
+        return Color3f{};
+    }
+    const float ce = std::max(1.0f, material.coating_ior);
+
+    RenderMaterial base;
+    if (conductor_base) {
+        base.kind = RenderMaterialKind::Conductor;
+        base.reflectance = material.reflectance;
+        base.uroughness = material.uroughness;
+        base.vroughness = material.vroughness;
+    } else {
+        base.kind = RenderMaterialKind::Diffuse;
+        base.reflectance = material.reflectance;
+    }
+
+    // Refract wo and wi into the medium. wo_t is the down-going entry ray; the
+    // up-going connection that exits to wi is wi_internal = -Refract(wi,n,1/ce).
+    Vec3f wo_t, wi_down;
+    if (!Refract(wo, normal, 1.0f / ce, wo_t)) {
+        return Color3f{};
+    }
+    if (!Refract(wi, normal, 1.0f / ce, wi_down)) {
+        return Color3f{};
+    }
+    const Vec3f wi_internal = -wi_down;
+    if (!IsAboveSurface(wi_internal, normal)) {
+        return Color3f{};
+    }
+
+    const float T_enter = 1.0f - FresnelDielectric(std::max(0.0f, Dot(wo, normal)), 1.0f, ce);
+    const float T_exit = 1.0f - FresnelDielectric(std::max(0.0f, Dot(wi, normal)), 1.0f, ce);
+    if (T_enter <= 0.0f || T_exit <= 0.0f) {
+        return Color3f{};
+    }
+
+    const int ns = std::max(1, material.coat_nsamples);
+    Color3f f_sum{0.0f, 0.0f, 0.0f};
+    for (int s = 0; s < ns; ++s) {
+        Color3f beta{T_enter, T_enter, T_enter};
+        Vec3f w = wo_t;   // down-going inside the medium
+        for (int depth = 0; depth < material.coat_maxdepth; ++depth) {
+            beta = ApplyBeerLambert(beta, material.coat_absorption, material.coat_thickness, w, normal);
+
+            // Deterministic connection to the exit through the smooth top.
+            const Color3f base_f = EvaluateBsdf(base, -w, wi_internal, normal, rng);
+            if (!IsBlack(base_f)) {
+                const Color3f tr_exit = ApplyBeerLambert(Color3f{1.0f, 1.0f, 1.0f},
+                    material.coat_absorption, material.coat_thickness, wi_internal, normal);
+                // Exit-coupling = exit Fresnel transmittance T_exit times the
+                // medium->air radiance Jacobian 1/ce^2. There is deliberately NO
+                // AbsCosTheta(wi_internal) factor: in PBRT's smooth-top connection
+                // it cancels against the dielectric BTDF's 1/cosTheta_t (the BTDF
+                // value is T/(cosTheta_t*ce^2) and the accumulation multiplies by
+                // AbsCosTheta(wis.wi)). Pinned by furnace-via-eval (rho ~= 1-F(wo))
+                // and reciprocity.
+                const float exit_coupling = T_exit / (ce * ce);
+                f_sum = f_sum + Color3f{
+                    beta.x * base_f.x * tr_exit.x * exit_coupling,
+                    beta.y * base_f.y * tr_exit.y * exit_coupling,
+                    beta.z * base_f.z * tr_exit.z * exit_coupling,
+                };
+            }
+
+            // Sample the base to continue the internal walk.
+            const BsdfSample bs = SampleBsdf(base, -w, normal, rng.NextFloat2(), rng);
+            if (!bs.valid || IsBlack(bs.weight) || !IsAboveSurface(bs.wi, normal)) {
+                break;
+            }
+            beta = Color3f{beta.x * bs.weight.x, beta.y * bs.weight.y, beta.z * bs.weight.z};
+            beta = ApplyBeerLambert(beta, material.coat_absorption, material.coat_thickness, bs.wi, normal);
+
+            // Russian-roulette reflect/transmit at the top interface. If it
+            // reflects (TIR or Fresnel), bounce back down and scatter again
+            // (multiple scattering). If it transmits, the energy left through a
+            // generic direction != wi and contributes nothing to this f estimate.
+            const float f_back = FresnelDielectric(std::max(0.0f, Dot(bs.wi, normal)), ce, 1.0f);
+            if (rng.NextFloat() < f_back) {
+                w = Reflect(bs.wi, normal);
+                if (IsAboveSurface(w, normal)) {
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+    }
+    return f_sum / static_cast<float>(ns);
+}
+
 } // namespace
 
 Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, [[maybe_unused]] Rng& rng) {
     switch (material.kind) {
-        case RenderMaterialKind::Diffuse:
         case RenderMaterialKind::CoatedDiffuse:
-            // TODO(2b): coated kinds alias to their base BSDF for eval/pdf.
-            // SampleBsdf does the real layered walk, but light-sampling MIS
-            // uses these base estimates — a documented 2a inconsistency that
-            // Slice 2b closes with a stochastic layered f/pdf estimator.
+            return EvaluateLayered(material, wo, wi, normal, rng, /*conductor_base=*/false);
+        case RenderMaterialKind::CoatedConductor:
+            return EvaluateLayered(material, wo, wi, normal, rng, /*conductor_base=*/true);
+        case RenderMaterialKind::Diffuse:
         case RenderMaterialKind::DiffuseTransmission:
         case RenderMaterialKind::Mix:
             if (!IsAboveSurface(wo, normal) || !IsAboveSurface(wi, normal)) {
@@ -474,11 +592,6 @@ Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f n
             }
             return LambertianBrdf(material.reflectance.value);
         case RenderMaterialKind::Conductor:
-        case RenderMaterialKind::CoatedConductor:
-            // TODO(2b): coated kinds alias to their base BSDF for eval/pdf.
-            // SampleBsdf does the real layered walk, but light-sampling MIS
-            // uses these base estimates — a documented 2a inconsistency that
-            // Slice 2b closes with a stochastic layered f/pdf estimator.
             if (material.uroughness.value <= DeltaRoughness && material.vroughness.value <= DeltaRoughness) {
                 return Color3f{};
             }
