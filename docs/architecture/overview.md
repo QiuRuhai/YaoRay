@@ -91,17 +91,23 @@ than redistributing.
 
 ## Roadmap
 
+North Star: **PBRT v4 scene coverage on CPU** — complete the material
+and geometry feature surface, then port the frozen CPU surface to CUDA;
+breadth features trail after.
+
 ```
-M1+M2 (done) ──▶ M3 (Advanced Materials) ──▶ M4 (CUDA) ──▶ M5+ (by interest)
+M1 (done) ──▶ M2 (done) ──▶ M3 (in progress) ──▶ M4 ──▶ M5 ──▶ M6+
 ```
 
-| Milestone | Anchor scene | Headline | Status |
+| Milestone | Anchor scene(s) | Headline | Status |
 |---|---|---|---|
-| **M2** | `barcelona-pavilion` (mmp PBRT v4) | SAH BVH + parallel BVH build; dining-room renders ≥ 2× faster | done |
-| **M3** | TBD — `ganesha` / `sportscar` / `killeroo-coated` | Real `subsurface` + `measured` + nested `layered` materials | sketch |
-| **M4** | `dining-room` < 10 s, `barcelona-pavilion` < 1 min | CUDA backend filling the existing `RenderBackendKind::Cuda` slot | sketch |
-| **M5+** | by interest | Denoiser, volumetrics, hair, subdivision, spectral, polish | exploratory |
+| **M1** | cornell_box / material_studio / texture_test / dining-room | PBRT v4 frontend + core BSDFs + textures | done |
+| **M2** | `barcelona-pavilion` (mmp PBRT v4) | SAH BVH + parallel build; dining-room renders ≥ 2× faster | done |
+| **M3** | `killeroo-coated` + `sportscar` | Advanced Materials I: stochastic layered (`coated*`) + `measured` BRDF | in progress |
+| **M4** | `ganesha` | Subsurface scattering (BSSRDF), replacing the diffuse degradation | planned |
+| **M5** | `dining-room` < 10 s, `barcelona-pavilion` < 1 min | CUDA backend — bit-for-bit GPU port of the frozen CPU surface | planned |
+| **M6+** | by interest | Volumetrics, hair + curves, subdivision, spectral, denoiser, adaptive sampling, sampler polish | exploratory |
 
-See [`docs/superpowers/specs/2026-05-28-yaoray-post-m1-roadmap-design.md`](../superpowers/specs/2026-05-28-yaoray-post-m1-roadmap-design.md)
-for the full roadmap design, including detailed M2 acceptance criteria,
-risk register, and rationale for the milestone ordering.
+See [`docs/superpowers/specs/2026-05-29-yaoray-roadmap-refresh-design.md`](../superpowers/specs/2026-05-29-yaoray-roadmap-refresh-design.md)
+for the authoritative roadmap — per-milestone acceptance criteria, risk
+registers, M3 slice state, and the rationale for the milestone ordering.
