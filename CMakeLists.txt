@@ -225,4 +225,13 @@ if(BUILD_TESTING)
             "Hits: [1-9]"
             "Compiled textures: [1-9]"
     )
+    add_yaoray_cli_render_test(yaoray_cli_render_pbrt_coated_showcase
+        SCENE "${CMAKE_CURRENT_SOURCE_DIR}/scenes/pbrt/coated_showcase/coated_showcase_smoke.pbrt"
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/scenes/pbrt/coated_showcase/out/coated_showcase_smoke.png"
+        BACKEND cpu
+        EXPECT_REGEX
+            "Integrator: path"
+            "Rendered image:"
+            "Hits: [^0]"
+    )
 endif()
