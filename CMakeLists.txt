@@ -132,6 +132,7 @@ add_executable(yaoray_tests
     tests/tensor_file_tests.cpp
     tests/measured_brdf_tests.cpp
     tests/scene_compiler_measured_tests.cpp
+    tests/piecewise_linear_2d_tests.cpp
 )
 target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_pbrt yaoray_render yaoray_assets yaoray_backends)
 target_compile_definitions(yaoray_tests PRIVATE YAORAY_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")

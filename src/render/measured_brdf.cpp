@@ -145,6 +145,45 @@ std::optional<MeasuredBrdf> LoadMeasuredBrdf(const std::string& path, std::strin
     m.luminance_shape = f_luminance->shape;
     m.spectra_shape   = f_spectra->shape;
 
+    // --- Build the warp distributions from the raw arrays ---
+    // pbrt-v4 layout: x = last grid dim, y = second-to-last grid dim. The
+    // conditioning axes (phi_i, theta_i[, wavelengths]) index outer slices.
+    const int n_phi_i_i   = static_cast<int>(n_phi_i);
+    const int n_theta_i_i = static_cast<int>(n_theta_i);
+    const int n_wl_i      = static_cast<int>(n_wl);
+
+    // ndf / sigma: unconditioned 2D microfacet grids, no normalization/CDF.
+    m.ndf_warp = PiecewiseLinear2D<0>(
+        m.ndf.data(), static_cast<int>(m.ndf_shape[1]),
+        static_cast<int>(m.ndf_shape[0]), {}, {}, /*normalize=*/false,
+        /*build_cdf=*/false);
+    m.sigma_warp = PiecewiseLinear2D<0>(
+        m.sigma.data(), static_cast<int>(m.sigma_shape[1]),
+        static_cast<int>(m.sigma_shape[0]), {}, {}, /*normalize=*/false,
+        /*build_cdf=*/false);
+
+    // vndf / luminance: conditioned on (phi_i, theta_i); normalize + CDFs so
+    // they can be sampled/inverted.
+    m.vndf_warp = PiecewiseLinear2D<2>(
+        m.vndf.data(), static_cast<int>(m.vndf_shape[3]),
+        static_cast<int>(m.vndf_shape[2]), {n_phi_i_i, n_theta_i_i},
+        {m.phi_i.data(), m.theta_i.data()}, /*normalize=*/true,
+        /*build_cdf=*/true);
+    m.luminance_warp = PiecewiseLinear2D<2>(
+        m.luminance.data(), static_cast<int>(m.luminance_shape[3]),
+        static_cast<int>(m.luminance_shape[2]), {n_phi_i_i, n_theta_i_i},
+        {m.phi_i.data(), m.theta_i.data()}, /*normalize=*/true,
+        /*build_cdf=*/true);
+
+    // spectra: conditioned on (phi_i, theta_i, wavelengths); plain bilinear
+    // lookup (no normalization/CDF).
+    m.spectra_warp = PiecewiseLinear2D<3>(
+        m.spectra.data(), static_cast<int>(m.spectra_shape[4]),
+        static_cast<int>(m.spectra_shape[3]),
+        {n_phi_i_i, n_theta_i_i, n_wl_i},
+        {m.phi_i.data(), m.theta_i.data(), m.wavelengths.data()},
+        /*normalize=*/false, /*build_cdf=*/false);
+
     return m;
 }
 
