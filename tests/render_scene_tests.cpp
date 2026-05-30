@@ -45,15 +45,21 @@ YR_TEST(render_settings_hash_is_stable_for_identical_scene) {
 }
 
 YR_TEST(render_settings_hash_changes_for_different_settings) {
-    yr::RenderSceneIR base;
-    base.width = 320;
-    base.height = 180;
-    base.spp = 4;
+    // Build each variant independently: RenderSceneIR is move-only (it owns the
+    // measured BRDF table via vector<unique_ptr>), so we can't copy a base.
+    auto make_base = [] {
+        yr::RenderSceneIR s;
+        s.width = 320;
+        s.height = 180;
+        s.spp = 4;
+        return s;
+    };
+    const yr::RenderSceneIR base = make_base();
 
-    yr::RenderSceneIR changed_spp = base;
+    yr::RenderSceneIR changed_spp = make_base();
     changed_spp.spp = 8;
 
-    yr::RenderSceneIR changed_seed = base;
+    yr::RenderSceneIR changed_seed = make_base();
     changed_seed.seed = 42;
 
     const std::uint64_t base_hash = yr::ComputeRenderSettingsHash(base);
@@ -62,11 +68,16 @@ YR_TEST(render_settings_hash_changes_for_different_settings) {
 }
 
 YR_TEST(render_settings_hash_changes_for_geometry_table_counts) {
-    yr::RenderSceneIR base;
-    base.width = 64;
-    base.height = 64;
+    // RenderSceneIR is move-only; build the two variants independently.
+    auto make_base = [] {
+        yr::RenderSceneIR s;
+        s.width = 64;
+        s.height = 64;
+        return s;
+    };
+    const yr::RenderSceneIR base = make_base();
 
-    yr::RenderSceneIR changed = base;
+    yr::RenderSceneIR changed = make_base();
     changed.vertices.push_back(yr::RenderVertex{});
 
     YR_EXPECT_TRUE(yr::ComputeRenderSettingsHash(base) != yr::ComputeRenderSettingsHash(changed));
