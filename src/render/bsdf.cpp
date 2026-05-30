@@ -704,6 +704,8 @@ Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f n
             }
             return LambertianBrdf(material.reflectance.value);
         case RenderMaterialKind::Conductor:
+        case RenderMaterialKind::Measured:
+            // TODO(measured Slice 2/3): real MeasuredBxDF f/Sample/Pdf via measured_index
             if (material.uroughness.value <= DeltaRoughness && material.vroughness.value <= DeltaRoughness) {
                 return Color3f{};
             }
@@ -745,6 +747,8 @@ float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, 
             }
             return std::max(0.0f, Dot(normal, wi)) / Pi;
         case RenderMaterialKind::Conductor:
+        case RenderMaterialKind::Measured:
+            // TODO(measured Slice 2/3): real MeasuredBxDF f/Sample/Pdf via measured_index
             if (material.uroughness.value <= DeltaRoughness && material.vroughness.value <= DeltaRoughness) {
                 return 0.0f;
             }
@@ -789,6 +793,8 @@ BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Ve
             };
         }
         case RenderMaterialKind::Conductor:
+        case RenderMaterialKind::Measured:
+            // TODO(measured Slice 2/3): real MeasuredBxDF f/Sample/Pdf via measured_index
             if (material.uroughness.value <= DeltaRoughness && material.vroughness.value <= DeltaRoughness) {
                 if (!IsAboveSurface(wo, normal) || IsBlack(material.reflectance.value)) {
                     return BsdfSample{};
@@ -902,6 +908,9 @@ bool IsDeltaBsdf(const RenderMaterial& material) {
         case RenderMaterialKind::Dielectric:
         case RenderMaterialKind::ThinDielectric:
             return material.uroughness.value == 0.0f && material.vroughness.value == 0.0f;
+        case RenderMaterialKind::Measured:
+            // Glossy measured BRDF — light sampling applies (not a delta).
+            return false;
         default:
             return false;
     }

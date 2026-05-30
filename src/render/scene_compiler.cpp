@@ -2,6 +2,7 @@
 
 #include <yaoray/assets/ply_loader.hpp>
 #include <yaoray/render/environment.hpp>
+#include <yaoray/render/measured_brdf.hpp>
 #include <yaoray/render/texture.hpp>
 
 #include <algorithm>
@@ -777,12 +778,32 @@ int CompileMaterial(
         material.reflectance = TexParam3fFromParams(params, "reflectance",
             Color3f{0.5f, 0.5f, 0.5f}, bindings, scene, diagnostics);
     } else if (type == "measured") {
-        diagnostics.push_back(MaterialFallbackWarning(scene, type));
+        // Conductor fallback defaults (used when loading fails).
         material.kind = RenderMaterialKind::Conductor;
         material.eta.value = Color3f{0.2f, 0.2f, 0.2f};
         material.k.value = Color3f{1.0f, 1.0f, 1.0f};
         material.uroughness.value = 0.0f;
         material.vroughness.value = 0.0f;
+
+        const PbrtParam* fname_param = FindParam(params, "filename");
+        const std::string fname = StringParam(fname_param, "");
+        if (fname.empty()) {
+            diagnostics.push_back(Warning(scene, "Material.measured",
+                "measured material is missing 'string filename'; falling back to conductor."));
+        } else {
+            const std::filesystem::path resolved = scene.source_root / fname;
+            std::string err;
+            std::optional<MeasuredBrdf> m = LoadMeasuredBrdf(resolved.string(), err);
+            if (!m.has_value()) {
+                diagnostics.push_back(Warning(scene, "Material.measured",
+                    "measured material: failed to load '" + resolved.string() + "': " + err +
+                    "; falling back to conductor."));
+            } else {
+                ir.measured_brdfs.push_back(std::move(*m));
+                material.kind = RenderMaterialKind::Measured;
+                material.measured_index = static_cast<int>(ir.measured_brdfs.size()) - 1;
+            }
+        }
     } else if (type == "hair") {
         diagnostics.push_back(MaterialFallbackWarning(scene, type));
         material.kind = RenderMaterialKind::Diffuse;
