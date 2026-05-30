@@ -15,7 +15,8 @@
 //   * FMA(a,b,c)                -> std::fma(a,b,c)
 //   * Float                     -> float
 //   * GPU/allocator machinery dropped (plain std::vector members)
-//   * Sample() intentionally omitted (deferred to a later slice)
+//   * the Sample()/Invert() return struct is named PLSample (as in pbrt)
+//     rather than Sample, to avoid clashing with the Sample() member function
 //   * Degenerate guard: when normalize is requested but the marginal total is
 //     <= 0 or non-finite (e.g. an all-zero synthetic grid), normalization is
 //     skipped instead of dividing by zero, so construction stays NaN/inf-free.
@@ -39,7 +40,12 @@ namespace yr {
 template <int Dimension = 0>
 class PiecewiseLinear2D {
   public:
-    struct Sample {
+    // Return type of Sample()/Invert(): a warped [0,1]^2 position and its pdf.
+    // Named PLSample (as in pbrt) rather than `Sample`, because this class also
+    // exposes a member function named Sample(); a same-named nested type would
+    // be hidden by that function during name lookup and break return-type
+    // deduction at call sites (auto s = d.Sample(...)).
+    struct PLSample {
         Vec2f p;
         float pdf;
     };
@@ -271,7 +277,7 @@ class PiecewiseLinear2D {
     }
 
     template <typename... Ts>
-    Sample Invert(Vec2f sample, Ts... params) const {
+    PLSample Invert(Vec2f sample, Ts... params) const {
         static_assert((std::is_arithmetic_v<Ts> && ...),
                       "Additional parameters must be numeric values");
         static_assert(sizeof...(Ts) == Dimension,
@@ -361,7 +367,123 @@ class PiecewiseLinear2D {
 
         sy += lookup<Dimension>(m_marginal_cdf.data(), offset, m_size_y, param_weight);
 
-        return Sample{Vec2f{sx, sy}, pdf * HProdInvPatch()};
+        return PLSample{Vec2f{sx, sy}, pdf * HProdInvPatch()};
+    }
+
+    // Inverse of Invert(): maps a uniform [0,1]^2 sample to a warped position
+    // in [0,1]^2 (importance-sampling the distribution) and returns the pdf.
+    // Faithful port of pbrt-v4's PiecewiseLinear2D::Sample.
+    template <typename... Ts>
+    PLSample Sample(Vec2f sample, Ts... params) const {
+        static_assert((std::is_arithmetic_v<Ts> && ...),
+                      "Additional parameters must be numeric values");
+        static_assert(sizeof...(Ts) == Dimension,
+                      "Incorrect number of additional parameters passed");
+        std::array<float, ArraySize> param = MakeParamArray(params...);
+
+        // Largest float strictly below 1 (pbrt's FloatOneMinusEpsilon). Clamp
+        // the sample away from the {0,1} degeneracies at the extrema.
+        constexpr float OneMinusEpsilon = 0x1.fffffep-1f;
+        sample.x = Clamp(sample.x, 1.f - OneMinusEpsilon, OneMinusEpsilon);
+        sample.y = Clamp(sample.y, 1.f - OneMinusEpsilon, OneMinusEpsilon);
+
+        float param_weight[2 * ArraySize];
+        std::uint32_t slice_offset = 0u;
+
+        if constexpr (Dimension > 0) {
+            for (std::size_t dim = 0; dim < Dimension; ++dim) {
+                if (m_param_size[dim] == 1) {
+                    param_weight[2 * dim] = 1.f;
+                    param_weight[2 * dim + 1] = 0.f;
+                    continue;
+                }
+
+                std::uint32_t param_index =
+                    FindInterval(m_param_size[dim], [&](std::uint32_t idx) {
+                        return m_param_values[dim][idx] <= param[dim];
+                    });
+
+                float p0 = m_param_values[dim][param_index],
+                      p1 = m_param_values[dim][param_index + 1];
+
+                param_weight[2 * dim + 1] =
+                    Clamp((param[dim] - p0) / (p1 - p0), 0.f, 1.f);
+                param_weight[2 * dim] = 1.f - param_weight[2 * dim + 1];
+                slice_offset += m_param_strides[dim] * param_index;
+            }
+        }
+
+        // Sample the row first (marginal CDF along y).
+        std::uint32_t offset = 0;
+        if (Dimension != 0)
+            offset = slice_offset * m_size_y;
+
+        auto fetch_marginal = [&](std::uint32_t idx) -> float {
+            return lookup<Dimension>(m_marginal_cdf.data(), offset + idx, m_size_y,
+                                     param_weight);
+        };
+
+        std::uint32_t row = FindInterval(m_size_y, [&](std::uint32_t idx) {
+            return fetch_marginal(idx) < sample.y;
+        });
+
+        sample.y -= fetch_marginal(row);
+
+        std::uint32_t slice_size = static_cast<std::uint32_t>(m_size_x) *
+                                   static_cast<std::uint32_t>(m_size_y);
+        offset = row * m_size_x;
+        if (Dimension != 0)
+            offset += slice_offset * slice_size;
+
+        float r0 = lookup<Dimension>(m_conditional_cdf.data(), offset + m_size_x - 1,
+                                     slice_size, param_weight),
+              r1 = lookup<Dimension>(m_conditional_cdf.data(),
+                                     offset + (m_size_x * 2 - 1), slice_size,
+                                     param_weight);
+
+        bool is_const = std::abs(r0 - r1) < 1e-4f * (r0 + r1);
+        sample.y = is_const ? (2.f * sample.y)
+                            : (r0 - SafeSqrt(r0 * r0 - 2.f * sample.y * (r0 - r1)));
+        sample.y /= is_const ? (r0 + r1) : (r0 - r1);
+
+        // Sample the column next (conditional CDF along x for the chosen row).
+        sample.x *= (1.f - sample.y) * r0 + sample.y * r1;
+
+        auto fetch_conditional = [&](std::uint32_t idx) -> float {
+            float v0 = lookup<Dimension>(m_conditional_cdf.data(), offset + idx,
+                                         slice_size, param_weight),
+                  v1 = lookup<Dimension>(m_conditional_cdf.data() + m_size_x,
+                                         offset + idx, slice_size, param_weight);
+
+            return (1.f - sample.y) * v0 + sample.y * v1;
+        };
+
+        std::uint32_t col = FindInterval(m_size_x, [&](std::uint32_t idx) {
+            return fetch_conditional(idx) < sample.x;
+        });
+
+        sample.x -= fetch_conditional(col);
+
+        offset += col;
+
+        float v00 = lookup<Dimension>(m_data.data(), offset, slice_size, param_weight),
+              v10 = lookup<Dimension>(m_data.data() + 1, offset, slice_size,
+                                      param_weight),
+              v01 = lookup<Dimension>(m_data.data() + m_size_x, offset, slice_size,
+                                      param_weight),
+              v11 = lookup<Dimension>(m_data.data() + m_size_x + 1, offset, slice_size,
+                                      param_weight),
+              c0 = std::fma((1.f - sample.y), v00, sample.y * v01),
+              c1 = std::fma((1.f - sample.y), v10, sample.y * v11);
+
+        is_const = std::abs(c0 - c1) < 1e-4f * (c0 + c1);
+        sample.x = is_const ? (2.f * sample.x)
+                            : (c0 - SafeSqrt(c0 * c0 - 2.f * sample.x * (c0 - c1)));
+        sample.x /= is_const ? (c0 + c1) : (c0 - c1);
+
+        return PLSample{
+            Vec2f{(col + sample.x) * m_patch_size_x, (row + sample.y) * m_patch_size_y},
+            ((1.f - sample.x) * c0 + sample.x * c1) * HProdInvPatch()};
     }
 
   private:
