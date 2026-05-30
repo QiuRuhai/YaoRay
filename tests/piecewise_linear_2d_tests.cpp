@@ -31,3 +31,28 @@ YR_TEST(plinear2d_invert_returns_valid) {
     YR_EXPECT_TRUE(s.p.y >= -1e-4f && s.p.y <= 1.0001f);
     YR_EXPECT_TRUE(s.pdf >= 0.0f && std::isfinite(s.pdf));
 }
+
+// Sample() is the inverse of Invert(). On a uniform grid the warp is the
+// identity, so Sample(u).p == u and pdf == 1.
+YR_TEST(plinear2d_sample_uniform_is_identity) {
+    const float data[4] = {1, 1, 1, 1};
+    yr::PiecewiseLinear2D<0> d(data, 2, 2, {}, {}, true, true);
+    auto s = d.Sample(yr::Vec2f{0.3f, 0.7f});
+    YR_EXPECT_NEAR(s.p.x, 0.3f, 1e-3f);
+    YR_EXPECT_NEAR(s.p.y, 0.7f, 1e-3f);
+    YR_EXPECT_NEAR(s.pdf, 1.0f, 1e-3f);
+}
+
+// Sample and Invert are exact inverses: Invert(Sample(u).p).p ~= u with a
+// matching pdf, on a non-uniform grid.
+YR_TEST(plinear2d_sample_invert_roundtrip) {
+    const float data[9] = {0.2f, 0.5f, 0.9f, 0.3f, 0.7f, 1.0f, 0.1f, 0.4f, 0.8f};
+    yr::PiecewiseLinear2D<0> d(data, 3, 3, {}, {}, true, true);
+    const yr::Vec2f u{0.42f, 0.63f};
+    auto s = d.Sample(u);
+    auto inv = d.Invert(s.p);
+    YR_EXPECT_NEAR(inv.p.x, u.x, 2e-3f);
+    YR_EXPECT_NEAR(inv.p.y, u.y, 2e-3f);
+    YR_EXPECT_NEAR(inv.pdf, s.pdf, 1e-3f * s.pdf + 1e-4f);
+    YR_EXPECT_TRUE(s.pdf > 0.0f && std::isfinite(s.pdf));
+}

@@ -744,7 +744,7 @@ Color3f EvaluateMeasured(const MeasuredBrdf& brdf, Vec3f wo, Vec3f wi, Vec3f nor
 
     // Inverse VNDF warp recovers the spectral-grid coordinate (conditioned on
     // the outgoing direction, passed as the variadic floats phi_o, theta_o).
-    const PiecewiseLinear2D<2>::Sample ui = brdf.vndf_warp.Invert(u_wm, phi_o, theta_o);
+    const PiecewiseLinear2D<2>::PLSample ui = brdf.vndf_warp.Invert(u_wm, phi_o, theta_o);
 
     const float cos_i = lwi.z;   // > 0 after the flip + hemisphere guard
     const float sig = brdf.sigma_warp.Evaluate(u_wo);
