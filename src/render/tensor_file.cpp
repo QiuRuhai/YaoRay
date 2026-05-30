@@ -184,13 +184,25 @@ std::optional<TensorFile> ReadTensorFile(const std::string& path, std::string& e
             pos += 8;
         }
 
-        // compute data byte size and validate against EOF
-        std::size_t elem_count = 1;
-        for (auto s : shape) elem_count *= static_cast<std::size_t>(s);
+        // compute data byte size — overflow-checked (Fix 2: shape-product overflow)
+        std::uint64_t elem_count = 1;
+        for (std::uint64_t d : shape) {
+            if (d != 0 && elem_count > file_size / d) {
+                error = "tensor_file: field '" + name + "' shape product overflows file size";
+                return std::nullopt;
+            }
+            elem_count *= d;
+        }
         const std::size_t elem_size = TensorDTypeSize(dtype);
-        const std::size_t data_bytes = elem_count * elem_size;
+        // Guard elem_count * elem_size overflow before converting to size_t
+        if (elem_size > 0 && elem_count > file_size / elem_size) {
+            error = "tensor_file: field '" + name + "' data_bytes overflows file size";
+            return std::nullopt;
+        }
+        const std::size_t data_bytes = static_cast<std::size_t>(elem_count) * elem_size;
 
-        if (data_offset + data_bytes > file_size) {
+        // Fix 1: non-overflowing EOF guard (data_offset + data_bytes could wrap on uint64)
+        if (data_offset > file_size || data_bytes > file_size - data_offset) {
             error = "tensor_file: field '" + name + "' data (offset=" +
                     std::to_string(data_offset) + " size=" + std::to_string(data_bytes) +
                     ") extends past EOF (" + std::to_string(file_size) + ")";
