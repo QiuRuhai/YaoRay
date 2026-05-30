@@ -39,22 +39,29 @@ inline std::vector<unsigned char> F32(const std::vector<float>& v) {
     std::vector<unsigned char> b(v.size()*4); std::memcpy(b.data(), v.data(), b.size()); return b;
 }
 // Minimal valid .bsdf. n_phi_i=2 => isotropic; 4 => anisotropic. Tiny dims.
-inline std::string WriteSyntheticBsdf(const char* path, int n_phi_i) {
+//
+// The optional *_v args fill each array with a CONSTANT value instead of zeros
+// (defaults preserve the original all-zero behavior, so Slice-1 callers that
+// pass only (path, n_phi_i) are unchanged). Constant tables let the evaluation
+// tests reason about the closed-form f = spectra * ndf / (4 * sigma * cos).
+inline std::string WriteSyntheticBsdf(const char* path, int n_phi_i,
+        float ndf_v = 0.f, float sigma_v = 0.f, float vndf_v = 0.f,
+        float lum_v = 0.f, float spec_v = 0.f) {
     const int nti = 2, nwl = 3, ntm = 2, npm = 2, res = 2;
-    auto zeros = [](std::size_t n){ return std::vector<float>(n, 0.0f); };
+    auto fill = [](std::size_t n, float v){ return std::vector<float>(n, v); };
     std::vector<TField> f;
     f.push_back({"description", 1, 1, {3}, {'a','b','c'}});
-    f.push_back({"theta_i", 1, 10, {(std::uint64_t)nti}, F32(zeros(nti))});
-    f.push_back({"phi_i",   1, 10, {(std::uint64_t)n_phi_i}, F32(zeros(n_phi_i))});
+    f.push_back({"theta_i", 1, 10, {(std::uint64_t)nti}, F32(fill(nti, 0.0f))});
+    f.push_back({"phi_i",   1, 10, {(std::uint64_t)n_phi_i}, F32(fill(n_phi_i, 0.0f))});
     f.push_back({"wavelengths", 1, 10, {(std::uint64_t)nwl}, F32({600.f,550.f,450.f})});
-    f.push_back({"ndf",   2, 10, {(std::uint64_t)ntm,(std::uint64_t)npm}, F32(zeros(ntm*npm))});
-    f.push_back({"sigma", 2, 10, {(std::uint64_t)ntm,(std::uint64_t)npm}, F32(zeros(ntm*npm))});
+    f.push_back({"ndf",   2, 10, {(std::uint64_t)ntm,(std::uint64_t)npm}, F32(fill(ntm*npm, ndf_v))});
+    f.push_back({"sigma", 2, 10, {(std::uint64_t)ntm,(std::uint64_t)npm}, F32(fill(ntm*npm, sigma_v))});
     f.push_back({"vndf",  4, 10, {(std::uint64_t)n_phi_i,(std::uint64_t)nti,(std::uint64_t)ntm,(std::uint64_t)npm},
-                 F32(zeros((std::size_t)n_phi_i*nti*ntm*npm))});
+                 F32(fill((std::size_t)n_phi_i*nti*ntm*npm, vndf_v))});
     f.push_back({"luminance", 4, 10, {(std::uint64_t)n_phi_i,(std::uint64_t)nti,(std::uint64_t)res,(std::uint64_t)res},
-                 F32(zeros((std::size_t)n_phi_i*nti*res*res))});
+                 F32(fill((std::size_t)n_phi_i*nti*res*res, lum_v))});
     f.push_back({"spectra", 5, 10, {(std::uint64_t)n_phi_i,(std::uint64_t)nti,(std::uint64_t)nwl,(std::uint64_t)res,(std::uint64_t)res},
-                 F32(zeros((std::size_t)n_phi_i*nti*nwl*res*res))});
+                 F32(fill((std::size_t)n_phi_i*nti*nwl*res*res, spec_v))});
     f.push_back({"jacobian", 1, 1, {1}, {1}});
     return WriteTensor(path, f);
 }

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -799,9 +800,13 @@ int CompileMaterial(
                     "measured material: failed to load '" + resolved.string() + "': " + err +
                     "; falling back to conductor."));
             } else {
-                ir.measured_brdfs.push_back(std::move(*m));
+                ir.measured_brdfs.push_back(std::make_unique<MeasuredBrdf>(std::move(*m)));
                 material.kind = RenderMaterialKind::Measured;
-                material.measured_index = static_cast<int>(ir.measured_brdfs.size()) - 1;
+                const int idx = static_cast<int>(ir.measured_brdfs.size()) - 1;
+                material.measured_index = idx;
+                // Stable heap address: survives later measured_brdfs growth and IR
+                // moves. EvaluateBsdf(Measured) reads the warps through this.
+                material.measured_brdf = ir.measured_brdfs[idx].get();
             }
         }
     } else if (type == "hair") {

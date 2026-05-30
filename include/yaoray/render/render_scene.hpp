@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string_view>
 #include <optional>
 #include <vector>
@@ -116,6 +117,11 @@ struct RenderMaterial {
     int coat_nsamples = 1;   // PBRT nsamples: stochastic f/pdf walks averaged per call
 
     int measured_index = -1;  // index into RenderSceneIR::measured_brdfs (-1 if not Measured)
+    // Stable, non-owning pointer to the loaded measured BRDF data (heap-allocated
+    // in RenderSceneIR::measured_brdfs as a unique_ptr, so this address survives
+    // vector growth and IR moves). Set at compile time; nullptr unless Measured.
+    // EvaluateBsdf reaches the measured warps through this without scene access.
+    const MeasuredBrdf* measured_brdf = nullptr;
 
     int normal_map = -1;
     float normal_scale = 1.0f;
@@ -206,7 +212,9 @@ struct RenderSceneIR {
     std::vector<RenderSphere> spheres;
 
     std::vector<RenderMaterial> materials;
-    std::vector<MeasuredBrdf> measured_brdfs;
+    // Heap-allocated so the address of each MeasuredBrdf stays stable across
+    // vector growth and IR moves; RenderMaterial::measured_brdf points at one.
+    std::vector<std::unique_ptr<MeasuredBrdf>> measured_brdfs;
     std::vector<RenderTexture> textures;
 
     std::vector<EmissivePrimitive> emissive_primitives;

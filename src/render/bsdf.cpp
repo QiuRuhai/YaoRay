@@ -688,6 +688,86 @@ Color3f EvaluateLayered(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3
     return f_sum / static_cast<float>(ns);
 }
 
+// Real measured-BRDF reflectance evaluation (Dupuy & Jakob 2018), ported from
+// pbrt-v4 MeasuredBxDF::f. Builds a LOCAL frame from the shading normal (the
+// material is isotropic this milestone phase, so the azimuth origin of the
+// tangent basis is irrelevant). Transforms wo/wi into that frame, forms the
+// half-vector, maps (theta, phi) onto the unit square, runs the inverse VNDF
+// warp to recover the spectral grid coordinate, looks the spectra table up at
+// the three sRGB primary wavelengths, and assembles
+//   f = spectra * ndf / (4 * sigma * cos_wi).
+// Reflection only (same-hemisphere); returns black for transmission, degenerate
+// geometry, or any non-finite intermediate. Sample/Pdf stay conductor-aliased
+// until Slice 3 -- this function only provides the f term.
+Color3f EvaluateMeasured(const MeasuredBrdf& brdf, Vec3f wo, Vec3f wi, Vec3f normal) {
+    // theta -> [0,1] (sqrt warp, pbrt theta2u) and phi -> [0,1] (pbrt phi2u).
+    const auto theta2u = [](float t) { return std::sqrt(t * (2.0f / Pi)); };
+    const auto phi2u = [](float p) { return p * (1.0f / (2.0f * Pi)) + 0.5f; };
+
+    // Build a local orthonormal frame; reuse the same helper-vector construction
+    // as SampleCosineHemisphere so the basis matches the rest of the BSDF code.
+    const Vec3f helper =
+        std::fabs(normal.z) < 0.999f ? Vec3f{0.0f, 0.0f, 1.0f} : Vec3f{1.0f, 0.0f, 0.0f};
+    const Vec3f tangent = Normalize(Cross(helper, normal));
+    const Vec3f bitangent = Cross(normal, tangent);
+    const auto to_local = [&](Vec3f w) {
+        return Vec3f{Dot(w, tangent), Dot(w, bitangent), Dot(w, normal)};
+    };
+
+    Vec3f lwo = to_local(wo);
+    Vec3f lwi = to_local(wi);
+
+    // Reflection only: both directions on the same side of the surface.
+    if (lwo.z * lwi.z <= 0.0f) {
+        return Color3f{};
+    }
+    // Canonicalize to the upper hemisphere (the measurement is symmetric).
+    if (lwo.z < 0.0f) {
+        lwo = -lwo;
+        lwi = -lwi;
+    }
+
+    Vec3f wm = lwo + lwi;
+    if (LengthSquared(wm) <= 0.0f) {
+        return Color3f{};
+    }
+    wm = Normalize(wm);
+
+    const float theta_o = std::acos(Clamp(lwo.z, -1.0f, 1.0f));
+    const float phi_o = std::atan2(lwo.y, lwo.x);
+    const float theta_m = std::acos(Clamp(wm.z, -1.0f, 1.0f));
+    const float phi_m = std::atan2(wm.y, wm.x);
+
+    const Vec2f u_wo{theta2u(theta_o), phi2u(phi_o)};
+    Vec2f u_wm{theta2u(theta_m), phi2u(brdf.isotropic ? (phi_m - phi_o) : phi_m)};
+    u_wm.y -= std::floor(u_wm.y);   // wrap azimuth into [0,1)
+
+    // Inverse VNDF warp recovers the spectral-grid coordinate (conditioned on
+    // the outgoing direction, passed as the variadic floats phi_o, theta_o).
+    const PiecewiseLinear2D<2>::Sample ui = brdf.vndf_warp.Invert(u_wm, phi_o, theta_o);
+
+    const float cos_i = lwi.z;   // > 0 after the flip + hemisphere guard
+    const float sig = brdf.sigma_warp.Evaluate(u_wo);
+    const float denom = 4.0f * sig * cos_i;
+    if (denom <= 0.0f) {
+        return Color3f{};
+    }
+
+    const float ndf = brdf.ndf_warp.Evaluate(u_wm);
+
+    // Spectra lookup at the three sRGB primary wavelengths (nm), conditioned on
+    // (phi_o, theta_o). Clamp negatives to zero (synthetic/degenerate tables).
+    const float r = std::max(0.0f, brdf.spectra_warp.Evaluate(ui.p, phi_o, theta_o, 630.0f));
+    const float g = std::max(0.0f, brdf.spectra_warp.Evaluate(ui.p, phi_o, theta_o, 532.0f));
+    const float b = std::max(0.0f, brdf.spectra_warp.Evaluate(ui.p, phi_o, theta_o, 467.0f));
+
+    const float scale = ndf / denom;
+    Color3f f{r * scale, g * scale, b * scale};
+    if (!std::isfinite(f.x) || !std::isfinite(f.y) || !std::isfinite(f.z)) {
+        return Color3f{};
+    }
+    return f;
+}
 } // namespace
 
 Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, Rng& rng) {
@@ -703,9 +783,18 @@ Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f n
                 return Color3f{};
             }
             return LambertianBrdf(material.reflectance.value);
-        case RenderMaterialKind::Conductor:
         case RenderMaterialKind::Measured:
-            // TODO(measured Slice 2/3): real MeasuredBxDF f/Sample/Pdf via measured_index
+            // Real measured-BRDF f (M3 Measured Slice 2). When the data loaded,
+            // evaluate the Dupuy-Jakob response; otherwise fall through to the
+            // conductor degrade below (the compiler leaves measured_brdf null on
+            // load failure and degrades kind to Conductor, so this guards the
+            // bare-RenderMaterial case the unit tests construct).
+            if (material.measured_brdf != nullptr) {
+                return EvaluateMeasured(*material.measured_brdf, wo, wi, normal);
+            }
+            [[fallthrough]];
+        case RenderMaterialKind::Conductor:
+            // Sample/Pdf for Measured stay conductor-aliased until Slice 3.
             if (material.uroughness.value <= DeltaRoughness && material.vroughness.value <= DeltaRoughness) {
                 return Color3f{};
             }
