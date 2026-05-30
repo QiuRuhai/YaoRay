@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <yaoray/core/vec.hpp>
+#include <yaoray/render/measured_brdf.hpp>
 #include <yaoray/render/texture.hpp>
 
 namespace yr {
@@ -70,6 +71,7 @@ enum class RenderMaterialKind {
     CoatedConductor,
     DiffuseTransmission,
     Mix,
+    Measured,
 };
 
 struct TexParam1f {
@@ -112,6 +114,8 @@ struct RenderMaterial {
                                                  // it in 2a (defaults to clear).
     int coat_maxdepth = 10;                       // walk bounce cap
     int coat_nsamples = 1;   // PBRT nsamples: stochastic f/pdf walks averaged per call
+
+    int measured_index = -1;  // index into RenderSceneIR::measured_brdfs (-1 if not Measured)
 
     int normal_map = -1;
     float normal_scale = 1.0f;
@@ -202,6 +206,7 @@ struct RenderSceneIR {
     std::vector<RenderSphere> spheres;
 
     std::vector<RenderMaterial> materials;
+    std::vector<MeasuredBrdf> measured_brdfs;
     std::vector<RenderTexture> textures;
 
     std::vector<EmissivePrimitive> emissive_primitives;
