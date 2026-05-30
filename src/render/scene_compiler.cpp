@@ -972,12 +972,57 @@ bool CompileSphereShape(
     return true;
 }
 
+// Compute area-weighted smooth per-vertex normals in object space.
+// P is a flat array of [x,y,z,...] with P.size()/3 vertices.
+// indices is a flat array of triangle vertex indices (size must be divisible by 3).
+// Returns a flat array [nx0,ny0,nz0, nx1,ny1,nz1, ...] of the same vertex count,
+// each normalized.  Degenerate accumulators (zero-area neighbourhood) fall back
+// to Vec3f{0, 0, 1}.
+std::vector<float> ComputeSmoothVertexNormals(
+    const std::vector<float>& P,
+    const std::vector<int>& indices
+) {
+    const std::size_t vcount = P.size() / 3;
+    const std::size_t tcount = indices.size() / 3;
+
+    // Accumulate un-normalised (area-weighted) face normals into each vertex.
+    std::vector<Vec3f> accum(vcount, Vec3f{0.0f, 0.0f, 0.0f});
+    for (std::size_t ti = 0; ti < tcount; ++ti) {
+        const int i0 = indices[ti * 3 + 0];
+        const int i1 = indices[ti * 3 + 1];
+        const int i2 = indices[ti * 3 + 2];
+        const Vec3f p0{P[i0 * 3], P[i0 * 3 + 1], P[i0 * 3 + 2]};
+        const Vec3f p1{P[i1 * 3], P[i1 * 3 + 1], P[i1 * 3 + 2]};
+        const Vec3f p2{P[i2 * 3], P[i2 * 3 + 1], P[i2 * 3 + 2]};
+        // Un-normalised cross product: magnitude = 2 * triangle area => natural area weighting.
+        const Vec3f fn = Cross(p1 - p0, p2 - p0);
+        accum[i0] = accum[i0] + fn;
+        accum[i1] = accum[i1] + fn;
+        accum[i2] = accum[i2] + fn;
+    }
+
+    // Normalize each accumulator; fall back to {0,0,1} for degenerate vertices.
+    std::vector<float> result(vcount * 3);
+    for (std::size_t vi = 0; vi < vcount; ++vi) {
+        Vec3f n = accum[vi];
+        if (LengthSquared(n) < 1.0e-12f) {
+            n = Vec3f{0.0f, 0.0f, 1.0f};
+        } else {
+            n = Normalize(n);
+        }
+        result[vi * 3 + 0] = n.x;
+        result[vi * 3 + 1] = n.y;
+        result[vi * 3 + 2] = n.z;
+    }
+    return result;
+}
+
 // Pass through a PBRT v4 Shape "loopsubdiv" as a base-mesh trianglemesh.
 // Full Loop subdivision is out of scope (M3 Slice 3); the base control mesh
-// (level 0) is used as-is. A Warning is emitted so users know the surface is
-// faceted rather than smooth. The P and indices params have the same layout as
-// trianglemesh, so CompileTriangleMeshShape handles the actual triangle emission
-// after we rewrite the shape type.
+// (level 0) is used as-is.  If the directive provides no N param, smooth
+// area-weighted vertex normals are synthesised from P + indices so the surface
+// shades smoothly rather than faceted — approximating the limit-surface normals.
+// A Warning is emitted so users know subdivision levels are not applied.
 bool CompileLoopSubdivShape(
     const PbrtShapeRecord& record,
     int material_index,
@@ -998,12 +1043,22 @@ bool CompileLoopSubdivShape(
 
     diagnostics.push_back(Warning(scene, "Shape.loopsubdiv",
         "loopsubdiv shape: subdivision levels not applied (out of scope); "
-        "rendering base control mesh as faceted trianglemesh"));
+        "rendering the base control mesh with generated smooth (area-weighted) shading normals"));
 
     // Reuse CompileTriangleMeshShape by constructing a trianglemesh-type record
     // that carries the same P/indices (and optional N) parameters.
     PbrtShapeRecord tri_record = record;
     tri_record.shape.type = "trianglemesh";
+
+    // If no per-vertex normals are provided, synthesise smooth ones.
+    const PbrtParam* n_param = FindParam(tri_record.shape.params, "N");
+    const std::size_t vcount = p_param->floats.size() / 3;
+    if (n_param == nullptr || n_param->floats.size() != vcount * 3) {
+        std::vector<float> smooth_normals =
+            ComputeSmoothVertexNormals(p_param->floats, indices_param->ints);
+        tri_record.shape.params.push_back(
+            PbrtParam{"normal", "N", std::move(smooth_normals), {}, {}, {}});
+    }
 
     return CompileTriangleMeshShape(tri_record, material_index, ir, scene, diagnostics);
 }

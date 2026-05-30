@@ -62,9 +62,10 @@ then revert.
   patch). The disk area light (r=150, z=800, L=[50,50,50]) is the scene's
   primary key light; it is now a fully emissive primitive.
 - `Shape "loopsubdiv"` compiles the base-mesh control vertices and faces directly
-  to a `trianglemesh`, giving the killeroo at base-mesh resolution with correct
-  silhouette and gold coated material (M3 Slice 3 patch). See *Documented
-  degradations* for the visual consequence.
+  to a `trianglemesh` with generated smooth area-weighted vertex normals, giving
+  the killeroo a smooth glossy coated surface at base-mesh silhouette resolution
+  (M3 Slice 3 patch + smooth-normals fix). See *Documented degradations* for
+  remaining limitations.
 - `"spectrum" conductor.eta / conductor.k` with SPD filenames (`Au.eta.spd`,
   `Au.k.spd`) are recognized and replaced with representative RGB eta/k values
   from a small static metal table (M3 Slice 3 patch). The result reads
@@ -84,20 +85,23 @@ A reference render at 1280×720 / 64 spp lives at
 a corner formed by a diffuse floor and two white walls, lit by the large
 overhead disk area light. The gold clearcoat surface shows a visible Fresnel
 highlight on the upper surfaces and smooth specular reflection where the coat
-faces the light. The base mesh's faceted silhouette (no Loop subdivision) is
-visible at the extremities.
+faces the light; surface shading is smooth (generated area-weighted vertex
+normals). The silhouette remains at base-mesh resolution (no Loop subdivision
+detail), so profile edges are coarser than a fully subdivided mesh.
 
 ## Documented degradations (killeroo-coated-specific)
 
 These are graceful degradations with Warnings emitted at compile or parse time.
 None block rendering; they affect specific visual aspects.
 
-- **`Shape "loopsubdiv"` → faceted base-mesh trianglemesh**: Loop subdivision
-  is out of scope for M3 Slice 3. The control-mesh vertices and faces are compiled
-  directly into a flat `trianglemesh` (equivalent to zero subdivision levels),
-  producing a faceted appearance on curved surfaces and extremities. A Warning is
-  emitted. *Render effect*: the killeroo silhouette is coarser than the intended
-  smooth subdivided mesh; material behaviour and lighting are otherwise correct.
+- **`Shape "loopsubdiv"` → base-mesh passthrough with smooth shading normals**:
+  Loop subdivision is still not applied (out of scope). The control-mesh vertices
+  and faces are compiled directly into a `trianglemesh`, BUT area-weighted smooth
+  per-vertex normals are generated from the base control mesh, so the coated
+  surface shades as a smooth glossy surface rather than hard facets. A Warning is
+  emitted. *Render effect*: the killeroo silhouette/profile remains at the coarser
+  base-mesh resolution (no added subdivision detail), but the surface itself reads
+  as smooth — no shattered-facet artefacts under the clearcoat.
 - **Au SPD files → RGB eta/k approximation**: SPD file parsing is out of scope.
   `conductor.eta` and `conductor.k` parameters that reference `spds/Au.*.spd`
   filenames are detected and replaced with representative RGB (eta, k) values for
