@@ -47,7 +47,13 @@ inline std::vector<unsigned char> F32(const std::vector<float>& v) {
 inline std::string WriteSyntheticBsdf(const char* path, int n_phi_i,
         float ndf_v = 0.f, float sigma_v = 0.f, float vndf_v = 0.f,
         float lum_v = 0.f, float spec_v = 0.f) {
-    const int nti = 2, nwl = 3, ntm = 2, npm = 2, res = 2;
+    // Use distinct dims to exercise the real layout:
+    //   ndf/sigma: [ntm=2, npm=3]  (ntm != npm to catch axis confusion)
+    //   vndf:      [n_phi_i, nti, vndf_res=4, vndf_res=4]  (INDEPENDENT of ndf)
+    //   luminance: [n_phi_i, nti, res=2, res=2]
+    //   spectra:   [n_phi_i, nti, nwl=3, res=2, res=2]
+    // The old code used ntm=npm=res=2, which masked the vndf-vs-ndf shape bug.
+    const int nti = 2, nwl = 3, ntm = 2, npm = 3, res = 2, vndf_res = 4;
     auto fill = [](std::size_t n, float v){ return std::vector<float>(n, v); };
     std::vector<TField> f;
     f.push_back({"description", 1, 1, {3}, {'a','b','c'}});
@@ -56,8 +62,9 @@ inline std::string WriteSyntheticBsdf(const char* path, int n_phi_i,
     f.push_back({"wavelengths", 1, 10, {(std::uint64_t)nwl}, F32({600.f,550.f,450.f})});
     f.push_back({"ndf",   2, 10, {(std::uint64_t)ntm,(std::uint64_t)npm}, F32(fill(ntm*npm, ndf_v))});
     f.push_back({"sigma", 2, 10, {(std::uint64_t)ntm,(std::uint64_t)npm}, F32(fill(ntm*npm, sigma_v))});
-    f.push_back({"vndf",  4, 10, {(std::uint64_t)n_phi_i,(std::uint64_t)nti,(std::uint64_t)ntm,(std::uint64_t)npm},
-                 F32(fill((std::size_t)n_phi_i*nti*ntm*npm, vndf_v))});
+    // vndf spatial resolution (vndf_res x vndf_res) is independent of ndf dims
+    f.push_back({"vndf",  4, 10, {(std::uint64_t)n_phi_i,(std::uint64_t)nti,(std::uint64_t)vndf_res,(std::uint64_t)vndf_res},
+                 F32(fill((std::size_t)n_phi_i*nti*vndf_res*vndf_res, vndf_v))});
     f.push_back({"luminance", 4, 10, {(std::uint64_t)n_phi_i,(std::uint64_t)nti,(std::uint64_t)res,(std::uint64_t)res},
                  F32(fill((std::size_t)n_phi_i*nti*res*res, lum_v))});
     f.push_back({"spectra", 5, 10, {(std::uint64_t)n_phi_i,(std::uint64_t)nti,(std::uint64_t)nwl,(std::uint64_t)res,(std::uint64_t)res},

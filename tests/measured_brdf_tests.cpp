@@ -61,3 +61,22 @@ YR_TEST(measured_brdf_rejects_shape_mismatch) {
     YR_EXPECT_TRUE(!err.empty());
     std::remove(p.c_str());
 }
+YR_TEST(measured_brdf_loads_independent_vndf_res) {
+    // Regression: vndf spatial resolution must be independent of ndf dims.
+    // Real .bsdf files use e.g. ndf=[2,512] but vndf=[1,8,512,512] — the old
+    // validator required vndf[2]==n_theta_m and vndf[3]==n_phi_m (ndf shape),
+    // which rejected every real file.  WriteSyntheticBsdf now generates such
+    // a layout (ntm=2, npm=3, vndf_res=4 != ntm/npm).
+    const std::string p = yrtest::WriteSyntheticBsdf("measured_indep_vndf.bsdf", 2);
+    std::string err;
+    auto m = yr::LoadMeasuredBrdf(p, err);
+    // Must LOAD successfully — not degrade to conductor.
+    YR_EXPECT_TRUE(m.has_value());
+    if (m.has_value()) {
+        // vndf spatial dims (4x4) must differ from ndf dims (2x3)
+        YR_EXPECT_TRUE(m->vndf_shape[2] != m->ndf_shape[0] ||
+                       m->vndf_shape[3] != m->ndf_shape[1]);
+        YR_EXPECT_EQ(m->res, 2); // luminance/spectra res stays 2
+    }
+    std::remove(p.c_str());
+}

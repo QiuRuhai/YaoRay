@@ -76,10 +76,14 @@ std::optional<MeasuredBrdf> LoadMeasuredBrdf(const std::string& path, std::strin
         return std::nullopt;
     }
 
-    // --- Cross-constraint: vndf must be [n_phi_i, n_theta_i, n_theta_m, n_phi_m] ---
+    // --- Cross-constraint: vndf must be [n_phi_i, n_theta_i, vndf_res, vndf_res] ---
+    // The conditioning dims [0,1] tie to the incident-angle grids; the spatial
+    // dims [2,3] are an independent warp resolution (often 512x512 in real .bsdf
+    // files) that is NOT tied to the ndf grid.  Only assert they are positive.
+    // (pbrt-v4 MeasuredBxDFData::Create imposes the same constraints.)
     if (f_vndf->shape[0] != n_phi_i || f_vndf->shape[1] != n_theta_i ||
-        f_vndf->shape[2] != n_theta_m || f_vndf->shape[3] != n_phi_m) {
-        error = "field 'vndf' shape must be [n_phi_i, n_theta_i, n_theta_m, n_phi_m]";
+        f_vndf->shape[2] == 0 || f_vndf->shape[3] == 0) {
+        error = "field 'vndf' shape must be [n_phi_i, n_theta_i, >0, >0]";
         return std::nullopt;
     }
 
