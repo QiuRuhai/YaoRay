@@ -835,6 +835,42 @@ int CompileMaterial(
     return index;
 }
 
+int EnsureDefaultMaterial(RenderSceneIR& ir, int& default_material_index) {
+    if (default_material_index < 0) {
+        RenderMaterial default_mat;
+        default_material_index = static_cast<int>(ir.materials.size());
+        ir.materials.push_back(default_mat);
+    }
+    return default_material_index;
+}
+
+int ResolveMaterialIndexForShape(
+    const PbrtShapeRecord& record,
+    const std::unordered_map<std::string, int>& material_name_to_index,
+    const TextureBindings& texture_bindings,
+    RenderSceneIR& ir,
+    const PbrtScene& scene,
+    std::vector<SceneDiagnostic>& diagnostics,
+    int& default_material_index,
+    const std::string& diagnostic_field
+) {
+    if (!record.material_name.empty()) {
+        auto it = material_name_to_index.find(record.material_name);
+        if (it != material_name_to_index.end()) {
+            return it->second;
+        }
+
+        diagnostics.push_back(Warning(scene, diagnostic_field, "undefined material: " + record.material_name));
+        return EnsureDefaultMaterial(ir, default_material_index);
+    }
+
+    if (record.inline_material.has_value()) {
+        return CompileMaterial(*record.inline_material, texture_bindings, ir, scene, diagnostics);
+    }
+
+    return EnsureDefaultMaterial(ir, default_material_index);
+}
+
 // ---------------------------------------------------------------------------
 // Shape compilation
 // ---------------------------------------------------------------------------
@@ -1354,7 +1390,8 @@ bool CompileInstances(
     const std::unordered_map<std::string, int>& material_name_to_index,
     const TextureBindings& texture_bindings,
     RenderSceneIR& ir,
-    std::vector<SceneDiagnostic>& diagnostics
+    std::vector<SceneDiagnostic>& diagnostics,
+    int& default_material_index
 ) {
     for (const PbrtObjectInstance& instance : scene.instances) {
         auto it = scene.object_definitions.find(instance.name);
@@ -1367,23 +1404,23 @@ bool CompileInstances(
             PbrtShapeRecord composed = shape;
             composed.object_to_world = Multiply(instance.instance_to_world, shape.object_to_world);
 
-            // Resolve material
-            int mat_idx = 0;
-            if (!composed.material_name.empty()) {
-                auto mit = material_name_to_index.find(composed.material_name);
-                if (mit != material_name_to_index.end()) mat_idx = mit->second;
-            } else if (composed.inline_material.has_value()) {
-                mat_idx = CompileMaterial(*composed.inline_material, texture_bindings, ir, scene, diagnostics);
-            }
+            int mat_idx = ResolveMaterialIndexForShape(
+                composed, material_name_to_index, texture_bindings, ir, scene, diagnostics,
+                default_material_index, "ObjectInstance");
 
             if (composed.shape.type == "trianglemesh") {
                 CompileTriangleMeshShape(composed, mat_idx, ir, scene, diagnostics);
             } else if (composed.shape.type == "plymesh") {
                 CompilePlyMeshShape(composed, mat_idx, ir, scene, diagnostics);
+            } else if (composed.shape.type == "sphere") {
+                CompileSphereShape(composed, mat_idx, ir, scene, diagnostics);
             } else if (composed.shape.type == "disk") {
                 CompileDiskShape(composed, mat_idx, ir, scene, diagnostics);
             } else if (composed.shape.type == "loopsubdiv") {
                 CompileLoopSubdivShape(composed, mat_idx, ir, scene, diagnostics);
+            } else {
+                diagnostics.push_back(Warning(scene, "ObjectInstance",
+                    "unsupported shape type: " + composed.shape.type));
             }
         }
     }
@@ -1577,6 +1614,7 @@ SceneCompileResult CompilePbrtScene(const PbrtScene& scene) {
     SceneCompileResult result;
     RenderSceneIR ir;
     auto& diagnostics = result.diagnostics;
+    int default_material_index = -1;
 
     // 1. Film, camera, integrator, sampler
     CompileFilm(scene, ir);
@@ -1601,23 +1639,9 @@ SceneCompileResult CompilePbrtScene(const PbrtScene& scene) {
 
     // 4. Compile shapes
     for (const PbrtShapeRecord& record : scene.shapes) {
-        // Resolve material
-        int mat_idx = 0;
-        if (!record.material_name.empty()) {
-            auto it = material_name_to_index.find(record.material_name);
-            if (it != material_name_to_index.end()) {
-                mat_idx = it->second;
-            } else {
-                diagnostics.push_back(Warning(scene, "Shape", "undefined material: " + record.material_name));
-            }
-        } else if (record.inline_material.has_value()) {
-            mat_idx = CompileMaterial(*record.inline_material, texture_bindings, ir, scene, diagnostics);
-        }
-        // If no material at all, ensure at least one default exists
-        if (ir.materials.empty()) {
-            RenderMaterial default_mat;
-            ir.materials.push_back(default_mat);
-        }
+        int mat_idx = ResolveMaterialIndexForShape(
+            record, material_name_to_index, texture_bindings, ir, scene, diagnostics,
+            default_material_index, "Shape");
 
         if (record.shape.type == "trianglemesh") {
             CompileTriangleMeshShape(record, mat_idx, ir, scene, diagnostics);
@@ -1635,7 +1659,7 @@ SceneCompileResult CompilePbrtScene(const PbrtScene& scene) {
     }
 
     // 5. Compile object instances
-    CompileInstances(scene, material_name_to_index, texture_bindings, ir, diagnostics);
+    CompileInstances(scene, material_name_to_index, texture_bindings, ir, diagnostics, default_material_index);
 
     // 6. Compile analytic light sources
     CompileAnalyticLights(scene, ir, diagnostics);
