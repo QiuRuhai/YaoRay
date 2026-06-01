@@ -55,6 +55,17 @@ yr::PbrtScene MakeSceneWithEmissiveDisk() {
     return pbrt;
 }
 
+yr::PbrtScene MakeSceneWithEmissiveAndPlainDefaultDisks() {
+    yr::PbrtScene pbrt = MakeSceneWithEmissiveDisk();
+
+    yr::PbrtShapeRecord plain = pbrt.shapes.front();
+    plain.area_light.reset();
+    plain.object_to_world = yr::TranslationMatrix(yr::Vec3f{3.0f, 0.0f, 0.0f});
+    pbrt.shapes.push_back(plain);
+
+    return pbrt;
+}
+
 bool HasDiagnosticContaining(
     const std::vector<yr::SceneDiagnostic>& diagnostics,
     yr::DiagnosticSeverity severity,
@@ -128,6 +139,30 @@ YR_TEST(scene_compiler_disk_area_light_creates_emissive_primitive) {
         YR_EXPECT_NEAR(ep.radiance.z, 50.0f, 1e-4f);
         YR_EXPECT_TRUE(ep.area > 0.0f);
     }
+}
+
+YR_TEST(scene_compiler_area_light_default_material_does_not_make_plain_shape_emissive) {
+    const yr::PbrtScene pbrt = MakeSceneWithEmissiveAndPlainDefaultDisks();
+    const yr::SceneCompileResult result = yr::CompilePbrtScene(pbrt);
+
+    YR_EXPECT_TRUE(result.scene.has_value());
+    if (!result.scene.has_value()) return;
+
+    const yr::RenderSceneIR& scene = result.scene.value();
+    YR_EXPECT_EQ(scene.primitives.size(), std::size_t{2});
+    YR_EXPECT_EQ(scene.emissive_primitives.size(), std::size_t{1});
+    const int emissive_primitive_index = scene.emissive_primitives[0].primitive_index;
+    YR_EXPECT_TRUE(emissive_primitive_index >= 0);
+    YR_EXPECT_TRUE(static_cast<std::size_t>(emissive_primitive_index) < scene.primitives.size());
+
+    const int plain_primitive_index = emissive_primitive_index == 0 ? 1 : 0;
+    const int emissive_material_index = scene.primitives[emissive_primitive_index].material_index;
+    const int plain_material_index = scene.primitives[plain_primitive_index].material_index;
+    YR_EXPECT_TRUE(emissive_material_index != plain_material_index);
+    YR_EXPECT_NEAR(scene.materials[emissive_material_index].emission.x, 50.0f, 1e-4f);
+    YR_EXPECT_NEAR(scene.materials[plain_material_index].emission.x, 0.0f, 1e-4f);
+    YR_EXPECT_NEAR(scene.materials[plain_material_index].emission.y, 0.0f, 1e-4f);
+    YR_EXPECT_NEAR(scene.materials[plain_material_index].emission.z, 0.0f, 1e-4f);
 }
 
 // Compilation succeeds — no errors

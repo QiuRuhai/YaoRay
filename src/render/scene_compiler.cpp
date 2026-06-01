@@ -1024,6 +1024,14 @@ int EnsureDefaultMaterial(RenderSceneIR& ir, int& default_material_index) {
     return default_material_index;
 }
 
+int CloneMaterialWithEmission(RenderSceneIR& ir, int material_index, Color3f radiance) {
+    RenderMaterial material = ir.materials[material_index];
+    material.emission = radiance;
+    const int emissive_material_index = static_cast<int>(ir.materials.size());
+    ir.materials.push_back(material);
+    return emissive_material_index;
+}
+
 int ResolveMaterialIndexForShape(
     const PbrtShapeRecord& record,
     const std::unordered_map<std::string, int>& material_name_to_index,
@@ -1094,6 +1102,12 @@ bool CompileTriangleMeshShape(
     // Tangents (PBRT v4 "normal S"). Per-vertex handedness defaults to +1.
     const PbrtParam* s_param = FindParam(params, "S");
     bool has_tangents = (s_param != nullptr && s_param->floats.size() == vertex_count * 3);
+    const std::optional<Color3f> area_light_radiance = record.area_light.has_value()
+        ? std::optional<Color3f>{RgbParam(FindParam(record.area_light->params, "L"), Color3f{1.0f, 1.0f, 1.0f})}
+        : std::nullopt;
+    const int primitive_material_index = area_light_radiance.has_value()
+        ? CloneMaterialWithEmission(ir, material_index, *area_light_radiance)
+        : material_index;
 
     // Build vertices
     for (std::size_t vi = 0; vi < vertex_count; ++vi) {
@@ -1124,16 +1138,14 @@ bool CompileTriangleMeshShape(
     RenderPrimitive prim;
     prim.first_index = base_index;
     prim.index_count = static_cast<std::uint32_t>(indices_param->ints.size());
-    prim.material_index = material_index;
+    prim.material_index = primitive_material_index;
     prim.has_normals = has_normals;
     prim.has_uvs = has_uvs;
     prim.has_tangents = has_tangents;
     ir.primitives.push_back(prim);
 
     // Handle area light emission
-    if (record.area_light.has_value()) {
-        Color3f radiance = RgbParam(FindParam(record.area_light->params, "L"), Color3f{1.0f, 1.0f, 1.0f});
-
+    if (area_light_radiance.has_value()) {
         // Compute total area of all triangles in this primitive
         float total_area = 0.0f;
         for (std::size_t ti = 0; ti < indices_param->ints.size() / 3; ++ti) {
@@ -1147,12 +1159,9 @@ bool CompileTriangleMeshShape(
 
         EmissivePrimitive ep;
         ep.primitive_index = static_cast<int>(ir.primitives.size()) - 1;
-        ep.radiance = radiance;
+        ep.radiance = *area_light_radiance;
         ep.area = total_area;
         ir.emissive_primitives.push_back(ep);
-
-        // Also set emission on the material
-        ir.materials[material_index].emission = radiance;
     }
 
     return true;
@@ -1350,6 +1359,12 @@ bool CompileDiskShape(
 
     const std::uint32_t base_vertex = static_cast<std::uint32_t>(ir.vertices.size());
     const std::uint32_t base_index = static_cast<std::uint32_t>(ir.indices.size());
+    const std::optional<Color3f> area_light_radiance = record.area_light.has_value()
+        ? std::optional<Color3f>{RgbParam(FindParam(record.area_light->params, "L"), Color3f{1.0f, 1.0f, 1.0f})}
+        : std::nullopt;
+    const int primitive_material_index = area_light_radiance.has_value()
+        ? CloneMaterialWithEmission(ir, material_index, *area_light_radiance)
+        : material_index;
 
     // The disk normal in object space is (0, 0, 1); after transform it becomes
     // the world-space normal (sign depends on orientation but is consistent per-vertex).
@@ -1445,16 +1460,14 @@ bool CompileDiskShape(
     RenderPrimitive prim;
     prim.first_index = base_index;
     prim.index_count = index_count;
-    prim.material_index = material_index;
+    prim.material_index = primitive_material_index;
     prim.has_normals = true;
     prim.has_uvs = true;
     prim.has_tangents = false;
     ir.primitives.push_back(prim);
 
     // Handle area light emission (same pattern as trianglemesh)
-    if (record.area_light.has_value()) {
-        Color3f radiance = RgbParam(FindParam(record.area_light->params, "L"), Color3f{1.0f, 1.0f, 1.0f});
-
+    if (area_light_radiance.has_value()) {
         float total_area = 0.0f;
         const std::size_t triangle_count = index_count / 3;
         for (std::size_t ti = 0; ti < triangle_count; ++ti) {
@@ -1468,11 +1481,9 @@ bool CompileDiskShape(
 
         EmissivePrimitive ep;
         ep.primitive_index = static_cast<int>(ir.primitives.size()) - 1;
-        ep.radiance = radiance;
+        ep.radiance = *area_light_radiance;
         ep.area = total_area;
         ir.emissive_primitives.push_back(ep);
-
-        ir.materials[material_index].emission = radiance;
     }
 
     return true;
@@ -1506,11 +1517,19 @@ bool CompilePlyMeshShape(
             "PLY loader returned no resource; skipping shape"));
         return false;
     }
+    const std::optional<Color3f> area_light_radiance = record.area_light.has_value()
+        ? std::optional<Color3f>{RgbParam(FindParam(record.area_light->params, "L"), Color3f{1.0f, 1.0f, 1.0f})}
+        : std::nullopt;
+    std::optional<int> emissive_material_index;
 
     for (const AssetMesh& mesh : load.resource->meshes) {
         for (const AssetPrimitive& ap : mesh.primitives) {
             std::uint32_t base_vertex = static_cast<std::uint32_t>(ir.vertices.size());
             std::uint32_t base_index = static_cast<std::uint32_t>(ir.indices.size());
+            if (area_light_radiance.has_value() && !emissive_material_index.has_value()) {
+                emissive_material_index = CloneMaterialWithEmission(ir, material_index, *area_light_radiance);
+            }
+            const int primitive_material_index = emissive_material_index.value_or(material_index);
 
             bool has_normals = (ap.normals.size() == ap.positions.size());
             bool has_uvs = (ap.texcoords0.size() == ap.positions.size());
@@ -1539,15 +1558,14 @@ bool CompilePlyMeshShape(
             RenderPrimitive prim;
             prim.first_index = base_index;
             prim.index_count = static_cast<std::uint32_t>(ap.indices.size());
-            prim.material_index = material_index;
+            prim.material_index = primitive_material_index;
             prim.has_normals = has_normals;
             prim.has_uvs = has_uvs;
             prim.has_tangents = has_tangents;
             ir.primitives.push_back(prim);
 
             // Handle area light emission (same as trianglemesh)
-            if (record.area_light.has_value()) {
-                Color3f radiance = RgbParam(FindParam(record.area_light->params, "L"), Color3f{1.0f, 1.0f, 1.0f});
+            if (area_light_radiance.has_value()) {
                 float total_area = 0.0f;
                 for (std::size_t ti = 0; ti < ap.indices.size() / 3; ++ti) {
                     std::uint32_t i0 = base_vertex + ap.indices[ti * 3];
@@ -1559,10 +1577,9 @@ bool CompilePlyMeshShape(
                 }
                 EmissivePrimitive ep;
                 ep.primitive_index = static_cast<int>(ir.primitives.size()) - 1;
-                ep.radiance = radiance;
+                ep.radiance = *area_light_radiance;
                 ep.area = total_area;
                 ir.emissive_primitives.push_back(ep);
-                ir.materials[material_index].emission = radiance;
             }
         }
     }
