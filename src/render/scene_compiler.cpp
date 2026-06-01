@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -19,6 +20,7 @@ namespace yr {
 namespace {
 
 constexpr float Pi = 3.14159265358979323846f;
+constexpr int MaxFilmResolution = 16384;
 
 float DegreesToRadians(float degrees) {
     return degrees * Pi / 180.0f;
@@ -65,6 +67,68 @@ int IntParam(const PbrtParam* param, int fallback) {
     return param->ints[0];
 }
 
+bool IsFinite(float value) {
+    return std::isfinite(value);
+}
+
+float FloatOrIntParam(const PbrtParam* param, float fallback) {
+    if (param == nullptr) {
+        return fallback;
+    }
+    if (!param->floats.empty()) {
+        return param->floats[0];
+    }
+    if (!param->ints.empty()) {
+        return static_cast<float>(param->ints[0]);
+    }
+    return fallback;
+}
+
+std::optional<double> NumericParamValue(const PbrtParam* param) {
+    if (param == nullptr) {
+        return std::nullopt;
+    }
+    if (!param->floats.empty()) {
+        return static_cast<double>(param->floats[0]);
+    }
+    if (!param->ints.empty()) {
+        return static_cast<double>(param->ints[0]);
+    }
+    return std::nullopt;
+}
+
+int BoundedIntParam(
+    const PbrtParam* param,
+    int fallback,
+    int below_minimum_fallback,
+    int above_maximum_fallback,
+    int minimum,
+    int maximum,
+    const PbrtScene& scene,
+    std::vector<SceneDiagnostic>& diagnostics,
+    const std::string& field
+) {
+    const std::optional<double> value = NumericParamValue(param);
+    if (!value.has_value()) {
+        return fallback;
+    }
+    if (!std::isfinite(*value)) {
+        diagnostics.push_back(Warning(scene, field, "value is not finite; using " + std::to_string(fallback)));
+        return fallback;
+    }
+    if (*value < static_cast<double>(minimum)) {
+        diagnostics.push_back(Warning(scene, field,
+            "value is below " + std::to_string(minimum) + "; using " + std::to_string(below_minimum_fallback)));
+        return below_minimum_fallback;
+    }
+    if (*value > static_cast<double>(maximum)) {
+        diagnostics.push_back(Warning(scene, field,
+            "value exceeds " + std::to_string(maximum) + "; using " + std::to_string(above_maximum_fallback)));
+        return above_maximum_fallback;
+    }
+    return static_cast<int>(*value);
+}
+
 Point3f Point3FromParam(const PbrtParam* param, Point3f fallback) {
     if (param == nullptr || param->floats.size() < 3) return fallback;
     return Point3f{param->floats[0], param->floats[1], param->floats[2]};
@@ -74,10 +138,28 @@ Point3f Point3FromParam(const PbrtParam* param, Point3f fallback) {
 // Film / Camera / Integrator / Sampler
 // ---------------------------------------------------------------------------
 
-void CompileFilm(const PbrtScene& scene, RenderSceneIR& ir) {
+void CompileFilm(const PbrtScene& scene, RenderSceneIR& ir, std::vector<SceneDiagnostic>& diagnostics) {
     const auto& params = scene.film.params;
-    ir.width = IntParam(FindParam(params, "xresolution"), 1280);
-    ir.height = IntParam(FindParam(params, "yresolution"), 720);
+    ir.width = BoundedIntParam(
+        FindParam(params, "xresolution"),
+        1280,
+        1,
+        MaxFilmResolution,
+        1,
+        MaxFilmResolution,
+        scene,
+        diagnostics,
+        "Film.xresolution");
+    ir.height = BoundedIntParam(
+        FindParam(params, "yresolution"),
+        720,
+        1,
+        MaxFilmResolution,
+        1,
+        MaxFilmResolution,
+        scene,
+        diagnostics,
+        "Film.yresolution");
 
     const PbrtParam* filename = FindParam(params, "filename");
     if (filename != nullptr && !filename->strings.empty()) {
@@ -97,8 +179,13 @@ void CompileFilm(const PbrtScene& scene, RenderSceneIR& ir) {
     }
 }
 
-void CompileCamera(const PbrtScene& scene, RenderSceneIR& ir) {
-    float fov = FloatParam(FindParam(scene.camera.params, "fov"), 45.0f);
+void CompileCamera(const PbrtScene& scene, RenderSceneIR& ir, std::vector<SceneDiagnostic>& diagnostics) {
+    float fov = FloatOrIntParam(FindParam(scene.camera.params, "fov"), 45.0f);
+    if (!IsFinite(fov) || fov <= 0.0f || fov >= 180.0f) {
+        diagnostics.push_back(Warning(scene, "Camera.fov",
+            "field of view is outside renderable range (0, 180); using 45"));
+        fov = 45.0f;
+    }
     ir.camera.fov_y_radians = DegreesToRadians(fov);
 
     // PBRT v4 stores the CTM at the camera point as world-to-camera (matching
@@ -121,16 +208,59 @@ void CompileCamera(const PbrtScene& scene, RenderSceneIR& ir) {
     });
 }
 
-void CompileIntegrator(const PbrtScene& scene, RenderSceneIR& ir) {
+void CompileIntegrator(const PbrtScene& scene, RenderSceneIR& ir, std::vector<SceneDiagnostic>& diagnostics) {
     if (scene.integrator.type == "path") {
         ir.integrator = RenderIntegratorKind::Path;
     } else {
         ir.integrator = RenderIntegratorKind::Path; // default to path
     }
-    ir.max_depth = static_cast<int>(FloatParam(FindParam(scene.integrator.params, "maxdepth"), 5.0f));
+    ir.max_depth = BoundedIntParam(
+        FindParam(scene.integrator.params, "maxdepth"),
+        5,
+        0,
+        5,
+        0,
+        std::numeric_limits<int>::max(),
+        scene,
+        diagnostics,
+        "Integrator.maxdepth");
 }
 
-void CompileSampler(const PbrtScene& scene, RenderSceneIR& ir) {
+int SampleCountParam(
+    const PbrtParam* param,
+    int fallback,
+    const PbrtScene& scene,
+    std::vector<SceneDiagnostic>& diagnostics,
+    const std::string& field
+) {
+    return BoundedIntParam(
+        param,
+        fallback,
+        fallback,
+        fallback,
+        1,
+        std::numeric_limits<int>::max(),
+        scene,
+        diagnostics,
+        field);
+}
+
+int MultiplySampleCounts(
+    int x,
+    int y,
+    const PbrtScene& scene,
+    std::vector<SceneDiagnostic>& diagnostics
+) {
+    const long long product = static_cast<long long>(x) * static_cast<long long>(y);
+    if (product < 1 || product > static_cast<long long>(std::numeric_limits<int>::max())) {
+        diagnostics.push_back(Warning(scene, "Sampler.samples",
+            "sample count product is outside supported integer range; using 1"));
+        return 1;
+    }
+    return static_cast<int>(product);
+}
+
+void CompileSampler(const PbrtScene& scene, RenderSceneIR& ir, std::vector<SceneDiagnostic>& diagnostics) {
     if (scene.sampler.type == "stratified") {
         ir.sampler = RenderSamplerKind::Stratified;
     } else {
@@ -139,17 +269,15 @@ void CompileSampler(const PbrtScene& scene, RenderSceneIR& ir) {
 
     const auto& params = scene.sampler.params;
     const PbrtParam* pixelsamples = FindParam(params, "pixelsamples");
-    if (pixelsamples != nullptr && !pixelsamples->floats.empty()) {
-        ir.spp = static_cast<int>(pixelsamples->floats[0]);
-    } else if (pixelsamples != nullptr && !pixelsamples->ints.empty()) {
-        ir.spp = pixelsamples->ints[0];
+    if (pixelsamples != nullptr) {
+        ir.spp = SampleCountParam(pixelsamples, 1, scene, diagnostics, "Sampler.pixelsamples");
     } else {
         const PbrtParam* xsamples = FindParam(params, "xsamples");
         const PbrtParam* ysamples = FindParam(params, "ysamples");
-        if (xsamples != nullptr) {
-            int x = static_cast<int>(FloatParam(xsamples, 1.0f));
-            int y = static_cast<int>(FloatParam(ysamples, 1.0f));
-            ir.spp = x * y;
+        if (xsamples != nullptr || ysamples != nullptr) {
+            int x = SampleCountParam(xsamples, 1, scene, diagnostics, "Sampler.xsamples");
+            int y = SampleCountParam(ysamples, 1, scene, diagnostics, "Sampler.ysamples");
+            ir.spp = MultiplySampleCounts(x, y, scene, diagnostics);
         }
     }
 }
@@ -1007,6 +1135,14 @@ bool CompileSphereShape(
     const float ly = std::sqrt(Dot(sy, sy));
     const float lz = std::sqrt(Dot(sz, sz));
     const float scale = (lx + ly + lz) / 3.0f;
+    const float effective_radius = radius * scale;
+    if (!IsFinite(radius) || !IsFinite(scale) || !IsFinite(effective_radius) ||
+        radius <= 0.0f || scale <= 0.0f || effective_radius <= 0.0f) {
+        diagnostics.push_back(Warning(scene, "Shape.sphere.radius",
+            "effective sphere radius is not positive and finite; skipping sphere"));
+        return false;
+    }
+
     const float max_dev = std::max({
         std::fabs(lx - scale),
         std::fabs(ly - scale),
@@ -1019,7 +1155,7 @@ bool CompileSphereShape(
 
     RenderSphere sphere;
     sphere.center = center;
-    sphere.radius = radius * scale;
+    sphere.radius = effective_radius;
     sphere.material_index = material_index;
     sphere.area_light_index = -1;  // Sphere area lights are not yet supported.
 
@@ -1617,10 +1753,10 @@ SceneCompileResult CompilePbrtScene(const PbrtScene& scene) {
     int default_material_index = -1;
 
     // 1. Film, camera, integrator, sampler
-    CompileFilm(scene, ir);
-    CompileCamera(scene, ir);
-    CompileIntegrator(scene, ir);
-    CompileSampler(scene, ir);
+    CompileFilm(scene, ir, diagnostics);
+    CompileCamera(scene, ir, diagnostics);
+    CompileIntegrator(scene, ir, diagnostics);
+    CompileSampler(scene, ir, diagnostics);
 
     // 2. Compile named textures -> name-to-index map (+ constant value side-map).
     TextureBindings texture_bindings = CompileTextures(scene, ir, diagnostics);
