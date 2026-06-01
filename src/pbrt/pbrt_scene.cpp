@@ -262,6 +262,24 @@ std::filesystem::path NormalizeExistingOrAbsolute(const std::filesystem::path& p
     return (ec ? path : absolute).lexically_normal();
 }
 
+void AddSourceRoot(PbrtScene& scene, const std::filesystem::path& root) {
+    const std::filesystem::path normalized = NormalizeExistingOrAbsolute(root);
+    for (const std::filesystem::path& existing : scene.source_roots) {
+        if (existing == normalized) {
+            return;
+        }
+    }
+    scene.source_roots.push_back(normalized);
+}
+
+PbrtEntity MakeEntity(std::string type, std::vector<PbrtParam> params, const std::filesystem::path& source_root) {
+    PbrtEntity entity;
+    entity.type = std::move(type);
+    entity.params = std::move(params);
+    entity.source_root = source_root;
+    return entity;
+}
+
 bool ReadFloatSequence(
     const std::vector<std::string>& tokens,
     std::size_t& index,
@@ -331,21 +349,22 @@ bool ParseTokens(
     PbrtParserState& state,
     int include_depth
 ) {
+    const std::filesystem::path current_source_root = NormalizeExistingOrAbsolute(path).parent_path();
     for (std::size_t index = 0; index < tokens.size();) {
         const std::string command = tokens[index++];
         if (command == "Film") {
             std::string film_type = index < tokens.size() ? tokens[index++] : "rgb";
-            state.scene.film = PbrtEntity{film_type, ReadParams(tokens, index)};
+            state.scene.film = MakeEntity(std::move(film_type), ReadParams(tokens, index), current_source_root);
         } else if (command == "Integrator") {
             std::string type = index < tokens.size() ? tokens[index++] : "";
-            state.scene.integrator = PbrtEntity{type, ReadParams(tokens, index)};
+            state.scene.integrator = MakeEntity(std::move(type), ReadParams(tokens, index), current_source_root);
         } else if (command == "Sampler") {
             std::string type = index < tokens.size() ? tokens[index++] : "";
-            state.scene.sampler = PbrtEntity{type, ReadParams(tokens, index)};
+            state.scene.sampler = MakeEntity(std::move(type), ReadParams(tokens, index), current_source_root);
         } else if (command == "Camera") {
             std::string type = index < tokens.size() ? tokens[index++] : "perspective";
             std::vector<PbrtParam> params = ReadParams(tokens, index);
-            state.scene.camera = PbrtEntity{type, std::move(params)};
+            state.scene.camera = MakeEntity(std::move(type), std::move(params), current_source_root);
             // camera_transform is captured at WorldBegin, not here (PBRT v4 semantics)
         } else if (command == "LookAt") {
             std::vector<float> values;
@@ -431,7 +450,7 @@ bool ParseTokens(
             std::string name = tokens[index++];
             std::vector<PbrtParam> params = ReadParams(tokens, index);
             std::string mat_type = StringParam(params, "type", "matte");
-            state.scene.named_materials[name] = PbrtEntity{mat_type, std::move(params)};
+            state.scene.named_materials[name] = MakeEntity(std::move(mat_type), std::move(params), current_source_root);
         } else if (command == "Material") {
             if (index >= tokens.size()) {
                 state.diagnostics.push_back(PbrtError(path, "Material", "missing material type"));
@@ -439,7 +458,7 @@ bool ParseTokens(
             }
             std::string type = tokens[index++];
             std::vector<PbrtParam> params = ReadParams(tokens, index);
-            state.current_inline_material = PbrtEntity{type, std::move(params)};
+            state.current_inline_material = MakeEntity(std::move(type), std::move(params), current_source_root);
             state.current_material_name.clear();
         } else if (command == "NamedMaterial") {
             if (index >= tokens.size()) {
@@ -450,7 +469,7 @@ bool ParseTokens(
             state.current_inline_material.reset();
         } else if (command == "AreaLightSource") {
             std::string type = index < tokens.size() ? tokens[index++] : "diffuse";
-            state.current_area_light = PbrtEntity{type, ReadParams(tokens, index)};
+            state.current_area_light = MakeEntity(std::move(type), ReadParams(tokens, index), current_source_root);
         } else if (command == "Shape") {
             if (index >= tokens.size()) {
                 state.diagnostics.push_back(PbrtError(path, "Shape", "missing shape type"));
@@ -459,7 +478,7 @@ bool ParseTokens(
             std::string shape_type = tokens[index++];
             std::vector<PbrtParam> params = ReadParams(tokens, index);
             PbrtShapeRecord record;
-            record.shape = PbrtEntity{shape_type, std::move(params)};
+            record.shape = MakeEntity(std::move(shape_type), std::move(params), current_source_root);
             record.material_name = state.current_material_name;
             record.inline_material = state.current_inline_material;
             record.area_light = state.current_area_light;
@@ -478,14 +497,16 @@ bool ParseTokens(
             std::string tex_value_type = tokens[index++];  // "float" or "spectrum"/"color"
             std::string tex_class = tokens[index++];  // "imagemap", "constant", etc.
             std::vector<PbrtParam> params = ReadParams(tokens, index);
-            state.scene.named_textures[tex_name] = PbrtEntity{tex_class, std::move(params)};
+            state.scene.named_textures[tex_name] = MakeEntity(std::move(tex_class), std::move(params), current_source_root);
         } else if (command == "LightSource") {
             std::string type = index < tokens.size() ? tokens[index++] : "";
             std::vector<PbrtParam> params = ReadParams(tokens, index);
-            state.scene.lights.push_back(PbrtLightRecord{PbrtEntity{type, std::move(params)}, state.current_transform});
+            state.scene.lights.push_back(PbrtLightRecord{
+                MakeEntity(std::move(type), std::move(params), current_source_root),
+                state.current_transform});
         } else if (command == "PixelFilter") {
             std::string type = index < tokens.size() ? tokens[index++] : "";
-            state.scene.filter = PbrtEntity{type, ReadParams(tokens, index)};
+            state.scene.filter = MakeEntity(std::move(type), ReadParams(tokens, index), current_source_root);
         } else if (command == "ObjectBegin") {
             if (index >= tokens.size()) {
                 state.diagnostics.push_back(PbrtError(path, "ObjectBegin", "missing object name"));
@@ -545,6 +566,7 @@ bool ParsePbrtFileIntoState(const std::filesystem::path& path, PbrtParserState& 
             return false;
         }
     }
+    AddSourceRoot(state.scene, normalized_path.parent_path());
 
     state.include_stack.push_back(normalized_path);
     struct StackPop {

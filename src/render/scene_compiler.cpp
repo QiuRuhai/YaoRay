@@ -71,6 +71,57 @@ bool IsFinite(float value) {
     return std::isfinite(value);
 }
 
+std::filesystem::path NormalizeExistingOrAbsolute(const std::filesystem::path& path) {
+    std::error_code ec;
+    const std::filesystem::path canonical = std::filesystem::weakly_canonical(path, ec);
+    if (!ec) {
+        return canonical.lexically_normal();
+    }
+    const std::filesystem::path absolute = std::filesystem::absolute(path, ec);
+    return (ec ? path : absolute).lexically_normal();
+}
+
+std::filesystem::path ResolveSceneResourcePath(
+    const PbrtScene& scene,
+    const std::filesystem::path& value,
+    const std::filesystem::path& declaring_root = {}
+) {
+    if (value.is_absolute()) {
+        return NormalizeExistingOrAbsolute(value);
+    }
+
+    const std::filesystem::path main_root = NormalizeExistingOrAbsolute(scene.source_root);
+    const std::filesystem::path main_candidate = NormalizeExistingOrAbsolute(main_root / value);
+    if (std::filesystem::exists(main_candidate)) {
+        return main_candidate;
+    }
+
+    std::filesystem::path normalized_declaring_root;
+    if (!declaring_root.empty()) {
+        normalized_declaring_root = NormalizeExistingOrAbsolute(declaring_root);
+        if (normalized_declaring_root != main_root) {
+            const std::filesystem::path declaring_candidate =
+                NormalizeExistingOrAbsolute(normalized_declaring_root / value);
+            if (std::filesystem::exists(declaring_candidate)) {
+                return declaring_candidate;
+            }
+        }
+    }
+
+    for (const std::filesystem::path& root : scene.source_roots) {
+        const std::filesystem::path normalized_root = NormalizeExistingOrAbsolute(root);
+        if (normalized_root == main_root || normalized_root == normalized_declaring_root) {
+            continue;
+        }
+        const std::filesystem::path candidate = NormalizeExistingOrAbsolute(normalized_root / value);
+        if (std::filesystem::exists(candidate)) {
+            return candidate;
+        }
+    }
+
+    return main_candidate;
+}
+
 float FloatOrIntParam(const PbrtParam* param, float fallback) {
     if (param == nullptr) {
         return fallback;
@@ -347,7 +398,7 @@ bool CompileImagemapTexture(
         return false;
     }
 
-    const std::filesystem::path resolved = scene.source_root / filename->strings[0];
+    const std::filesystem::path resolved = ResolveSceneResourcePath(scene, filename->strings[0], entity.source_root);
 
     std::string explicit_encoding;
     const PbrtParam* encoding = FindParam(entity.params, "encoding");
@@ -646,18 +697,19 @@ TexParam1f TexParam1fFromParams(
 // Returns true if a normal map was loaded and assigned. Mutates material.normal_map
 // and material.normal_scale. On load failure, pushes an Error and returns false.
 bool CompileNormalMap(
-    const std::vector<PbrtParam>& params,
+    const PbrtEntity& entity,
     const PbrtScene& scene,
     RenderSceneIR& ir,
     RenderMaterial& material,
     std::vector<SceneDiagnostic>& diagnostics
 ) {
+    const std::vector<PbrtParam>& params = entity.params;
     const PbrtParam* normalmap = FindParam(params, "normalmap");
     if (normalmap == nullptr || normalmap->strings.empty()) {
         return false;
     }
 
-    const std::filesystem::path resolved = scene.source_root / normalmap->strings[0];
+    const std::filesystem::path resolved = ResolveSceneResourcePath(scene, normalmap->strings[0], entity.source_root);
 
     std::string ext = resolved.extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char ch) {
@@ -920,7 +972,7 @@ int CompileMaterial(
             diagnostics.push_back(Warning(scene, "Material.measured",
                 "measured material is missing 'string filename'; falling back to conductor."));
         } else {
-            const std::filesystem::path resolved = scene.source_root / fname;
+            const std::filesystem::path resolved = ResolveSceneResourcePath(scene, fname, entity.source_root);
             std::string err;
             std::optional<MeasuredBrdf> m = LoadMeasuredBrdf(resolved.string(), err);
             if (!m.has_value()) {
@@ -956,7 +1008,7 @@ int CompileMaterial(
         material.reflectance.value = Color3f{0.5f, 0.5f, 0.5f};
     }
 
-    CompileNormalMap(params, scene, ir, material, diagnostics);
+    CompileNormalMap(entity, scene, ir, material, diagnostics);
 
     int index = static_cast<int>(ir.materials.size());
     ir.materials.push_back(material);
@@ -1439,7 +1491,8 @@ bool CompilePlyMeshShape(
         return false;
     }
 
-    std::filesystem::path ply_path = scene.source_root / filename_param->strings[0];
+    std::filesystem::path ply_path =
+        ResolveSceneResourcePath(scene, filename_param->strings[0], record.shape.source_root);
     AssetLoadResult load = LoadPlyResource(ply_path);
     for (const std::string& w : load.warnings) {
         diagnostics.push_back(Warning(scene, "Shape.filename", w));
@@ -1584,7 +1637,7 @@ bool CompileEnvironmentLight(
         return false;
     }
 
-    const std::filesystem::path resolved = scene.source_root / fname->strings[0];
+    const std::filesystem::path resolved = ResolveSceneResourcePath(scene, fname->strings[0], record.light.source_root);
     TextureLoadResult load = LoadHdrTexture(resolved);
     if (!load.ok) {
         diagnostics.push_back(Warning(scene, "LightSource.infinite",

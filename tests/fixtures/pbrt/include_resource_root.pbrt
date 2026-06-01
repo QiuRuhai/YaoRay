@@ -1,0 +1,7 @@
+Film "rgb" "integer xresolution" [32] "integer yresolution" [32]
+Camera "perspective" "float fov" [45]
+LookAt 0 0 4  0 0 0  0 1 0
+WorldBegin
+Include "include_resource_decoy/decoy_only.pbrt"
+Include "include_resource/included_local_ply.pbrt"
+WorldEnd

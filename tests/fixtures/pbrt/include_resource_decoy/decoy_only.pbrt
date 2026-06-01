@@ -1,0 +1,2 @@
+# This include intentionally declares no geometry. Its same-name PLY catches
+# global source-root resolution that ignores the declaring file's directory.

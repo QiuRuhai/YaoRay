@@ -31,6 +31,15 @@ bool DiagnosticsContain(
     return false;
 }
 
+bool ContainsPath(const std::vector<std::filesystem::path>& paths, const std::filesystem::path& expected) {
+    for (const std::filesystem::path& path : paths) {
+        if (path == expected) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 YR_TEST(pbrt_loads_minimal_triangle_scene) {
@@ -103,6 +112,49 @@ YR_TEST(pbrt_loads_plymesh_shape) {
         return;
     }
     YR_EXPECT_TRUE(!compiled.scene.value().primitives.empty());
+}
+
+YR_TEST(pbrt_resolves_included_plymesh_relative_to_include_directory) {
+    const yr::PbrtSceneLoadResult load =
+        yr::LoadPbrtScene(FixturePath("pbrt/include_resource_root.pbrt"));
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(load.diagnostics));
+    YR_EXPECT_TRUE(load.scene.has_value());
+    if (!load.scene.has_value()) {
+        return;
+    }
+
+    std::error_code ec;
+    const std::filesystem::path main_root =
+        std::filesystem::weakly_canonical(FixturePath("pbrt"), ec);
+    YR_EXPECT_TRUE(!ec);
+    YR_EXPECT_TRUE(!load.scene->source_roots.empty());
+    YR_EXPECT_TRUE(load.scene->source_roots[0] == main_root);
+
+    ec.clear();
+    const std::filesystem::path include_root =
+        std::filesystem::weakly_canonical(FixturePath("pbrt/include_resource"), ec);
+    YR_EXPECT_TRUE(!ec);
+    YR_EXPECT_TRUE(ContainsPath(load.scene->source_roots, include_root));
+
+    const yr::SceneCompileResult compiled = yr::CompilePbrtScene(load.scene.value());
+
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(compiled.diagnostics));
+    YR_EXPECT_TRUE(compiled.scene.has_value());
+    if (!compiled.scene.has_value()) {
+        return;
+    }
+    YR_EXPECT_TRUE(!compiled.scene.value().primitives.empty());
+    YR_EXPECT_EQ(compiled.scene.value().vertices.size(), std::size_t{3});
+    YR_EXPECT_NEAR(compiled.scene.value().vertices[0].position.x, -0.5, 0.0001);
+    YR_EXPECT_NEAR(compiled.scene.value().vertices[0].position.y, 0.0, 0.0001);
+    YR_EXPECT_NEAR(compiled.scene.value().vertices[0].position.z, 0.0, 0.0001);
+    YR_EXPECT_NEAR(compiled.scene.value().vertices[1].position.x, 0.5, 0.0001);
+    YR_EXPECT_NEAR(compiled.scene.value().vertices[1].position.y, 0.0, 0.0001);
+    YR_EXPECT_NEAR(compiled.scene.value().vertices[1].position.z, 0.0, 0.0001);
+    YR_EXPECT_NEAR(compiled.scene.value().vertices[2].position.x, 0.0, 0.0001);
+    YR_EXPECT_NEAR(compiled.scene.value().vertices[2].position.y, 1.0, 0.0001);
+    YR_EXPECT_NEAR(compiled.scene.value().vertices[2].position.z, 0.0, 0.0001);
 }
 
 YR_TEST(pbrt_builds_camera_from_transform) {

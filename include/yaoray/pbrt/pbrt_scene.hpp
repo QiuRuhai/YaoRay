@@ -25,6 +25,7 @@ struct PbrtParam {
 struct PbrtEntity {
     std::string type;
     std::vector<PbrtParam> params;
+    std::filesystem::path source_root;
 };
 
 struct PbrtShapeRecord {
@@ -48,6 +49,7 @@ struct PbrtObjectInstance {
 struct PbrtScene {
     std::filesystem::path source_path;
     std::filesystem::path source_root;
+    std::vector<std::filesystem::path> source_roots;
 
     PbrtEntity camera;
     PbrtEntity sampler;
