@@ -955,11 +955,29 @@ int CompileMaterial(
                 material.reflectance.value, bindings, scene, diagnostics);
         }
     } else if (type == "subsurface") {
-        // PBRT v4 subsurface: sigma_a / sigma_s spectra (mm^-1), eta (default 1.33).
-        const Color3f sigma_a = TexParam3fFromParams(params, "sigma_a",
-            Color3f{0.0011f, 0.0024f, 0.014f}, bindings, scene, diagnostics).value;
-        const Color3f sigma_s = TexParam3fFromParams(params, "sigma_s",
-            Color3f{2.55f, 3.21f, 3.77f}, bindings, scene, diagnostics).value;
+        // PBRT v4 subsurface: optional named preset + scale multiplier, then
+        // sigma_a / sigma_s spectra (mm^-1), eta (default 1.33).
+        const std::string preset = StringParam(FindParam(params, "name"), "");
+        const float scale = FloatParam(FindParam(params, "scale"), 1.0f);
+        Color3f sigma_a;
+        Color3f sigma_s;
+        if (!preset.empty()) {
+            // pbrt SubsurfaceParameterTable (mm^-1). Our diffusion table uses g=0,
+            // so the reduced scattering coefficient sigma_s' is used directly as sigma_s.
+            if (preset != "Skin1") {
+                diagnostics.push_back(Warning(scene, "Material.subsurface",
+                    "unsupported subsurface preset '" + preset + "'; using Skin1 coefficients."));
+            }
+            sigma_a = Color3f{0.032f, 0.17f, 0.48f};
+            sigma_s = Color3f{0.74f, 0.88f, 1.01f};
+        } else {
+            sigma_a = TexParam3fFromParams(params, "sigma_a",
+                Color3f{0.0011f, 0.0024f, 0.014f}, bindings, scene, diagnostics).value;
+            sigma_s = TexParam3fFromParams(params, "sigma_s",
+                Color3f{2.55f, 3.21f, 3.77f}, bindings, scene, diagnostics).value;
+        }
+        sigma_a = sigma_a * scale;
+        sigma_s = sigma_s * scale;
         const float eta = FloatParam(FindParam(params, "eta"), 1.33f);
 
         const bool scattering = sigma_s.x > 0.0f || sigma_s.y > 0.0f || sigma_s.z > 0.0f;
