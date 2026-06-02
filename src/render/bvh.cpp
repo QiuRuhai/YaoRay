@@ -783,4 +783,43 @@ BvhHit IntersectBvh(
     return nearest;
 }
 
+BvhProbeHits IntersectBvhProbe(
+    const RenderSceneIR& scene,
+    const RenderBvh& bvh,
+    const Ray3f& ray,
+    int target_primitive_index,
+    int target_sphere_index,
+    float t_min,
+    float t_max) {
+    BvhProbeHits result;
+    BvhTraceStats stats;
+
+    constexpr int kMaxIterations = 4096;
+    float cursor = t_min;
+    for (int iter = 0; iter < kMaxIterations; ++iter) {
+        BvhHit hit = IntersectBvh(scene, bvh, ray, stats, cursor, t_max);
+        if (!hit.hit) break;
+
+        const bool is_target =
+            (target_primitive_index >= 0 && hit.triangle_index >= 0 &&
+             hit.primitive_index == target_primitive_index) ||
+            (target_sphere_index >= 0 && hit.sphere_index == target_sphere_index);
+
+        if (is_target) {
+            if (result.count < BvhProbeHits::MaxHits) {
+                result.hits[result.count++] = hit;
+            } else {
+                result.exhausted = true;
+                break;
+            }
+        }
+
+        float next = hit.t + 1.0e-4f * (1.0f + std::fabs(hit.t));
+        if (!(next > cursor)) next = cursor + 1.0e-4f;
+        cursor = next;
+        if (cursor >= t_max) break;
+    }
+    return result;
+}
+
 } // namespace yr

@@ -74,4 +74,26 @@ BvhHit IntersectBvh(
     float t_max = std::numeric_limits<float>::infinity()
 );
 
+// All intersections along `ray` (within [t_min, t_max]) that belong to one target
+// object, collected by repeatedly calling IntersectBvh and advancing past each hit
+// (no all-hits BVH traversal exists). A hit is kept when it is a triangle of
+// `target_primitive_index` OR a hit on `target_sphere_index`; other geometry is
+// transparent to the probe (skipped, not stopped). Hits are returned in
+// increasing-t order, bounded by MaxHits.
+struct BvhProbeHits {
+    static constexpr int MaxHits = 64;
+    int count = 0;
+    bool exhausted = false;  // true if more than MaxHits target hits existed
+    BvhHit hits[MaxHits];
+};
+
+BvhProbeHits IntersectBvhProbe(
+    const RenderSceneIR& scene,
+    const RenderBvh& bvh,
+    const Ray3f& ray,
+    int target_primitive_index,   // -1 to not match triangles
+    int target_sphere_index,      // -1 to not match spheres
+    float t_min,
+    float t_max);
+
 } // namespace yr
