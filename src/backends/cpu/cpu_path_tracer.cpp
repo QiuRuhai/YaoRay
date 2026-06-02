@@ -8,6 +8,7 @@
 #include <yaoray/core/rng.hpp>
 #include <yaoray/render/bvh.hpp>
 #include <yaoray/render/bsdf.hpp>
+#include <yaoray/render/bssrdf.hpp>
 #include <yaoray/render/environment.hpp>
 #include <yaoray/render/light_sampling.hpp>
 #include <yaoray/render/mis.hpp>
@@ -575,6 +576,71 @@ Color3f TracePath(const CpuPreparedScene& prepared_scene, Ray3f ray, CpuSampler&
 
         if (depth + 1 >= max_depth) {
             break;
+        }
+
+        // --- Subsurface (BSSRDF) entry / exit / continue ---
+        if (material.kind == RenderMaterialKind::Subsurface && material.bssrdf_table != nullptr) {
+            const Vec3f ns = normal;
+            // Build an orthonormal frame (ss, ts) about ns.
+            Vec3f ss = (std::fabs(ns.x) > 0.9f)
+                           ? Normalize(Cross(ns, Vec3f{0.0f, 1.0f, 0.0f}))
+                           : Normalize(Cross(ns, Vec3f{1.0f, 0.0f, 0.0f}));
+            const Vec3f ts = Cross(ns, ss);
+
+            const float eta = material.bssrdf_eta;
+            const float cos_theta_o = std::fabs(Dot(wo, ns));
+            const float fr = FrDielectric(cos_theta_o, eta);
+
+            if (sampler.Next1D() < fr) {
+                // Specular reflection at the entry interface (throughput unchanged:
+                // the fr selection probability cancels the fr Fresnel factor).
+                const Vec3f wr = ns * (2.0f * Dot(wo, ns)) - wo;
+                previous_bounce = PreviousBounce{true, true, hit_point, 1.0f, DirectLightSampleCount(scene)};
+                const Vec3f bias_n = Dot(wr, ns) >= 0.0f ? ns : -ns;
+                ray = Ray3f{hit_point + bias_n * SurfaceBias(hit_point), wr};
+                continue;
+            }
+
+            // Enter the medium. (1 - fr) is consumed by the split, so it is NOT
+            // multiplied again here; S = (1-fr)*Sp*Sw, and Sw is applied at the exit.
+            const TabulatedBSSRDF bssrdf(material.sigma_a, material.sigma_s, eta, *material.bssrdf_table);
+            const BssrdfProbeSample probe = SampleBssrdfProbe(
+                bssrdf, scene, prepared_scene.bvh, hit_point, ss, ts, ns,
+                surface_hit.geometry_hit.primitive_index, surface_hit.geometry_hit.sphere_index,
+                sampler.Next1D(), sampler.Next2D());
+            if (!probe.hit || probe.pdf <= 0.0f) {
+                break;
+            }
+
+            throughput = Multiply(throughput, probe.sp / probe.pdf);
+            if (IsNearBlack(throughput)) {
+                break;
+            }
+
+            // Exit interface as a normalized Fresnel-weighted cosine (Sw) lobe.
+            RenderMaterial exit_material;
+            exit_material.kind = RenderMaterialKind::SubsurfaceExit;
+            exit_material.ior = eta;
+            const Vec3f ni = probe.ni;
+
+            // Direct lighting at the exit point (reuses the standard NEE path).
+            radiance = radiance + Multiply(throughput,
+                EstimateDirectLight(prepared_scene, exit_material, probe.pi, ni, ni, sampler, rng, stats));
+
+            // Sample the continuation direction from the exit lobe.
+            const BsdfSample exit_sample = SampleBsdf(exit_material, ni, ni, sampler.Next2D(), rng);
+            if (!exit_sample.valid || IsNearBlack(exit_sample.weight)) {
+                break;
+            }
+            throughput = Multiply(throughput, exit_sample.weight);
+            if (!SurviveRussianRoulette(depth, throughput, sampler)) {
+                break;
+            }
+
+            previous_bounce = PreviousBounce{true, false, probe.pi, exit_sample.pdf, DirectLightSampleCount(scene)};
+            const Vec3f bias_n = Dot(exit_sample.wi, ni) >= 0.0f ? ni : -ni;
+            ray = Ray3f{probe.pi + bias_n * SurfaceBias(probe.pi), exit_sample.wi};
+            continue;
         }
 
         const BsdfSample bsdf_sample = SampleBsdf(material, wo, normal, sampler.Next2D(), rng);
