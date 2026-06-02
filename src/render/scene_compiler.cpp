@@ -1,6 +1,7 @@
 #include <yaoray/render/scene_compiler.hpp>
 
 #include <yaoray/assets/ply_loader.hpp>
+#include <yaoray/render/bssrdf.hpp>
 #include <yaoray/render/environment.hpp>
 #include <yaoray/render/measured_brdf.hpp>
 #include <yaoray/render/texture.hpp>
@@ -954,10 +955,29 @@ int CompileMaterial(
                 material.reflectance.value, bindings, scene, diagnostics);
         }
     } else if (type == "subsurface") {
-        diagnostics.push_back(MaterialFallbackWarning(scene, type));
-        material.kind = RenderMaterialKind::Diffuse;
-        material.reflectance = TexParam3fFromParams(params, "reflectance",
-            Color3f{0.5f, 0.5f, 0.5f}, bindings, scene, diagnostics);
+        // PBRT v4 subsurface: sigma_a / sigma_s spectra (mm^-1), eta (default 1.33).
+        const Color3f sigma_a = TexParam3fFromParams(params, "sigma_a",
+            Color3f{0.0011f, 0.0024f, 0.014f}, bindings, scene, diagnostics).value;
+        const Color3f sigma_s = TexParam3fFromParams(params, "sigma_s",
+            Color3f{2.55f, 3.21f, 3.77f}, bindings, scene, diagnostics).value;
+        const float eta = FloatParam(FindParam(params, "eta"), 1.33f);
+
+        const bool scattering = sigma_s.x > 0.0f || sigma_s.y > 0.0f || sigma_s.z > 0.0f;
+        if (!scattering) {
+            diagnostics.push_back(MaterialFallbackWarning(scene, type));
+            material.kind = RenderMaterialKind::Diffuse;
+            material.reflectance.value = Color3f{0.5f, 0.5f, 0.5f};
+        } else {
+            ir.bssrdf_tables.push_back(std::make_unique<BSSRDFTable>(100, 64));
+            ComputeBeamDiffusionBSSRDF(/*g=*/0.0f, eta, *ir.bssrdf_tables.back());
+            const int idx = static_cast<int>(ir.bssrdf_tables.size()) - 1;
+            material.kind = RenderMaterialKind::Subsurface;
+            material.sigma_a = sigma_a;
+            material.sigma_s = sigma_s;
+            material.bssrdf_eta = eta;
+            material.bssrdf_index = idx;
+            material.bssrdf_table = ir.bssrdf_tables[idx].get();
+        }
     } else if (type == "measured") {
         // Conductor fallback defaults (used when loading fails).
         material.kind = RenderMaterialKind::Conductor;

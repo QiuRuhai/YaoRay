@@ -47,23 +47,20 @@ bool DiagnosticsContain(
 
 } // namespace
 
-YR_TEST(material_degradation_subsurface_keeps_declared_reflectance) {
+// Subsurface materials with non-zero default sigma_s now compile to
+// RenderMaterialKind::Subsurface (M4 Slice 4). The old degradation-to-diffuse
+// path only fires when sigma_s is explicitly zero on all channels.
+YR_TEST(material_degradation_subsurface_with_defaults_compiles_to_subsurface) {
     yr::PbrtScene pbrt = MinimalSceneWithMaterial("subsurface");
-    // Override the material to include a specific reflectance.
-    yr::PbrtEntity mat;
-    mat.type = "subsurface";
-    mat.params.push_back(yr::PbrtParam{"rgb", "reflectance", {0.8f, 0.2f, 0.1f}, {}, {}, {}});
-    pbrt.named_materials["test_mat"] = mat;
-
+    // No sigma_s override — the default {2.55, 3.21, 3.77} is non-zero, so
+    // the material compiles to Subsurface with a precomputed diffusion table.
     const yr::SceneCompileResult result = yr::CompilePbrtScene(pbrt);
     YR_EXPECT_TRUE(result.scene.has_value());
     YR_EXPECT_EQ(result.scene->materials.size(), std::size_t{1});
     const yr::RenderMaterial& m = result.scene->materials[0];
-    YR_EXPECT_TRUE(m.kind == yr::RenderMaterialKind::Diffuse);
-    YR_EXPECT_NEAR(m.reflectance.value.x, 0.8f, 1.0e-6);
-    YR_EXPECT_NEAR(m.reflectance.value.y, 0.2f, 1.0e-6);
-    YR_EXPECT_NEAR(m.reflectance.value.z, 0.1f, 1.0e-6);
-    YR_EXPECT_TRUE(DiagnosticsContain(result.diagnostics, yr::DiagnosticSeverity::Warning, "subsurface"));
+    YR_EXPECT_TRUE(m.kind == yr::RenderMaterialKind::Subsurface);
+    YR_EXPECT_TRUE(m.bssrdf_table != nullptr);
+    YR_EXPECT_TRUE(!yr::HasSceneErrors(result.diagnostics));
 }
 
 YR_TEST(material_degradation_measured_becomes_default_conductor) {

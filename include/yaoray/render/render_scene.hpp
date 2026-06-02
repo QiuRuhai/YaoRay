@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <yaoray/core/vec.hpp>
+#include <yaoray/render/bssrdf.hpp>
 #include <yaoray/render/measured_brdf.hpp>
 #include <yaoray/render/texture.hpp>
 
@@ -73,6 +74,8 @@ enum class RenderMaterialKind {
     DiffuseTransmission,
     Mix,
     Measured,
+    Subsurface,
+    SubsurfaceExit,
 };
 
 struct TexParam1f {
@@ -122,6 +125,13 @@ struct RenderMaterial {
     // vector growth and IR moves). Set at compile time; nullptr unless Measured.
     // EvaluateBsdf reaches the measured warps through this without scene access.
     const MeasuredBrdf* measured_brdf = nullptr;
+
+    // Subsurface (BSSRDF) medium coefficients + the precomputed diffusion table.
+    Color3f sigma_a{0.0f, 0.0f, 0.0f};   // absorption per RGB channel
+    Color3f sigma_s{0.0f, 0.0f, 0.0f};   // scattering per RGB channel
+    float bssrdf_eta = 1.33f;            // relative IOR of the interface
+    int bssrdf_index = -1;               // index into RenderSceneIR::bssrdf_tables
+    const BSSRDFTable* bssrdf_table = nullptr;  // stable raw pointer (nullptr unless Subsurface)
 
     int normal_map = -1;
     float normal_scale = 1.0f;
@@ -215,6 +225,9 @@ struct RenderSceneIR {
     // Heap-allocated so the address of each MeasuredBrdf stays stable across
     // vector growth and IR moves; RenderMaterial::measured_brdf points at one.
     std::vector<std::unique_ptr<MeasuredBrdf>> measured_brdfs;
+    // Heap-allocated so each BSSRDFTable address stays stable across vector growth
+    // and IR moves; RenderMaterial::bssrdf_table points at one.
+    std::vector<std::unique_ptr<BSSRDFTable>> bssrdf_tables;
     std::vector<RenderTexture> textures;
 
     std::vector<EmissivePrimitive> emissive_primitives;

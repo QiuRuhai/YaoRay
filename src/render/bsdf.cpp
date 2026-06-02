@@ -1,4 +1,5 @@
 #include <yaoray/render/bsdf.hpp>
+#include <yaoray/render/bssrdf.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -101,6 +102,14 @@ Vec3f SampleCosineHemisphere(Vec3f normal, Vec2f sample) {
 
 Color3f LambertianBrdf(Color3f albedo) {
     return albedo / Pi;
+}
+
+// Exit-interface directional term Sw(cos) for a subsurface boundary of relative
+// IOR eta: a normalized Fresnel-weighted cosine lobe. Sw(cos) = (1 - Fr(cos)) / (c*Pi),
+// c = 1 - 2*FresnelMoment1(1/eta).
+float SubsurfaceSw(float cos_theta, float eta) {
+    const float c = 1.0f - 2.0f * FresnelMoment1(1.0f / eta);
+    return (1.0f - FrDielectric(cos_theta, eta)) / (c * Pi);
 }
 
 bool IsBlack(Color3f color) {
@@ -966,6 +975,15 @@ Color3f EvaluateBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f n
             return SameHemisphere(wo, wi, normal)
                 ? GgxDielectricReflection(material.reflectance.value, material.ior, material.uroughness.value, wo, wi, normal)
                 : GgxDielectricTransmission(material.reflectance.value, material.ior, material.uroughness.value, wo, wi, normal);
+        case RenderMaterialKind::SubsurfaceExit: {
+            if (!IsAboveSurface(wo, normal) || !IsAboveSurface(wi, normal)) {
+                return Color3f{};
+            }
+            const float sw = SubsurfaceSw(std::max(0.0f, Dot(normal, wi)), material.ior);
+            return Color3f{sw, sw, sw};
+        }
+        case RenderMaterialKind::Subsurface:
+            return Color3f{};  // entry interface handled by the integrator
     }
     return Color3f{};
 }
@@ -1011,6 +1029,13 @@ float PdfBsdf(const RenderMaterial& material, Vec3f wo, Vec3f wi, Vec3f normal, 
             return SameHemisphere(wo, wi, normal)
                 ? GgxDielectricReflectionPdf(material.ior, material.uroughness.value, wo, wi, normal)
                 : GgxDielectricTransmissionPdf(material.ior, material.uroughness.value, wo, wi, normal);
+        case RenderMaterialKind::SubsurfaceExit:
+            if (!IsAboveSurface(wo, normal) || !IsAboveSurface(wi, normal)) {
+                return 0.0f;
+            }
+            return std::max(0.0f, Dot(normal, wi)) / Pi;
+        case RenderMaterialKind::Subsurface:
+            return 0.0f;
     }
     return 0.0f;
 }
@@ -1148,6 +1173,21 @@ BsdfSample SampleBsdf(const RenderMaterial& material, Vec3f wo, Vec3f normal, Ve
             const float cos_i = AbsDot(normal, wi);
             return BsdfSample{wi, f * (cos_i / pdf), pdf, true, false};
         }
+        case RenderMaterialKind::SubsurfaceExit: {
+            if (!IsAboveSurface(wo, normal)) {
+                return BsdfSample{};
+            }
+            const Vec3f wi = SampleCosineHemisphere(normal, sample);
+            const float pdf = std::max(0.0f, Dot(normal, wi)) / Pi;
+            if (pdf <= 0.0f) {
+                return BsdfSample{};
+            }
+            // weight = f * cos / pdf = Sw(cos) * pi.
+            const float w = SubsurfaceSw(std::max(0.0f, Dot(normal, wi)), material.ior) * Pi;
+            return BsdfSample{wi, Color3f{w, w, w}, pdf, true, false};
+        }
+        case RenderMaterialKind::Subsurface:
+            return BsdfSample{};  // entry interface handled by the integrator
     }
     return BsdfSample{};
 }
@@ -1163,6 +1203,9 @@ bool IsDeltaBsdf(const RenderMaterial& material) {
         case RenderMaterialKind::Measured:
             // Glossy measured BRDF — light sampling applies (not a delta).
             return false;
+        case RenderMaterialKind::Subsurface:
+            // Entry interface: treated as a special delta event by the integrator.
+            return true;
         default:
             return false;
     }
