@@ -1,11 +1,13 @@
 #include <yaoray/assets/ply_loader.hpp>
 
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -15,7 +17,20 @@ namespace {
 enum class PlyFormat {
     Ascii,
     BinaryLittleEndian,
+    BinaryBigEndian,
 };
+
+template <typename T>
+T ByteSwap(T value) {
+    static_assert(std::is_trivially_copyable_v<T>);
+    unsigned char bytes[sizeof(T)];
+    std::memcpy(bytes, &value, sizeof(T));
+    for (std::size_t i = 0; i < sizeof(T) / 2; ++i) {
+        std::swap(bytes[i], bytes[sizeof(T) - 1 - i]);
+    }
+    std::memcpy(&value, bytes, sizeof(T));
+    return value;
+}
 
 struct PlyProperty {
     std::string name;
@@ -78,6 +93,8 @@ std::optional<PlyHeader> ReadHeader(std::istream& in, AssetLoadResult& result) {
                 header.format = PlyFormat::Ascii;
             } else if (format == "binary_little_endian") {
                 header.format = PlyFormat::BinaryLittleEndian;
+            } else if (format == "binary_big_endian") {
+                header.format = PlyFormat::BinaryBigEndian;
             } else {
                 PushError(result, "unsupported PLY format: " + format);
                 return std::nullopt;
@@ -242,7 +259,7 @@ bool ReadAsciiFaces(std::istream& in, const PlyHeader& header, AssetLoadResult& 
     return true;
 }
 
-bool ReadBinaryVertices(std::istream& in, const PlyHeader& header, AssetLoadResult& result, AssetPrimitive& primitive) {
+bool ReadBinaryVertices(std::istream& in, const PlyHeader& header, AssetLoadResult& result, AssetPrimitive& primitive, bool swap) {
     const bool has_normals = HasProperty(header, "nx") && HasProperty(header, "ny") && HasProperty(header, "nz");
     const bool has_uv = (HasProperty(header, "s") && HasProperty(header, "t")) ||
                         (HasProperty(header, "u") && HasProperty(header, "v"));
@@ -256,6 +273,9 @@ bool ReadBinaryVertices(std::istream& in, const PlyHeader& header, AssetLoadResu
             if (!in) {
                 PushError(result, "unexpected end of binary PLY vertex data");
                 return false;
+            }
+            if (swap) {
+                value = ByteSwap(value);
             }
             if (property.name == "x") {
                 position.x = value;
@@ -286,7 +306,7 @@ bool ReadBinaryVertices(std::istream& in, const PlyHeader& header, AssetLoadResu
     return true;
 }
 
-bool ReadBinaryFaces(std::istream& in, const PlyHeader& header, AssetLoadResult& result, AssetPrimitive& primitive) {
+bool ReadBinaryFaces(std::istream& in, const PlyHeader& header, AssetLoadResult& result, AssetPrimitive& primitive, bool swap) {
     for (int face_index = 0; face_index < header.face_count; ++face_index) {
         unsigned char count = 0;
         in.read(reinterpret_cast<char*>(&count), sizeof(count));
@@ -299,6 +319,9 @@ bool ReadBinaryFaces(std::istream& in, const PlyHeader& header, AssetLoadResult&
         for (unsigned char i = 0; i < count; ++i) {
             std::int32_t index = 0;
             in.read(reinterpret_cast<char*>(&index), sizeof(index));
+            if (swap) {
+                index = ByteSwap(index);
+            }
             if (!in || index < 0) {
                 PushError(result, "PLY face index references an invalid vertex");
                 return false;
@@ -349,8 +372,9 @@ AssetLoadResult LoadPlyResource(const std::filesystem::path& path) {
             return result;
         }
     } else {
-        if (!ReadBinaryVertices(in, *header, result, primitive) ||
-            !ReadBinaryFaces(in, *header, result, primitive)) {
+        const bool swap = (header->format == PlyFormat::BinaryBigEndian);
+        if (!ReadBinaryVertices(in, *header, result, primitive, swap) ||
+            !ReadBinaryFaces(in, *header, result, primitive, swap)) {
             return result;
         }
     }
