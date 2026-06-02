@@ -85,3 +85,25 @@ YR_TEST(cpu_subsurface_deterministic) {
     yr::Color3f ca = a.film.LinearPixel(8, 8), cb = b.film.LinearPixel(8, 8);
     YR_EXPECT_NEAR(ca.x, cb.x, 1e-5f);
 }
+
+// White furnace: a nearly-pure scattering medium (sigma_a = 1e-4, ~0) with a matched
+// interface (eta = 1, so no Fresnel reflection or interface loss) under uniform unit
+// illumination must conserve energy -- no gain. sigma_a must be non-zero to keep the
+// dipole diffusion model non-degenerate (sigma_tr > 0); exact 0 makes rho_eff = 0 and
+// the probe always fails. The diffusion model is approximate, so we assert the rendered
+// radiance is bounded (<= 1 + tol) and non-trivial.
+YR_TEST(cpu_subsurface_white_furnace_no_gain) {
+    auto result = RunPathTrace(MakeSubsurfaceSphereScene(/*sigma_a=*/1e-4f, /*eta=*/1.0f, /*subsurface=*/true));
+    yr::Color3f c = result.film.LinearPixel(8, 8);
+    YR_EXPECT_TRUE(std::isfinite(c.x));
+    YR_EXPECT_TRUE(c.x <= 1.05f);
+    YR_EXPECT_TRUE(c.x > 0.1f);
+}
+
+YR_TEST(cpu_subsurface_differs_from_diffuse) {
+    auto sss = RunPathTrace(MakeSubsurfaceSphereScene(0.02f, 1.33f, /*subsurface=*/true));
+    auto diff = RunPathTrace(MakeSubsurfaceSphereScene(0.02f, 1.33f, /*subsurface=*/false));
+    yr::Color3f cs = sss.film.LinearPixel(8, 8);
+    yr::Color3f cd = diff.film.LinearPixel(8, 8);
+    YR_EXPECT_TRUE(std::fabs(cs.x - cd.x) > 1e-3f);
+}
