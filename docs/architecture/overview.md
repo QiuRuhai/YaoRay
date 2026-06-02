@@ -21,23 +21,26 @@ distributions); `Render` then ray-traces against that prepared scene.
 
 ## Supported PBRT v4 Surface
 
-**Geometry:** `trianglemesh` (P / N / uv / S), `plymesh`, `sphere`.
+**Geometry:** `trianglemesh` (P / N / uv / S), `plymesh` (ascii,
+binary_little_endian, and binary_big_endian PLY), `sphere`.
 
 **Materials:** `diffuse` / `matte`, `conductor` / `metal`, `dielectric` /
 `glass`, `thindielectric`, `coateddiffuse`, `coatedconductor`,
-`diffusetransmission`, `measured`. Texture binding via `"texture <param>" ["name"]`
-on `reflectance`, `eta`, `k`, `uroughness`, `vroughness`, and the
-coating-layer parameters. Normal maps via `"string normalmap"`.
-`coateddiffuse` and `coatedconductor` perform full stochastic two-layer
-evaluation (sample + f + pdf, MIS-consistent) via a Russian-roulette
-internal walk with Beer-Lambert absorption. `measured` performs real
-Dupuy & Jakob 2018 tabulated-BRDF evaluation (isotropic; spectral→RGB
-conversion; data-driven importance sampling), anchored by the sportscar
-scene.
+`diffusetransmission`, `measured`, `subsurface`. Texture binding via
+`"texture <param>" ["name"]` on `reflectance`, `eta`, `k`, `uroughness`,
+`vroughness`, and the coating-layer parameters. Normal maps via
+`"string normalmap"`. `coateddiffuse` and `coatedconductor` perform full
+stochastic two-layer evaluation (sample + f + pdf, MIS-consistent) via a
+Russian-roulette internal walk with Beer-Lambert absorption. `measured`
+performs real Dupuy & Jakob 2018 tabulated-BRDF evaluation (isotropic;
+spectral→RGB conversion; data-driven importance sampling), anchored by the
+sportscar scene. `subsurface` performs real separable tabulated BSSRDF
+evaluation (Habel et al. photon beam diffusion; isotropic; RGB; smooth
+dielectric interface), supporting direct `sigma_a`/`sigma_s` and the `Skin1`
+named preset with a `scale` multiplier, anchored by the sssdragon scene.
 
-**Materials with documented degradation:** `subsurface` (→ diffuse with
-declared reflectance), `hair` (→ grey diffuse), `mix` (→ approximate
-diffuse). Each emits a named Warning at compile time.
+**Materials with documented degradation:** `hair` (→ grey diffuse), `mix`
+(→ approximate diffuse). Each emits a named Warning at compile time.
 
 **Lights:** `LightSource "infinite"` (HDRI environment with importance
 sampling), `LightSource "point"`, `LightSource "distant"`,
@@ -77,6 +80,7 @@ multi-threaded path tracer
 | `scenes/pbrt/barcelona_pavilion/README.md` | mmp's PBRT v4 Barcelona Pavilion — M2 anchor scene (downloaded via `git lfs`; gitignored). |
 | `scenes/pbrt/killeroo_coated/README.md` | mmp's PBRT v4 killeroo-coated — M3 layered-materials anchor (downloaded via `git lfs`; gitignored). |
 | `scenes/pbrt/sportscar/README.md` | mmp's PBRT v4 sportscar — M3 measured-BRDF anchor (downloaded via `git lfs`; gitignored). |
+| `scenes/pbrt/sssdragon/README.md` | mmp's PBRT v4 sssdragon — M4 subsurface (BSSRDF) anchor (downloaded via `git lfs`; gitignored). |
 
 The first four scenes are committed and exercised by CTest. The
 dining-room and Pavilion assets are large and live under permissive
@@ -95,6 +99,9 @@ than redistributing.
   but degrade to `independent` at compile time.
 - True black-border wrap (degrades to clamp).
 - Auto-tangent generation when trianglemesh has `uv` but no `S`.
+- Equal-area (octahedral) environment map projection; environment maps with
+  that encoding (e.g. `small_rural_road_equiarea.exr`) are sampled as
+  lat-long / equirectangular, which is approximate and higher-variance.
 
 ## Roadmap
 
@@ -103,7 +110,7 @@ and geometry feature surface, then port the frozen CPU surface to CUDA;
 breadth features trail after.
 
 ```
-M1 (done) ──▶ M2 (done) ──▶ M3 (done) ──▶ M4 ──▶ M5 ──▶ M6+
+M1 (done) ──▶ M2 (done) ──▶ M3 (done) ──▶ M4 (done) ──▶ M5 ──▶ M6+
 ```
 
 | Milestone | Anchor scene(s) | Headline | Status |
@@ -111,9 +118,14 @@ M1 (done) ──▶ M2 (done) ──▶ M3 (done) ──▶ M4 ──▶ M5 ─�
 | **M1** | cornell_box / material_studio / texture_test / dining-room | PBRT v4 frontend + core BSDFs + textures | done |
 | **M2** | `barcelona-pavilion` (mmp PBRT v4) | SAH BVH + parallel build; dining-room renders ≥ 2× faster | done |
 | **M3** | `killeroo-coated` + `sportscar` | Advanced Materials I: stochastic layered (`coated*`) + Dupuy-Jakob `measured` BRDF | done |
-| **M4** | `ganesha` | Subsurface scattering (BSSRDF), replacing the diffuse degradation | planned |
+| **M4** | `sssdragon` | Subsurface scattering (BSSRDF), replacing the diffuse degradation | done |
 | **M5** | `dining-room` < 10 s, `barcelona-pavilion` < 1 min | CUDA backend — bit-for-bit GPU port of the frozen CPU surface | planned |
 | **M6+** | by interest | Volumetrics, hair + curves, subdivision, spectral, denoiser, adaptive sampling, sampler polish | exploratory |
+
+Note: the originally-planned M4 anchor was `ganesha`, but Slice 5 triage
+found that `ganesha.pbrt` uses `Material "coateddiffuse"` (an M3 material),
+not subsurface. The correct PBRT v4 subsurface scene is `sssdragon`
+(PBRT v4 `Material "subsurface"` with the `Skin1` preset).
 
 See [`docs/superpowers/specs/2026-05-29-yaoray-roadmap-refresh-design.md`](../superpowers/specs/2026-05-29-yaoray-roadmap-refresh-design.md)
 for the authoritative roadmap — per-milestone acceptance criteria, risk

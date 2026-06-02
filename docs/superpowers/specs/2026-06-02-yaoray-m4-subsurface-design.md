@@ -2,7 +2,9 @@
 
 **Status:** approved (brainstorm) — pending spec review
 **Date:** 2026-06-02
-**Anchor scene:** `ganesha` (PBRT v4, mmp)
+**Anchor scene:** ~~`ganesha`~~ → **`sssdragon`** (PBRT v4, mmp) — `ganesha.pbrt` was
+found during Slice 5 triage to use `Material "coateddiffuse"` (an M3 material), not
+subsurface; `sssdragon` is the correct SSS anchor.
 **North Star alignment:** completes the PBRT v4 *material* feature surface — replaces the
 `subsurface → diffuse` degradation with a faithful BSSRDF before the CUDA port (M5).
 
