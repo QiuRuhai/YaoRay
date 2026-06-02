@@ -204,4 +204,41 @@ Color3f TabulatedBSSRDF::S(float cos_theta_o, float r, float cos_theta_i) const 
     return Color3f{ft * sp.x * sw, ft * sp.y * sw, ft * sp.z * sw};
 }
 
+float TabulatedBSSRDF::Sample_Sr(int ch, float u) const {
+    const float st[3] = {sigma_t.x, sigma_t.y, sigma_t.z};
+    const float rh[3] = {rho.x, rho.y, rho.z};
+    if (st[ch] == 0) return -1;
+    float r = SampleCatmullRom2D(table->n_rho, table->n_radius,
+                                 table->rho_samples.data(), table->radius_samples.data(),
+                                 table->profile.data(), table->profile_cdf.data(),
+                                 rh[ch], u);
+    return r / st[ch];
+}
+
+float TabulatedBSSRDF::Pdf_Sr(int ch, float r) const {
+    const float st[3] = {sigma_t.x, sigma_t.y, sigma_t.z};
+    const float rh[3] = {rho.x, rho.y, rho.z};
+
+    float rOptical = r * st[ch];
+
+    int rhoOffset, radiusOffset;
+    float rhoW[4], radiusW[4];
+    if (!CatmullRomWeights(table->n_rho, table->rho_samples.data(), rh[ch], rhoOffset, rhoW) ||
+        !CatmullRomWeights(table->n_radius, table->radius_samples.data(), rOptical, radiusOffset, radiusW))
+        return 0;
+
+    float sr = 0, rhoEff = 0;
+    for (int i = 0; i < 4; ++i) {
+        if (rhoW[i] == 0) continue;
+        rhoEff += table->rho_eff[rhoOffset + i] * rhoW[i];
+        for (int j = 0; j < 4; ++j) {
+            if (radiusW[j] == 0) continue;
+            sr += table->EvalProfile(rhoOffset + i, radiusOffset + j) * rhoW[i] * radiusW[j];
+        }
+    }
+    if (rOptical != 0) sr /= 2 * Pi * rOptical;
+    if (rhoEff <= 0) return 0;  // degenerate (non-scattering) guard
+    return std::max(0.0f, sr * st[ch] * st[ch] / rhoEff);
+}
+
 }  // namespace yr
