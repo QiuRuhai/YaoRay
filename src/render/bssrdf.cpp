@@ -1,7 +1,10 @@
 #include <yaoray/render/bssrdf.hpp>
 
+#include <yaoray/render/catmull_rom.hpp>
+
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 
 namespace yr {
 namespace {
@@ -108,6 +111,44 @@ float BeamDiffusionSS(float sigma_s, float sigma_a, float g, float eta, float r)
                std::abs(cosTheta_o);
     }
     return Ess / nSamples;
+}
+
+BSSRDFTable::BSSRDFTable(int n_rho_samples, int n_radius_samples)
+    : n_rho(n_rho_samples),
+      n_radius(n_radius_samples),
+      rho_samples(n_rho_samples),
+      radius_samples(n_radius_samples),
+      profile((std::size_t)n_rho_samples * n_radius_samples),
+      rho_eff(n_rho_samples),
+      profile_cdf((std::size_t)n_rho_samples * n_radius_samples) {}
+
+void ComputeBeamDiffusionBSSRDF(float g, float eta, BSSRDFTable& t) {
+    // Geometric radius discretization: 0, 2.5e-3, then *1.2 each step.
+    t.radius_samples[0] = 0.0f;
+    t.radius_samples[1] = 2.5e-3f;
+    for (int i = 2; i < t.n_radius; ++i)
+        t.radius_samples[i] = t.radius_samples[i - 1] * 1.2f;
+
+    // Albedo discretization clustered toward rho=1.
+    for (int i = 0; i < t.n_rho; ++i)
+        t.rho_samples[i] = (1 - std::exp(-8.0f * i / (float)(t.n_rho - 1))) /
+                           (1 - std::exp(-8.0f));
+
+    for (int i = 0; i < t.n_rho; ++i) {
+        for (int j = 0; j < t.n_radius; ++j) {
+            float rho = t.rho_samples[i];
+            float r = t.radius_samples[j];
+            t.profile[(std::size_t)i * t.n_radius + j] =
+                2 * Pi * r *
+                (BeamDiffusionMS(rho, 1 - rho, g, eta, r) +
+                 BeamDiffusionSS(rho, 1 - rho, g, eta, r));
+        }
+        // Effective albedo + radial CDF for this rho row.
+        t.rho_eff[i] = IntegrateCatmullRom(
+            t.n_radius, t.radius_samples.data(),
+            &t.profile[(std::size_t)i * t.n_radius],
+            &t.profile_cdf[(std::size_t)i * t.n_radius]);
+    }
 }
 
 }  // namespace yr

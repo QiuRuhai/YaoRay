@@ -69,3 +69,53 @@ YR_TEST(beam_diffusion_ms_absorption_reduces) {
     float high_abs = yr::BeamDiffusionMS(sigma_s, 0.5f, g, eta, r);
     YR_EXPECT_TRUE(low_abs > high_abs);
 }
+
+// The table builds without NaNs: profile finite & non-negative, CDFs monotone and
+// starting at 0, rho_eff finite in [0,1.05].
+YR_TEST(bssrdf_table_well_formed) {
+    yr::BSSRDFTable table(100, 64);
+    yr::ComputeBeamDiffusionBSSRDF(/*g=*/0.0f, /*eta=*/1.33f, table);
+
+    YR_EXPECT_EQ((int)table.profile.size(), 100 * 64);
+    YR_EXPECT_EQ((int)table.rho_eff.size(), 100);
+
+    for (float v : table.profile) YR_EXPECT_TRUE(std::isfinite(v) && v >= 0.0f);
+
+    for (int i = 0; i < table.n_rho; ++i) {
+        YR_EXPECT_TRUE(std::isfinite(table.rho_eff[i]));
+        YR_EXPECT_TRUE(table.rho_eff[i] >= 0.0f && table.rho_eff[i] <= 1.05f);
+        const float* cdf = &table.profile_cdf[i * table.n_radius];
+        YR_EXPECT_NEAR(cdf[0], 0.0f, 1e-6f);
+        for (int j = 1; j < table.n_radius; ++j) YR_EXPECT_TRUE(cdf[j] >= cdf[j - 1]);
+    }
+}
+
+// Effective albedo increases monotonically with the single-scattering albedo.
+YR_TEST(bssrdf_table_rho_eff_monotonic) {
+    yr::BSSRDFTable table(100, 64);
+    yr::ComputeBeamDiffusionBSSRDF(0.0f, 1.33f, table);
+
+    YR_EXPECT_NEAR(table.rho_eff.front(), 0.0f, 1e-2f);
+    YR_EXPECT_TRUE(table.rho_eff.back() > table.rho_eff.front());
+    for (int i = 1; i < table.n_rho; ++i)
+        YR_EXPECT_TRUE(table.rho_eff[i] >= table.rho_eff[i - 1] - 1e-4f);
+}
+
+// First radius node is 0 and radii increase geometrically (faithful discretization).
+YR_TEST(bssrdf_table_radius_discretization) {
+    yr::BSSRDFTable table(100, 64);
+    yr::ComputeBeamDiffusionBSSRDF(0.0f, 1.33f, table);
+    YR_EXPECT_NEAR(table.radius_samples[0], 0.0f, 1e-9f);
+    YR_EXPECT_NEAR(table.radius_samples[1], 2.5e-3f, 1e-9f);
+    for (int j = 2; j < table.n_radius; ++j)
+        YR_EXPECT_TRUE(table.radius_samples[j] > table.radius_samples[j - 1]);
+}
+
+// Determinism: two independent builds with identical params are bit-for-bit equal.
+YR_TEST(bssrdf_table_deterministic) {
+    yr::BSSRDFTable a(50, 32), b(50, 32);
+    yr::ComputeBeamDiffusionBSSRDF(0.2f, 1.4f, a);
+    yr::ComputeBeamDiffusionBSSRDF(0.2f, 1.4f, b);
+    for (size_t i = 0; i < a.profile.size(); ++i) YR_EXPECT_EQ(a.profile[i], b.profile[i]);
+    for (size_t i = 0; i < a.rho_eff.size(); ++i) YR_EXPECT_EQ(a.rho_eff[i], b.rho_eff[i]);
+}
