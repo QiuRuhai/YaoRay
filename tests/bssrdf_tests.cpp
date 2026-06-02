@@ -41,3 +41,31 @@ YR_TEST(fresnel_moments_finite) {
     YR_EXPECT_TRUE(std::isfinite(yr::FresnelMoment1(1.33f)) && yr::FresnelMoment1(1.33f) > 0.0f);
     YR_EXPECT_TRUE(std::isfinite(yr::FresnelMoment2(1.33f)));
 }
+
+// Beam diffusion terms are non-negative and finite for a typical skin-like medium.
+YR_TEST(beam_diffusion_nonnegative_finite) {
+    const float sigma_s = 2.0f, sigma_a = 0.01f, g = 0.0f, eta = 1.33f;
+    for (float r : {0.001f, 0.01f, 0.1f, 0.5f, 1.0f}) {
+        float ms = yr::BeamDiffusionMS(sigma_s, sigma_a, g, eta, r);
+        float ss = yr::BeamDiffusionSS(sigma_s, sigma_a, g, eta, r);
+        YR_EXPECT_TRUE(std::isfinite(ms) && ms >= 0.0f);
+        YR_EXPECT_TRUE(std::isfinite(ss) && ss >= 0.0f);
+    }
+}
+
+// The multiple-scattering fluence decays with radius (more spreading = less return
+// far away). Compare a near and a far radius.
+YR_TEST(beam_diffusion_ms_decays_with_radius) {
+    const float sigma_s = 2.0f, sigma_a = 0.01f, g = 0.0f, eta = 1.33f;
+    float near_r = yr::BeamDiffusionMS(sigma_s, sigma_a, g, eta, 0.02f);
+    float far_r = yr::BeamDiffusionMS(sigma_s, sigma_a, g, eta, 0.8f);
+    YR_EXPECT_TRUE(near_r > far_r);
+}
+
+// More absorption reduces the multiple-scattering response at a fixed radius.
+YR_TEST(beam_diffusion_ms_absorption_reduces) {
+    const float sigma_s = 2.0f, g = 0.0f, eta = 1.33f, r = 0.1f;
+    float low_abs = yr::BeamDiffusionMS(sigma_s, 0.01f, g, eta, r);
+    float high_abs = yr::BeamDiffusionMS(sigma_s, 0.5f, g, eta, r);
+    YR_EXPECT_TRUE(low_abs > high_abs);
+}
