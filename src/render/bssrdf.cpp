@@ -241,4 +241,28 @@ float TabulatedBSSRDF::Pdf_Sr(int ch, float r) const {
     return std::max(0.0f, sr * st[ch] * st[ch] / rhoEff);
 }
 
+float TabulatedBSSRDF::Pdf_Sp(const Point3f& po, const Vec3f& ss, const Vec3f& ts,
+                              const Vec3f& ns, const Point3f& pi, const Vec3f& ni) const {
+    // Express the entry->exit offset and the exit normal in the shading frame.
+    Vec3f d = po - pi;
+    float dLocal[3] = {Dot(ss, d), Dot(ts, d), Dot(ns, d)};
+    float nLocal[3] = {Dot(ss, ni), Dot(ts, ni), Dot(ns, ni)};
+
+    // Radius of the offset projected into the plane perpendicular to each axis.
+    float rProj[3] = {
+        std::sqrt(dLocal[1] * dLocal[1] + dLocal[2] * dLocal[2]),  // ss axis
+        std::sqrt(dLocal[2] * dLocal[2] + dLocal[0] * dLocal[0]),  // ts axis
+        std::sqrt(dLocal[0] * dLocal[0] + dLocal[1] * dLocal[1]),  // ns axis
+    };
+
+    const float axisProb[3] = {0.25f, 0.25f, 0.5f};
+    const float chProb = 1.0f / 3.0f;
+
+    float pdf = 0;
+    for (int axis = 0; axis < 3; ++axis)
+        for (int ch = 0; ch < 3; ++ch)
+            pdf += Pdf_Sr(ch, rProj[axis]) * std::abs(nLocal[axis]) * chProb * axisProb[axis];
+    return pdf;
+}
+
 }  // namespace yr

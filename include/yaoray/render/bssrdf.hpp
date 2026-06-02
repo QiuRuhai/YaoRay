@@ -80,6 +80,13 @@ struct TabulatedBSSRDF {
     Color3f S(float cos_theta_o, float r, float cos_theta_i) const;
     float Sample_Sr(int ch, float u) const;
     float Pdf_Sr(int ch, float r) const;
+
+    // Area-measure spatial pdf of sampling exit point `pi` (with geometric normal
+    // `ni`) given entry point `po` and its orthonormal shading frame (ss, ts, ns).
+    // MIS over the 3 projection axes (weights ss/ts/ns = .25/.25/.5) and the 3 RGB
+    // channels (each 1/3). Mirrors SampleBssrdfProbe's axis/channel choices.
+    float Pdf_Sp(const Point3f& po, const Vec3f& ss, const Vec3f& ts, const Vec3f& ns,
+                 const Point3f& pi, const Vec3f& ni) const;
 };
 
 }  // namespace yr
