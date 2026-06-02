@@ -25,4 +25,14 @@ float IntegrateCatmullRom(int n, const float* x, const float* values, float* cdf
 // non-decreasing (e.g. a CDF). Clamps to the endpoints when u is out of range.
 float InvertCatmullRom(int n, const float* x, const float* values, float u);
 
+// Importance-sample x from a 2-D Catmull-Rom table conditioned on `alpha`.
+// nodes1 (size1) are the alpha nodes; nodes2 (size2) are the x nodes; `values`
+// and `cdf` are row-major [size1 * size2] (function samples and their cumulative
+// integral along x, as produced by IntegrateCatmullRom per row). Returns the
+// sampled x. If `fval`/`pdf` are non-null, they receive the interpolated function
+// value at the sample and the normalized pdf (fval / total-row-integral).
+float SampleCatmullRom2D(int size1, int size2, const float* nodes1, const float* nodes2,
+                         const float* values, const float* cdf, float alpha, float u,
+                         float* fval = nullptr, float* pdf = nullptr);
+
 }  // namespace yr

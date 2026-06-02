@@ -1,6 +1,7 @@
 #include <yaoray/render/catmull_rom.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace yr {
 namespace {
@@ -122,6 +123,77 @@ float InvertCatmullRom(int n, const float* x, const float* values, float u) {
         t -= (fhat - u) / fhatDeriv;
     }
     return x0 + t * width;
+}
+
+float SampleCatmullRom2D(int size1, int size2, const float* nodes1, const float* nodes2,
+                         const float* values, const float* cdf, float alpha, float u,
+                         float* fval, float* pdf) {
+    // Interpolation weights for the alpha parameter (selects 4 rows).
+    int offset;
+    float weights[4];
+    if (!CatmullRomWeights(size1, nodes1, alpha, offset, weights)) return 0;
+
+    // Blend the 4 alpha-rows at column idx. Boundary weights are 0, so
+    // (offset+i) out-of-range rows are never read.
+    auto interpolate = [&](const float* array, int idx) {
+        float value = 0;
+        for (int i = 0; i < 4; ++i)
+            if (weights[i] != 0)
+                value += array[(offset + i) * size2 + idx] * weights[i];
+        return value;
+    };
+
+    // Map u to a spline interval by inverting the interpolated cdf.
+    float maximum = interpolate(cdf, size2 - 1);
+    u *= maximum;
+    int idx = FindInterval(size2, [&](int i) { return interpolate(cdf, i) <= u; });
+
+    float f0 = interpolate(values, idx), f1 = interpolate(values, idx + 1);
+    float x0 = nodes2[idx], x1 = nodes2[idx + 1];
+    float width = x1 - x0;
+
+    // Re-scale u using the interpolated cdf at the interval start.
+    u = (u - interpolate(cdf, idx)) / width;
+
+    // Approximate derivatives via finite differences of the interpolant.
+    float d0, d1;
+    if (idx > 0)
+        d0 = width * (f1 - interpolate(values, idx - 1)) / (x1 - nodes2[idx - 1]);
+    else
+        d0 = f1 - f0;
+    if (idx + 2 < size2)
+        d1 = width * (interpolate(values, idx + 2) - f0) / (nodes2[idx + 2] - x0);
+    else
+        d1 = f1 - f0;
+
+    // Seed t from the quadratic approximation, then refine by Newton-bisection.
+    float t = (f0 != f1) ? (f0 - std::sqrt(std::max(0.0f, f0 * f0 + 2 * u * (f1 - f0)))) / (f0 - f1)
+                         : (f0 != 0 ? u / f0 : 0.0f);
+    float a = 0, b = 1, Fhat, fhat;
+    while (true) {
+        if (!(t >= a && t <= b)) t = 0.5f * (a + b);
+
+        Fhat = t * (f0 +
+                    t * (0.5f * d0 +
+                         t * ((1.0f / 3.0f) * (-2 * d0 - d1) + f1 - f0 +
+                              t * (0.25f * (d0 + d1) + 0.5f * (f0 - f1)))));
+        fhat = f0 +
+               t * (d0 +
+                    t * (-2 * d0 - d1 + 3 * (f1 - f0) +
+                         t * (d0 + d1 + 2 * (f0 - f1))));
+
+        if (std::abs(Fhat - u) < 1e-6f || b - a < 1e-6f) break;
+
+        if (Fhat - u < 0)
+            a = t;
+        else
+            b = t;
+        t -= (Fhat - u) / fhat;
+    }
+
+    if (fval) *fval = fhat;
+    if (pdf) *pdf = (maximum != 0) ? fhat / maximum : 0.0f;
+    return x0 + width * t;
 }
 
 }  // namespace yr
