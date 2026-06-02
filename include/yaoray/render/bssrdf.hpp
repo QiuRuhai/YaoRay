@@ -11,6 +11,9 @@
 
 namespace yr {
 
+struct RenderSceneIR;
+struct RenderBvh;
+
 // Scalar dielectric Fresnel reflectance for unpolarized light. `eta` is the
 // relative IOR (transmitted / incident). cos_theta_i may be negative (light from
 // the far side); eta is inverted internally in that case. Returns 1 on total
@@ -88,5 +91,36 @@ struct TabulatedBSSRDF {
     float Pdf_Sp(const Point3f& po, const Vec3f& ss, const Vec3f& ts, const Vec3f& ns,
                  const Point3f& pi, const Vec3f& ni) const;
 };
+
+// Result of probing for a subsurface exit point. `hit == false` means the probe
+// found no surface (the caller should discard the sample). On success, `pi`/`ni`
+// are the exit position and geometric normal, the *_index/bary fields identify the
+// hit for later material/shading resolution, `sp` is the spatial term Sp(distance),
+// and `pdf` is the area-measure density (already divided by the crossing count).
+struct BssrdfProbeSample {
+    bool hit = false;
+    Point3f pi{0, 0, 0};
+    Vec3f ni{0, 0, 1};
+    int primitive_index = -1;
+    int triangle_index = -1;
+    int sphere_index = -1;
+    float bary_u = 0.0f;
+    float bary_v = 0.0f;
+    Color3f sp{0, 0, 0};
+    float pdf = 0.0f;
+};
+
+// Importance-sample a subsurface exit point on the entry object. `po` is the entry
+// point; (ss, ts, ns) is its orthonormal shading frame. `u1` is consumed for the
+// axis, channel, and crossing-selection choices (pbrt's reuse trick); `u2` =
+// (radius-u, phi-u). The probe is restricted to `target_primitive_index` /
+// `target_sphere_index` (pass -1 for the unused kind).
+BssrdfProbeSample SampleBssrdfProbe(
+    const TabulatedBSSRDF& bssrdf,
+    const RenderSceneIR& scene,
+    const RenderBvh& bvh,
+    const Point3f& po, const Vec3f& ss, const Vec3f& ts, const Vec3f& ns,
+    int target_primitive_index, int target_sphere_index,
+    float u1, const Vec2f& u2);
 
 }  // namespace yr

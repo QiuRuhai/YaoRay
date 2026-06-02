@@ -1,6 +1,9 @@
 #include <yaoray/render/bssrdf.hpp>
 
 #include <yaoray/render/catmull_rom.hpp>
+#include <yaoray/render/bvh.hpp>
+#include <yaoray/render/render_scene.hpp>
+#include <yaoray/render/shading.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -263,6 +266,84 @@ float TabulatedBSSRDF::Pdf_Sp(const Point3f& po, const Vec3f& ss, const Vec3f& t
         for (int ch = 0; ch < 3; ++ch)
             pdf += Pdf_Sr(ch, rProj[axis]) * std::abs(nLocal[axis]) * chProb * axisProb[axis];
     return pdf;
+}
+
+BssrdfProbeSample SampleBssrdfProbe(
+    const TabulatedBSSRDF& bssrdf,
+    const RenderSceneIR& scene,
+    const RenderBvh& bvh,
+    const Point3f& po, const Vec3f& ss, const Vec3f& ts, const Vec3f& ns,
+    int target_primitive_index, int target_sphere_index,
+    float u1, const Vec2f& u2) {
+    BssrdfProbeSample out;
+
+    // Choose a projection axis (vz is the probe direction). Reuse u1 by rescaling.
+    Vec3f vx, vy, vz;
+    if (u1 < 0.5f) {
+        vx = ss; vy = ts; vz = ns;
+        u1 *= 2.0f;
+    } else if (u1 < 0.75f) {
+        vx = ts; vy = ns; vz = ss;
+        u1 = (u1 - 0.5f) * 4.0f;
+    } else {
+        vx = ns; vy = ss; vz = ts;
+        u1 = (u1 - 0.75f) * 4.0f;
+    }
+
+    // Choose an RGB channel, then rescale u1 again.
+    int ch = (int)(u1 * 3.0f);
+    if (ch < 0) ch = 0;
+    if (ch > 2) ch = 2;
+    u1 = u1 * 3.0f - (float)ch;
+
+    // Sample a radius; reject non-scattering channels and out-of-support radii.
+    float r = bssrdf.Sample_Sr(ch, u2.x);
+    if (r < 0) return out;
+    float phi = 2.0f * Pi * u2.y;
+
+    float rMax = bssrdf.Sample_Sr(ch, 0.999f);
+    if (r >= rMax) return out;
+    float l = 2.0f * std::sqrt(std::max(0.0f, rMax * rMax - r * r));
+
+    // Probe ray: a segment of length l centered on the entry, parallel to vz, offset
+    // by the sampled disk position in the (vx, vy) plane.
+    Vec3f disk = vx * (r * std::cos(phi)) + vy * (r * std::sin(phi));
+    Point3f base = po + disk - vz * (l * 0.5f);
+    Ray3f probe{base, vz};
+
+    BvhProbeHits hits = IntersectBvhProbe(scene, bvh, probe, target_primitive_index,
+                                          target_sphere_index, 1.0e-5f, l);
+    int nFound = hits.count;
+    if (nFound == 0) return out;
+
+    // Pick one crossing uniformly, reusing u1.
+    int selected = (int)(u1 * (float)nFound);
+    if (selected < 0) selected = 0;
+    if (selected >= nFound) selected = nFound - 1;
+    const BvhHit& chosen = hits.hits[selected];
+
+    // Resolve the exit position and geometric normal.
+    out.pi = probe.At(chosen.t);
+    if (chosen.sphere_index >= 0) {
+        const RenderSphere& sph = scene.spheres[chosen.sphere_index];
+        out.ni = SphereNormal(sph.center, sph.radius, out.pi);
+        out.sphere_index = chosen.sphere_index;
+    } else {
+        TriangleRef tri = LocateTriangle(scene, chosen.triangle_index);
+        out.ni = GeometricNormal(scene, tri);
+        out.primitive_index = chosen.primitive_index;
+        out.triangle_index = chosen.triangle_index;
+        out.bary_u = chosen.bary_u;
+        out.bary_v = chosen.bary_v;
+    }
+
+    // Spatial term and pdf (divided by the number of crossings, as in pbrt).
+    Vec3f delta = po - out.pi;
+    float dist = Length(delta);
+    out.sp = bssrdf.Sp(dist);
+    out.pdf = bssrdf.Pdf_Sp(po, ss, ts, ns, out.pi, out.ni) / (float)nFound;
+    out.hit = true;
+    return out;
 }
 
 }  // namespace yr
