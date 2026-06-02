@@ -151,4 +151,57 @@ void ComputeBeamDiffusionBSSRDF(float g, float eta, BSSRDFTable& t) {
     }
 }
 
+TabulatedBSSRDF::TabulatedBSSRDF(const Color3f& sigma_a, const Color3f& sigma_s,
+                                 float eta_, const BSSRDFTable& table_)
+    : eta(eta_), table(&table_) {
+    sigma_t = Color3f{sigma_a.x + sigma_s.x, sigma_a.y + sigma_s.y, sigma_a.z + sigma_s.z};
+    rho = Color3f{sigma_t.x != 0 ? sigma_s.x / sigma_t.x : 0.0f,
+                  sigma_t.y != 0 ? sigma_s.y / sigma_t.y : 0.0f,
+                  sigma_t.z != 0 ? sigma_s.z / sigma_t.z : 0.0f};
+}
+
+Color3f TabulatedBSSRDF::Sr(float r) const {
+    const float st[3] = {sigma_t.x, sigma_t.y, sigma_t.z};
+    const float rh[3] = {rho.x, rho.y, rho.z};
+    float out[3] = {0.0f, 0.0f, 0.0f};
+
+    for (int ch = 0; ch < 3; ++ch) {
+        float rOptical = r * st[ch];
+
+        int rhoOffset, radiusOffset;
+        float rhoW[4], radiusW[4];
+        if (!CatmullRomWeights(table->n_rho, table->rho_samples.data(), rh[ch], rhoOffset, rhoW) ||
+            !CatmullRomWeights(table->n_radius, table->radius_samples.data(), rOptical, radiusOffset, radiusW))
+            continue;
+
+        float sr = 0;
+        for (int i = 0; i < 4; ++i) {
+            for (int j = 0; j < 4; ++j) {
+                float weight = rhoW[i] * radiusW[j];
+                if (weight != 0)
+                    sr += weight * table->EvalProfile(rhoOffset + i, radiusOffset + j);
+            }
+        }
+
+        if (rOptical != 0) sr /= 2 * Pi * rOptical;
+        out[ch] = sr;
+    }
+
+    return Color3f{std::max(0.0f, out[0] * st[0] * st[0]),
+                   std::max(0.0f, out[1] * st[1] * st[1]),
+                   std::max(0.0f, out[2] * st[2] * st[2])};
+}
+
+float TabulatedBSSRDF::Sw(float cos_theta) const {
+    float c = 1 - 2 * FresnelMoment1(1.0f / eta);
+    return (1 - FrDielectric(cos_theta, eta)) / (c * Pi);
+}
+
+Color3f TabulatedBSSRDF::S(float cos_theta_o, float r, float cos_theta_i) const {
+    float ft = 1 - FrDielectric(cos_theta_o, eta);
+    Color3f sp = Sp(r);
+    float sw = Sw(cos_theta_i);
+    return Color3f{ft * sp.x * sw, ft * sp.y * sw, ft * sp.z * sw};
+}
+
 }  // namespace yr

@@ -4,7 +4,10 @@
 // Slice 1: scattering helpers, photon beam diffusion integrands, and the
 // precomputed BSSRDFTable. No integrator, no scene types — pure math.
 
+#include <cstddef>
 #include <vector>
+
+#include <yaoray/core/vec.hpp>
 
 namespace yr {
 
@@ -43,10 +46,40 @@ struct BSSRDFTable {
     std::vector<float> profile_cdf;     // [n_rho*n_radius]  per-rho radial CDF
 
     BSSRDFTable(int n_rho_samples, int n_radius_samples);
+
+    // profile[rho_index * n_radius + radius_index]
+    float EvalProfile(int rho_index, int radius_index) const {
+        return profile[(std::size_t)rho_index * n_radius + radius_index];
+    }
 };
 
 // Fill `table.profile`, `table.rho_eff`, and `table.profile_cdf` for the given
 // phase asymmetry g and relative IOR eta. Deterministic (sequential).
 void ComputeBeamDiffusionBSSRDF(float g, float eta, BSSRDFTable& table);
+
+// A separable, tabulated BSSRDF instance for one shading point and medium.
+// Faithful port of pbrt-v4's TabulatedBSSRDF, restricted to RGB. Constructed from
+// per-channel absorption/scattering coefficients, the relative IOR, and a
+// precomputed BSSRDFTable (built once per (g, eta) by ComputeBeamDiffusionBSSRDF).
+// Slice 2 implements the radial profile (Sr), directional term (Sw), spatial term
+// (Sp == Sr of the surface distance), the combined value (S), and 1-D radius
+// importance sampling (Sample_Sr / Pdf_Sr). Exit-point sampling and scene wiring
+// are later slices.
+struct TabulatedBSSRDF {
+    Color3f sigma_t;          // sigma_a + sigma_s, per channel
+    Color3f rho;              // sigma_s / sigma_t, per channel (0 where sigma_t==0)
+    float eta = 1.0f;         // relative IOR
+    const BSSRDFTable* table = nullptr;
+
+    TabulatedBSSRDF(const Color3f& sigma_a, const Color3f& sigma_s, float eta,
+                    const BSSRDFTable& table);
+
+    Color3f Sr(float r) const;
+    float Sw(float cos_theta) const;
+    Color3f Sp(float r) const { return Sr(r); }
+    Color3f S(float cos_theta_o, float r, float cos_theta_i) const;
+    float Sample_Sr(int ch, float u) const;
+    float Pdf_Sr(int ch, float r) const;
+};
 
 }  // namespace yr
