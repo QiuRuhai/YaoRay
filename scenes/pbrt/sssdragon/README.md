@@ -99,8 +99,13 @@ Warnings at parse or compile time where applicable.
    approximate and environment sampling is higher-variance (visible as grain on
    the floor plane). Proper equal-area environment support is future work (M6).
 
-2. **Film ISO / exposure ignored.** `Film "float iso"` is parsed but has no
-   effect; tone-map at view time instead.
+2. **Tone reproduction differs.** `Film "float iso"` *is* applied — it maps to
+   exposure stops via `log2(iso / 100)` and feeds the tone-mapping pipeline. The
+   difference is the tone curve: YaoRay tone-maps to 8-bit with **ACES** (which
+   compresses highlights and slightly desaturates), whereas PBRT writes a linear
+   `.exr`, so the two are not directly comparable in tone. The committed reference
+   image is rendered at `iso 800` (+1 stop over the scene's `iso 400`) purely for
+   presentation brightness under ACES; it is not a change to the scene's physics.
 
 3. **Sampler degrades to `independent`.** The scene's `halton` sampler parses
    but degrades to `independent` at compile time (M1 policy). A Warning is
