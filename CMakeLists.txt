@@ -67,6 +67,7 @@ add_library(yaoray_render STATIC
     src/render/texture.cpp
     src/render/tensor_file.cpp
     src/render/measured_brdf.cpp
+    src/render/catmull_rom.cpp
 )
 target_include_directories(yaoray_render PUBLIC include)
 target_link_libraries(yaoray_render PUBLIC yaoray_core yaoray_pbrt PRIVATE yaoray_assets stb tinyexr)
@@ -137,6 +138,7 @@ add_executable(yaoray_tests
     tests/piecewise_linear_2d_tests.cpp
     tests/measured_eval_tests.cpp
     tests/measured_sample_tests.cpp
+    tests/catmull_rom_tests.cpp
 )
 target_link_libraries(yaoray_tests PRIVATE yaoray_core yaoray_film yaoray_pbrt yaoray_render yaoray_assets yaoray_backends)
 target_compile_definitions(yaoray_tests PRIVATE YAORAY_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
