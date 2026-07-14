@@ -12,7 +12,7 @@ Vendored single-header OpenEXR (.exr) reading + writing dependency.
 
 YaoRay uses `tinyexr.h` for:
 
-- `.exr` HDR texture / environment map loading in `src/render/texture.cpp` (via `LoadEXR`).
+- `.exr` HDR texture / environment map loading in `src/io/image_loader_exr.cpp` (via `LoadEXR`).
 - `.exr` HDR image output in `src/film/image_writer.cpp` (via `SaveEXR`, raw float RGB, no tone-mapping).
 
-The `TINYEXR_IMPLEMENTATION` macro is defined in exactly one translation unit (`src/render/texture.cpp`), mirroring the `STB_IMAGE_IMPLEMENTATION` pattern. Other TUs that include `tinyexr.h` get declarations only.
+The `TINYEXR_IMPLEMENTATION` macro is defined in exactly one translation unit (`src/io/image_loader_exr.cpp`), mirroring the `STB_IMAGE_IMPLEMENTATION` pattern. Other TUs that include `tinyexr.h` get declarations only.
