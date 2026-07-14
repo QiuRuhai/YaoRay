@@ -1,0 +1,424 @@
+#include <yaoray/frontend/pbrt/pbrt_scene.hpp>
+
+#include "pbrt_tokenizer_internal.hpp"
+
+#include <array>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace yr {
+namespace {
+
+constexpr int MaxIncludeDepth = 32;
+
+SceneDiagnostic PbrtError(const std::filesystem::path& file, std::string field, std::string message) {
+    return SceneDiagnostic{DiagnosticSeverity::Error, file, std::move(field), std::move(message)};
+}
+
+SceneDiagnostic PbrtWarning(const std::filesystem::path& file, std::string field, std::string message) {
+    return SceneDiagnostic{DiagnosticSeverity::Warning, file, std::move(field), std::move(message)};
+}
+
+Mat4f MatrixFromPbrtValues(const std::vector<float>& values) {
+    Mat4f result;
+    for (std::size_t i = 0; i < result.m.size(); ++i) {
+        result.m[i] = values[i];
+    }
+    return result;
+}
+
+struct ScopedPbrtState {
+    std::string material_name;
+    std::optional<PbrtEntity> inline_material;
+    std::optional<PbrtEntity> current_area_light;
+    Mat4f transform;
+};
+
+struct PbrtParserState {
+    PbrtScene scene;
+    std::vector<SceneDiagnostic> diagnostics;
+    std::string current_material_name;
+    std::optional<PbrtEntity> current_inline_material;
+    std::optional<PbrtEntity> current_area_light;
+    Mat4f current_transform;
+    std::vector<ScopedPbrtState> attribute_stack;
+    std::vector<Mat4f> transform_stack;
+    std::vector<std::filesystem::path> include_stack;
+    // For ObjectBegin/End tracking
+    std::string current_object_name;
+    bool inside_object = false;
+};
+
+using pbrt_parse::FindParam;
+using pbrt_parse::ParseFloatToken;
+using pbrt_parse::ReadParams;
+using pbrt_parse::StringParam;
+
+std::filesystem::path ResolvePath(const std::filesystem::path& base, std::string_view value) {
+    const std::filesystem::path candidate{std::string{value}};
+    if (candidate.is_absolute()) {
+        return candidate.lexically_normal();
+    }
+    return (base / candidate).lexically_normal();
+}
+
+std::filesystem::path NormalizeExistingOrAbsolute(const std::filesystem::path& path) {
+    std::error_code ec;
+    const std::filesystem::path canonical = std::filesystem::weakly_canonical(path, ec);
+    if (!ec) {
+        return canonical.lexically_normal();
+    }
+    const std::filesystem::path absolute = std::filesystem::absolute(path, ec);
+    return (ec ? path : absolute).lexically_normal();
+}
+
+void AddSourceRoot(PbrtScene& scene, const std::filesystem::path& root) {
+    const std::filesystem::path normalized = NormalizeExistingOrAbsolute(root);
+    for (const std::filesystem::path& existing : scene.source_roots) {
+        if (existing == normalized) {
+            return;
+        }
+    }
+    scene.source_roots.push_back(normalized);
+}
+
+PbrtEntity MakeEntity(std::string type, std::vector<PbrtParam> params, const std::filesystem::path& source_root) {
+    PbrtEntity entity;
+    entity.type = std::move(type);
+    entity.params = std::move(params);
+    entity.source_root = source_root;
+    return entity;
+}
+
+bool ReadFloatSequence(
+    const std::vector<std::string>& tokens,
+    std::size_t& index,
+    std::size_t expected_count,
+    const std::filesystem::path& path,
+    std::string_view field,
+    std::vector<SceneDiagnostic>& diagnostics,
+    std::vector<float>& values
+) {
+    values.clear();
+    const bool bracketed = index < tokens.size() && tokens[index] == "[";
+    if (bracketed) {
+        ++index;
+    }
+
+    while (index < tokens.size() && values.size() < expected_count && (!bracketed || tokens[index] != "]")) {
+        const std::optional<float> parsed = ParseFloatToken(tokens[index]);
+        if (!parsed.has_value()) {
+            diagnostics.push_back(PbrtError(path, std::string{field}, "expected numeric value"));
+            return false;
+        }
+        values.push_back(*parsed);
+        ++index;
+    }
+
+    if (values.size() != expected_count) {
+        diagnostics.push_back(PbrtError(path, std::string{field}, "expected " + std::to_string(expected_count) + " numeric values"));
+        return false;
+    }
+    if (bracketed) {
+        if (index >= tokens.size() || tokens[index] != "]") {
+            diagnostics.push_back(PbrtError(path, std::string{field}, "expected closing bracket"));
+            return false;
+        }
+        ++index;
+    }
+    return true;
+}
+
+void SkipUnsupportedWithParams(const std::vector<std::string>& tokens, std::size_t& index, int positional_count) {
+    for (int i = 0; i < positional_count && index < tokens.size(); ++i) {
+        ++index;
+    }
+    (void)ReadParams(tokens, index);
+}
+
+bool ParsePbrtFileIntoState(const std::filesystem::path& path, PbrtParserState& state, int include_depth);
+
+bool ParseInclude(
+    const std::vector<std::string>& tokens,
+    std::size_t& index,
+    const std::filesystem::path& path,
+    PbrtParserState& state,
+    int include_depth
+) {
+    if (index >= tokens.size()) {
+        state.diagnostics.push_back(PbrtError(path, "Include", "missing include path"));
+        return false;
+    }
+    const std::filesystem::path include_path = ResolvePath(path.parent_path(), tokens[index++]);
+    return ParsePbrtFileIntoState(include_path, state, include_depth + 1);
+}
+
+bool ParseTokens(
+    const std::filesystem::path& path,
+    const std::vector<std::string>& tokens,
+    PbrtParserState& state,
+    int include_depth
+) {
+    const std::filesystem::path current_source_root = NormalizeExistingOrAbsolute(path).parent_path();
+    for (std::size_t index = 0; index < tokens.size();) {
+        const std::string command = tokens[index++];
+        if (command == "Film") {
+            std::string film_type = index < tokens.size() ? tokens[index++] : "rgb";
+            state.scene.film = MakeEntity(std::move(film_type), ReadParams(tokens, index), current_source_root);
+        } else if (command == "Integrator") {
+            std::string type = index < tokens.size() ? tokens[index++] : "";
+            state.scene.integrator = MakeEntity(std::move(type), ReadParams(tokens, index), current_source_root);
+        } else if (command == "Sampler") {
+            std::string type = index < tokens.size() ? tokens[index++] : "";
+            state.scene.sampler = MakeEntity(std::move(type), ReadParams(tokens, index), current_source_root);
+        } else if (command == "Camera") {
+            std::string type = index < tokens.size() ? tokens[index++] : "perspective";
+            std::vector<PbrtParam> params = ReadParams(tokens, index);
+            state.scene.camera = MakeEntity(std::move(type), std::move(params), current_source_root);
+            // camera_transform is captured at WorldBegin, not here (PBRT v4 semantics)
+        } else if (command == "LookAt") {
+            std::vector<float> values;
+            if (!ReadFloatSequence(tokens, index, 9, path, "LookAt", state.diagnostics, values)) {
+                return false;
+            }
+            Point3f eye{values[0], values[1], values[2]};
+            Point3f target{values[3], values[4], values[5]};
+            Vec3f up{values[6], values[7], values[8]};
+            state.current_transform = Multiply(state.current_transform, LookAtMatrix(eye, target, up));
+        } else if (command == "WorldBegin") {
+            // PBRT v4: camera transform is the CTM at WorldBegin
+            state.scene.camera_transform = state.current_transform;
+            state.current_transform = Mat4f{};
+            state.attribute_stack.clear();
+            state.transform_stack.clear();
+        } else if (command == "WorldEnd") {
+            continue;
+        } else if (command == "AttributeBegin") {
+            state.attribute_stack.push_back(ScopedPbrtState{
+                state.current_material_name, state.current_inline_material,
+                state.current_area_light, state.current_transform});
+        } else if (command == "AttributeEnd") {
+            if (state.attribute_stack.empty()) {
+                state.diagnostics.push_back(PbrtWarning(path, "AttributeEnd", "unmatched AttributeEnd ignored"));
+            } else {
+                const ScopedPbrtState& scoped = state.attribute_stack.back();
+                state.current_material_name = scoped.material_name;
+                state.current_inline_material = scoped.inline_material;
+                state.current_area_light = scoped.current_area_light;
+                state.current_transform = scoped.transform;
+                state.attribute_stack.pop_back();
+            }
+        } else if (command == "TransformBegin") {
+            state.transform_stack.push_back(state.current_transform);
+        } else if (command == "TransformEnd") {
+            if (state.transform_stack.empty()) {
+                state.diagnostics.push_back(PbrtWarning(path, "TransformEnd", "unmatched TransformEnd ignored"));
+            } else {
+                state.current_transform = state.transform_stack.back();
+                state.transform_stack.pop_back();
+            }
+        } else if (command == "Identity") {
+            state.current_transform = Mat4f{};
+        } else if (command == "Translate") {
+            std::vector<float> values;
+            if (!ReadFloatSequence(tokens, index, 3, path, "Translate", state.diagnostics, values)) {
+                return false;
+            }
+            state.current_transform = Multiply(state.current_transform, TranslationMatrix(Vec3f{values[0], values[1], values[2]}));
+        } else if (command == "Scale") {
+            std::vector<float> values;
+            if (!ReadFloatSequence(tokens, index, 3, path, "Scale", state.diagnostics, values)) {
+                return false;
+            }
+            state.current_transform = Multiply(state.current_transform, ScaleMatrix(Vec3f{values[0], values[1], values[2]}));
+        } else if (command == "Rotate") {
+            std::vector<float> values;
+            if (!ReadFloatSequence(tokens, index, 4, path, "Rotate", state.diagnostics, values)) {
+                return false;
+            }
+            state.current_transform = Multiply(
+                state.current_transform,
+                RotationAxisMatrix(values[0], Vec3f{values[1], values[2], values[3]})
+            );
+        } else if (command == "Transform") {
+            std::vector<float> values;
+            if (!ReadFloatSequence(tokens, index, 16, path, "Transform", state.diagnostics, values)) {
+                return false;
+            }
+            state.current_transform = MatrixFromPbrtValues(values);
+        } else if (command == "ConcatTransform") {
+            std::vector<float> values;
+            if (!ReadFloatSequence(tokens, index, 16, path, "ConcatTransform", state.diagnostics, values)) {
+                return false;
+            }
+            state.current_transform = Multiply(state.current_transform, MatrixFromPbrtValues(values));
+        } else if (command == "MakeNamedMaterial") {
+            if (index >= tokens.size()) {
+                state.diagnostics.push_back(PbrtError(path, "MakeNamedMaterial", "missing material name"));
+                return false;
+            }
+            std::string name = tokens[index++];
+            std::vector<PbrtParam> params = ReadParams(tokens, index);
+            std::string mat_type = StringParam(params, "type", "matte");
+            state.scene.named_materials[name] = MakeEntity(std::move(mat_type), std::move(params), current_source_root);
+        } else if (command == "Material") {
+            if (index >= tokens.size()) {
+                state.diagnostics.push_back(PbrtError(path, "Material", "missing material type"));
+                return false;
+            }
+            std::string type = tokens[index++];
+            std::vector<PbrtParam> params = ReadParams(tokens, index);
+            state.current_inline_material = MakeEntity(std::move(type), std::move(params), current_source_root);
+            state.current_material_name.clear();
+        } else if (command == "NamedMaterial") {
+            if (index >= tokens.size()) {
+                state.diagnostics.push_back(PbrtError(path, "NamedMaterial", "missing material name"));
+                return false;
+            }
+            state.current_material_name = tokens[index++];
+            state.current_inline_material.reset();
+        } else if (command == "AreaLightSource") {
+            std::string type = index < tokens.size() ? tokens[index++] : "diffuse";
+            state.current_area_light = MakeEntity(std::move(type), ReadParams(tokens, index), current_source_root);
+        } else if (command == "Shape") {
+            if (index >= tokens.size()) {
+                state.diagnostics.push_back(PbrtError(path, "Shape", "missing shape type"));
+                return false;
+            }
+            std::string shape_type = tokens[index++];
+            std::vector<PbrtParam> params = ReadParams(tokens, index);
+            PbrtShapeRecord record;
+            record.shape = MakeEntity(std::move(shape_type), std::move(params), current_source_root);
+            record.material_name = state.current_material_name;
+            record.inline_material = state.current_inline_material;
+            record.area_light = state.current_area_light;
+            record.object_to_world = state.current_transform;
+            if (state.inside_object) {
+                state.scene.object_definitions[state.current_object_name].push_back(std::move(record));
+            } else {
+                state.scene.shapes.push_back(std::move(record));
+            }
+        } else if (command == "Texture") {
+            if (index + 2 >= tokens.size()) {
+                state.diagnostics.push_back(PbrtError(path, "Texture", "missing texture parameters"));
+                return false;
+            }
+            std::string tex_name = tokens[index++];
+            std::string tex_value_type = tokens[index++];  // "float" or "spectrum"/"color"
+            std::string tex_class = tokens[index++];  // "imagemap", "constant", etc.
+            std::vector<PbrtParam> params = ReadParams(tokens, index);
+            state.scene.named_textures[tex_name] = MakeEntity(std::move(tex_class), std::move(params), current_source_root);
+        } else if (command == "LightSource") {
+            std::string type = index < tokens.size() ? tokens[index++] : "";
+            std::vector<PbrtParam> params = ReadParams(tokens, index);
+            state.scene.lights.push_back(PbrtLightRecord{
+                MakeEntity(std::move(type), std::move(params), current_source_root),
+                state.current_transform});
+        } else if (command == "PixelFilter") {
+            std::string type = index < tokens.size() ? tokens[index++] : "";
+            state.scene.filter = MakeEntity(std::move(type), ReadParams(tokens, index), current_source_root);
+        } else if (command == "ObjectBegin") {
+            if (index >= tokens.size()) {
+                state.diagnostics.push_back(PbrtError(path, "ObjectBegin", "missing object name"));
+                return false;
+            }
+            state.current_object_name = tokens[index++];
+            state.inside_object = true;
+            state.scene.object_definitions[state.current_object_name]; // ensure entry exists
+        } else if (command == "ObjectEnd") {
+            state.inside_object = false;
+            state.current_object_name.clear();
+        } else if (command == "ObjectInstance") {
+            if (index >= tokens.size()) {
+                state.diagnostics.push_back(PbrtError(path, "ObjectInstance", "missing object name"));
+                return false;
+            }
+            std::string name = tokens[index++];
+            state.scene.instances.push_back(PbrtObjectInstance{std::move(name), state.current_transform});
+        } else if (command == "Include") {
+            if (!ParseInclude(tokens, index, path, state, include_depth)) {
+                return false;
+            }
+        } else if (command == "Accelerator" || command == "MakeNamedMedium" || command == "MediumInterface") {
+            state.diagnostics.push_back(PbrtWarning(path, command, "unsupported PBRT directive ignored"));
+            SkipUnsupportedWithParams(tokens, index, 1);
+        } else if (command == "CoordinateSystem" || command == "CoordSysTransform" || command == "ActiveTransform") {
+            state.diagnostics.push_back(PbrtWarning(path, command, "unsupported PBRT directive ignored"));
+            SkipUnsupportedWithParams(tokens, index, 1);
+        } else if (command == "ReverseOrientation") {
+            state.diagnostics.push_back(PbrtWarning(path, command, "unsupported PBRT directive ignored"));
+        } else if (command == "TransformTimes") {
+            state.diagnostics.push_back(PbrtWarning(path, command, "unsupported PBRT directive ignored"));
+            SkipUnsupportedWithParams(tokens, index, 2);
+        } else {
+            state.diagnostics.push_back(PbrtWarning(path, command, "unsupported PBRT directive ignored"));
+            (void)ReadParams(tokens, index);
+        }
+    }
+
+    return true;
+}
+
+bool ParsePbrtFileIntoState(const std::filesystem::path& path, PbrtParserState& state, int include_depth) {
+    if (include_depth > MaxIncludeDepth) {
+        state.diagnostics.push_back(PbrtError(path, "Include", "PBRT include depth exceeded"));
+        return false;
+    }
+    if (!std::filesystem::exists(path)) {
+        state.diagnostics.push_back(PbrtError(path, "", "PBRT file not found"));
+        return false;
+    }
+
+    const std::filesystem::path normalized_path = NormalizeExistingOrAbsolute(path);
+    for (const std::filesystem::path& active_path : state.include_stack) {
+        if (active_path == normalized_path) {
+            state.diagnostics.push_back(PbrtError(path, "Include", "PBRT include cycle detected"));
+            return false;
+        }
+    }
+    AddSourceRoot(state.scene, normalized_path.parent_path());
+
+    state.include_stack.push_back(normalized_path);
+    struct StackPop {
+        std::vector<std::filesystem::path>& values;
+        ~StackPop() {
+            values.pop_back();
+        }
+    } stack_pop{state.include_stack};
+
+    std::ifstream in{path};
+    if (!in) {
+        state.diagnostics.push_back(PbrtError(path, "", "failed to open PBRT file"));
+        return false;
+    }
+
+    const std::string text{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    return ParseTokens(path, pbrt_parse::Tokenize(text), state, include_depth);
+}
+
+} // namespace
+
+PbrtSceneLoadResult LoadPbrtScene(const std::filesystem::path& path) {
+    PbrtParserState state;
+    state.scene.source_path = path;
+    state.scene.source_root = path.parent_path();
+
+    (void)ParsePbrtFileIntoState(path, state, 0);
+
+    PbrtSceneLoadResult result;
+    result.diagnostics = std::move(state.diagnostics);
+    if (HasSceneErrors(result.diagnostics)) {
+        return result;
+    }
+
+    result.scene = std::move(state.scene);
+    return result;
+}
+
+} // namespace yr

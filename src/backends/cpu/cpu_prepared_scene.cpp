@@ -1,13 +1,24 @@
 #include <yaoray/backends/cpu/cpu_prepared_scene.hpp>
 
+#include "cpu_worker_pool.hpp"
+
+#include <yaoray/backends/cpu/cpu_tile_scheduler.hpp>
+#include <yaoray/shading/texture.hpp>
+#include <yaoray/lighting/light_sampling.hpp>
+
 #include <chrono>
 #include <utility>
 
 namespace yr {
 
-CpuPreparedScene::CpuPreparedScene(RenderSceneIR scene, RenderBvh prepared_bvh)
-    : render_scene(std::move(scene)),
-      bvh(std::move(prepared_bvh)) {
+CpuPreparedScene::CpuPreparedScene(RenderJob job, RenderAcceleration prepared_acceleration)
+    : render_job(std::move(job)),
+      acceleration(std::move(prepared_acceleration)),
+      worker_pool(std::make_shared<CpuWorkerPool>(
+          BuildCpuTileSchedule(
+              render_job.settings.width,
+              render_job.settings.height,
+              render_job.settings.threads).worker_count)) {
 }
 
 RenderBackendKind CpuPreparedScene::Kind() const {
@@ -15,18 +26,28 @@ RenderBackendKind CpuPreparedScene::Kind() const {
 }
 
 const RenderSceneIR& CpuPreparedScene::SourceScene() const {
-    return render_scene;
+    return render_job.scene;
+}
+
+const RenderSettings& CpuPreparedScene::Settings() const {
+    return render_job.settings;
 }
 
 const RenderSceneIR& CpuPreparedScene::Scene() const {
     return SourceScene();
 }
 
-CpuPrepareResult PrepareCpuScene(RenderSceneIR scene) {
+CpuPrepareResult PrepareCpuScene(RenderJob job) {
     CpuPrepareResult result;
 
     const auto start = std::chrono::steady_clock::now();
-    BvhBuildResult build = BuildBvh(scene);
+    BuildTextureSamplingCaches(job.scene.textures);
+    PrepareLightSampling(job.scene);
+    const auto bvh_start = std::chrono::steady_clock::now();
+    RenderAccelerationBuildResult build = BuildRenderAcceleration(job.scene.Geometry());
+    const auto bvh_end = std::chrono::steady_clock::now();
+    result.bvh_build_seconds =
+        std::chrono::duration<double>(bvh_end - bvh_start).count();
     const auto end = std::chrono::steady_clock::now();
     result.elapsed_seconds = std::chrono::duration<double>(end - start).count();
 
@@ -37,7 +58,7 @@ CpuPrepareResult PrepareCpuScene(RenderSceneIR scene) {
     }
 
     result.ok = true;
-    result.scene.emplace(std::move(scene), std::move(build.bvh));
+    result.scene.emplace(std::move(job), std::move(build.acceleration));
     return result;
 }
 

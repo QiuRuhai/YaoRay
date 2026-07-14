@@ -12,7 +12,7 @@ namespace yr {
 namespace {
 
 constexpr std::array<char, 8> Magic{'Y', 'R', 'C', 'H', 'E', 'C', 'K', '1'};
-constexpr std::uint32_t Version = 1;
+constexpr std::uint32_t Version = 3;
 
 struct FileHeader {
     std::array<char, 8> magic{};
@@ -30,6 +30,16 @@ struct StoredPixel {
     float y = 0.0f;
     float z = 0.0f;
     std::uint32_t samples = 0;
+    float luminance_mean = 0.0f;
+    float luminance_m2 = 0.0f;
+    float albedo_x = 0.0f;
+    float albedo_y = 0.0f;
+    float albedo_z = 0.0f;
+    float normal_x = 0.0f;
+    float normal_y = 0.0f;
+    float normal_z = 0.0f;
+    float depth_sum = 0.0f;
+    std::uint32_t aov_samples = 0;
 };
 
 template <typename T>
@@ -94,7 +104,11 @@ FilmCheckpointWriteResult WriteFilmCheckpoint(
     }
 
     for (const FilmPixel& pixel : film.Pixels()) {
-        const StoredPixel stored{pixel.sum.x, pixel.sum.y, pixel.sum.z, pixel.samples};
+        const StoredPixel stored{pixel.sum.x, pixel.sum.y, pixel.sum.z, pixel.samples,
+            pixel.luminance_mean, pixel.luminance_m2,
+            pixel.albedo_sum.x, pixel.albedo_sum.y, pixel.albedo_sum.z,
+            pixel.normal_sum.x, pixel.normal_sum.y, pixel.normal_sum.z,
+            pixel.depth_sum, pixel.aov_samples};
         if (!WritePod(out, stored)) {
             return FilmCheckpointWriteResult{false, "failed to write checkpoint pixels: " + path.generic_string()};
         }
@@ -156,13 +170,17 @@ FilmCheckpointLoadResult LoadFilmCheckpoint(
             result.error = "failed to read checkpoint pixels: " + path.generic_string();
             return result;
         }
-        if (stored.samples != header.completed_spp) {
-            result.error = "checkpoint pixel sample count is not uniform";
+        if (stored.samples > header.completed_spp) {
+            result.error = "checkpoint pixel sample count exceeds completed passes";
             return result;
         }
         const int x = static_cast<int>(index % static_cast<std::uint64_t>(expected_width));
         const int y = static_cast<int>(index / static_cast<std::uint64_t>(expected_width));
-        film.SetPixelForCheckpoint(x, y, FilmPixel{Color3f{stored.x, stored.y, stored.z}, stored.samples});
+        film.SetPixelForCheckpoint(x, y, FilmPixel{Color3f{stored.x, stored.y, stored.z},
+            stored.samples, stored.luminance_mean, stored.luminance_m2,
+            Color3f{stored.albedo_x, stored.albedo_y, stored.albedo_z},
+            Vec3f{stored.normal_x, stored.normal_y, stored.normal_z},
+            stored.depth_sum, stored.aov_samples});
     }
 
     result.ok = true;

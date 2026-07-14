@@ -8,6 +8,11 @@ struct Ray3f {
     Point3f origin;
     Vec3f direction;
     float time = 0.0f;
+    bool has_differentials = false;
+    Point3f rx_origin;
+    Point3f ry_origin;
+    Vec3f rx_direction;
+    Vec3f ry_direction;
 
     constexpr Ray3f() = default;
     constexpr Ray3f(Point3f ray_origin, Vec3f ray_direction, float ray_time = 0.0f)

@@ -4,6 +4,8 @@ build-*/
 _build/
 cmake-build-*/
 out/
+/tmp/
+/output/
 .cache/
 .worktrees/
 .claude/worktrees/
@@ -20,6 +22,7 @@ external/assets/
 .superpowers/brainstorm/
 
 # OS and compiler noise
+.DS_Store
 *.user
 *.suo
 *.log
