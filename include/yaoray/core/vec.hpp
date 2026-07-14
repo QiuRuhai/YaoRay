@@ -47,6 +47,18 @@ struct Color4f {
     }
 };
 
+constexpr Color4f operator+(Color4f a, Color4f b) {
+    return Color4f{a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w};
+}
+
+constexpr Color4f operator*(Color4f value, float scale) {
+    return Color4f{value.x * scale, value.y * scale, value.z * scale, value.w * scale};
+}
+
+constexpr Color4f operator/(Color4f value, float scale) {
+    return Color4f{value.x / scale, value.y / scale, value.z / scale, value.w / scale};
+}
+
 constexpr Vec3f operator+(Vec3f a, Vec3f b) {
     return Vec3f{a.x + b.x, a.y + b.y, a.z + b.z};
 }

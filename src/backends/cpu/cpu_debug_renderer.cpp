@@ -1,8 +1,9 @@
 #include <yaoray/backends/cpu/cpu_debug_renderer.hpp>
 
-#include <yaoray/backends/cpu/cpu_surface.hpp>
+#include <yaoray/integrators/surface_query.hpp>
 #include <yaoray/core/ray.hpp>
-#include <yaoray/render/shading.hpp>
+#include <yaoray/geometry/intersection.hpp>
+#include <yaoray/scene/camera.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -12,21 +13,6 @@
 
 namespace yr {
 namespace {
-
-Ray3f MakeCameraRay(const RenderSceneIR& scene, int x, int y) {
-    const float width = static_cast<float>(scene.width);
-    const float height = static_cast<float>(scene.height);
-    const float aspect = width / height;
-    const float half_height = std::tan(scene.camera.fov_y_radians * 0.5f);
-    const float screen_x = (2.0f * (static_cast<float>(x) + 0.5f) / width - 1.0f) * aspect * half_height;
-    const float screen_y = (1.0f - 2.0f * (static_cast<float>(y) + 0.5f) / height) * half_height;
-    const Vec3f direction = Normalize(
-        scene.camera.forward +
-        scene.camera.right * screen_x +
-        scene.camera.up * screen_y
-    );
-    return Ray3f{scene.camera.origin, direction};
-}
 
 Color3f EnvironmentColor(const RenderSceneIR& scene) {
     if (scene.environment.active) {
@@ -62,28 +48,31 @@ bool IsValidMaterialIndex(const RenderSceneIR& scene, int material_index) {
     return material_index >= 0 && static_cast<std::size_t>(material_index) < scene.materials.size();
 }
 
-void AccumulateTraceStats(CpuDebugRenderStats& stats, const BvhTraceStats& trace_stats) {
+void AccumulateTraceStats(CpuRenderStats& stats, const BvhTraceStats& trace_stats) {
     stats.bvh_node_tests += trace_stats.node_tests;
     stats.triangle_tests += trace_stats.triangle_tests;
+    stats.sphere_tests += trace_stats.sphere_tests;
 }
 
 Color3f ShadeHit(
     const CpuPreparedScene& prepared_scene,
     const Ray3f& ray,
-    const CpuSurfaceHit& hit,
-    CpuDebugRenderStats& stats
+    const SurfaceHit& hit,
+    CpuRenderStats& stats
 ) {
     const RenderSceneIR& scene = prepared_scene.Scene();
+    const int primitive_index = hit.geometry_hit.mesh_primitive.Value();
     if (hit.geometry_hit.triangle_index < 0 ||
-        !IsValidMaterialIndex(scene, scene.primitives[hit.geometry_hit.primitive_index].material_index)) {
+        primitive_index < 0 ||
+        !IsValidMaterialIndex(
+            scene,
+            scene.primitives[static_cast<std::size_t>(primitive_index)].material_index)) {
         return Color3f{1.0f, 0.0f, 1.0f};
     }
 
     const RenderMaterial& material = hit.sample.material;
     const Point3f hit_point = ray.origin + ray.direction * hit.geometry_hit.t;
-    const TriangleRef tri_ref = LocateTriangle(scene, hit.geometry_hit.triangle_index);
-    const Vec3f raw_normal = GeometricNormal(scene, tri_ref);
-    const Vec3f normal = FaceForward(raw_normal, -ray.direction);
+    const Vec3f normal = FaceForward(hit.sample.shading_normal, -ray.direction);
 
     Color3f radiance = material.emission;
     for (const EmissivePrimitive& emissive : scene.emissive_primitives) {
@@ -115,8 +104,9 @@ Color3f ShadeHit(
         ++stats.shadow_rays;
         BvhTraceStats shadow_trace;
         const Ray3f shadow_ray{shadow_origin, wi};
-        const CpuSurfaceHit shadow_hit = TraceVisibleSurface(
-            prepared_scene,
+        const SurfaceHit shadow_hit = TraceVisibleSurface(
+            scene,
+            prepared_scene.acceleration,
             shadow_ray,
             1.0e-5f,
             shadow_distance - shadow_bias,
@@ -139,19 +129,28 @@ Color3f ShadeHit(
 
 CpuDebugRenderResult RenderCpuDebug(const CpuPreparedScene& prepared_scene) {
     const RenderSceneIR& scene = prepared_scene.Scene();
-    CpuDebugRenderResult result{Film{scene.width, scene.height}, {}};
-    result.stats.bvh_nodes = static_cast<int>(prepared_scene.bvh.nodes.size());
-    result.stats.bvh_max_depth = prepared_scene.bvh.max_depth;
+    const RenderSettings& settings = prepared_scene.Settings();
+    CpuDebugRenderResult result{Film{settings.width, settings.height}, {}};
+    result.stats.bvh_nodes = prepared_scene.acceleration.NodeCount();
+    result.stats.bvh_max_depth = prepared_scene.acceleration.MaxDepth();
     const auto start = std::chrono::steady_clock::now();
 
-    for (int y = 0; y < scene.height; ++y) {
-        for (int x = 0; x < scene.width; ++x) {
-            const Ray3f ray = MakeCameraRay(scene, x, y);
+    for (int y = 0; y < settings.height; ++y) {
+        for (int x = 0; x < settings.width; ++x) {
+            const Ray3f ray = GeneratePerspectiveCameraRay(
+                scene.camera,
+                settings.width,
+                settings.height,
+                x,
+                y,
+                Vec2f{0.5f, 0.5f}
+            );
             ++result.stats.rays_traced;
 
             BvhTraceStats trace_stats;
-            const CpuSurfaceHit hit = TraceVisibleSurface(
-                prepared_scene,
+            const SurfaceHit hit = TraceVisibleSurface(
+                scene,
+                prepared_scene.acceleration,
                 ray,
                 1.0e-5f,
                 std::numeric_limits<float>::infinity(),

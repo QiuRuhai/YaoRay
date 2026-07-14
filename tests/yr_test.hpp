@@ -45,6 +45,24 @@ inline void ExpectNear(double actual, double expected, double eps, const char* e
     }
 }
 
+inline void ExpectGreater(double actual, double expected, const char* expr, const char* file, int line) {
+    if (!(actual > expected)) {
+        std::ostringstream out;
+        out << file << ':' << line << ": greater-than expectation failed: " << expr
+            << " actual=" << actual << " expected-greater-than=" << expected;
+        throw std::runtime_error(out.str());
+    }
+}
+
+inline void ExpectLessEqual(double actual, double expected, const char* expr, const char* file, int line) {
+    if (!(actual <= expected)) {
+        std::ostringstream out;
+        out << file << ':' << line << ": less-or-equal expectation failed: " << expr
+            << " actual=" << actual << " expected-at-most=" << expected;
+        throw std::runtime_error(out.str());
+    }
+}
+
 inline int RunAll() {
     int failed = 0;
     for (const auto& test : Registry()) {
@@ -74,3 +92,9 @@ inline int RunAll() {
 
 #define YR_EXPECT_NEAR(actual, expected, eps) \
     do { ::yrtest::ExpectNear((actual), (expected), (eps), #actual " ~= " #expected, __FILE__, __LINE__); } while (false)
+
+#define YR_EXPECT_GT(actual, expected) \
+    do { ::yrtest::ExpectGreater((actual), (expected), #actual " > " #expected, __FILE__, __LINE__); } while (false)
+
+#define YR_EXPECT_LE(actual, expected) \
+    do { ::yrtest::ExpectLessEqual((actual), (expected), #actual " <= " #expected, __FILE__, __LINE__); } while (false)

@@ -1,10 +1,10 @@
-#include <yaoray/backends/backend.hpp>
-#include <yaoray/core/diagnostic.hpp>
+#include <yaoray/runtime/backend.hpp>
+#include <yaoray/scene/diagnostic.hpp>
 #include <yaoray/core/version.hpp>
 #include <yaoray/film/image_writer.hpp>
 #include <yaoray/film/tone_mapping.hpp>
-#include <yaoray/pbrt/pbrt_scene.hpp>
-#include <yaoray/render/scene_compiler.hpp>
+#include <yaoray/frontend/pbrt/pbrt_scene.hpp>
+#include <yaoray/frontend/pbrt/scene_compiler.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -117,6 +117,7 @@ int RunRender(int argc, char** argv) {
     }
 
     yr::RenderSceneIR render_scene = std::move(compile_result.scene.value());
+    yr::RenderSettings render_settings = std::move(compile_result.settings);
 
     // --- Print compile warnings (non-fatal) ---
     if (!compile_result.diagnostics.empty()) {
@@ -125,7 +126,7 @@ int RunRender(int argc, char** argv) {
 
     // --- Apply backend override ---
     if (backend_override) {
-        render_scene.requested_backend = *backend_override;
+        render_settings.requested_backend = *backend_override;
     }
 
     // --- Print scene info ---
@@ -136,21 +137,24 @@ int RunRender(int argc, char** argv) {
 
     std::cout << "Scene parsed successfully: " << scene_path.generic_string() << '\n';
     std::cout << "Scene compiled successfully.\n";
-    std::cout << "Requested backend: " << yr::RenderBackendName(render_scene.requested_backend) << '\n';
-    std::cout << "Integrator: " << yr::RenderIntegratorName(render_scene.integrator) << '\n';
+    std::cout << "Requested backend: "
+              << yr::RenderBackendName(render_settings.requested_backend) << '\n';
+    std::cout << "Integrator: " << yr::RenderIntegratorName(render_settings.integrator) << '\n';
     std::cout << "Compiled triangles: " << total_triangles << '\n';
     std::cout << "Compiled materials: " << render_scene.materials.size() << '\n';
     std::cout << "Compiled textures: " << render_scene.textures.size() << '\n';
     std::cout << "Texture memory MiB: " << BytesToMiB(EstimateTextureMemoryBytes(render_scene)) << '\n';
 
     // --- Create backend and prepare ---
-    const auto backend = yr::CreateRenderBackend(render_scene.requested_backend);
+    const auto backend = yr::CreateRenderBackend(render_settings.requested_backend);
     if (!backend) {
-        std::cerr << "Render backend not available: " << yr::RenderBackendName(render_scene.requested_backend) << '\n';
+        std::cerr << "Render backend not available: "
+                  << yr::RenderBackendName(render_settings.requested_backend) << '\n';
         return 1;
     }
 
-    yr::BackendPrepareResult prepare_result = backend->Prepare(std::move(render_scene));
+    yr::BackendPrepareResult prepare_result = backend->Prepare(
+        yr::RenderJob{std::move(render_scene), std::move(render_settings)});
     if (!prepare_result.ok || prepare_result.scene == nullptr) {
         std::cerr << "Render backend preparation failed: "
                   << (prepare_result.error.empty() ? "unknown error" : prepare_result.error)
@@ -158,8 +162,10 @@ int RunRender(int argc, char** argv) {
         return 1;
     }
     std::cout << "Prepare seconds: " << prepare_result.elapsed_seconds << '\n';
+    std::cout << "Acceleration build seconds: "
+              << prepare_result.acceleration_build_seconds << '\n';
 
-    const yr::RenderSceneIR& prepared_scene_ir = prepare_result.scene->SourceScene();
+    const yr::RenderSettings& prepared_settings = prepare_result.scene->Settings();
 
     // --- Render ---
     yr::RenderRequest render_request;
@@ -181,18 +187,19 @@ int RunRender(int argc, char** argv) {
 
     // --- Write output image ---
     const yr::ToneMapSettings tone_map{
-        ToFilmToneMapper(prepared_scene_ir.film.tone_mapper),
-        prepared_scene_ir.film.exposure
+        ToFilmToneMapper(prepared_settings.film.tone_mapper),
+        prepared_settings.film.exposure
     };
 
-    const yr::ImageWriteResult write_result = yr::WriteImage(*render_result.film, tone_map, prepared_scene_ir.film.output);
+    const yr::ImageWriteResult write_result = yr::WriteImage(
+        *render_result.film, tone_map, prepared_settings.film.output);
     if (!write_result.ok) {
         std::cerr << "Image write error: " << write_result.error << '\n';
         return 1;
     }
 
     // --- Print stats ---
-    std::cout << "Rendered image: " << prepared_scene_ir.film.output.generic_string() << '\n';
+    std::cout << "Rendered image: " << prepared_settings.film.output.generic_string() << '\n';
     std::cout << "Threads: " << render_result.stats.threads << '\n';
     std::cout << "Rays traced: " << render_result.stats.rays_traced << '\n';
     std::cout << "Rays/sec: " << SafeRate(static_cast<double>(render_result.stats.rays_traced), render_result.stats.elapsed_seconds) << '\n';
@@ -202,6 +209,7 @@ int RunRender(int argc, char** argv) {
     std::cout << "Occluded shadow rays: " << render_result.stats.occluded_shadow_rays << '\n';
     std::cout << "BVH node tests: " << render_result.stats.bvh_node_tests << '\n';
     std::cout << "Triangle tests: " << render_result.stats.triangle_tests << '\n';
+    std::cout << "Sphere tests: " << render_result.stats.sphere_tests << '\n';
     std::cout << "Hits: " << render_result.stats.hits << '\n';
     std::cout << "Misses: " << render_result.stats.misses << '\n';
     std::cout << "Elapsed seconds: " << render_result.stats.elapsed_seconds << '\n';

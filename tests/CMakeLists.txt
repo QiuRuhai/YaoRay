@@ -1,0 +1,90 @@
+add_executable(yaoray_tests
+    test_main.cpp
+    core/core_tests.cpp
+    core/rng_tests.cpp
+    core/version_tests.cpp
+    io/image_loader_tests.cpp
+    io/ply_loader_tests.cpp
+    io/tensor_file_tests.cpp
+    frontend/pbrt/material_degradation_tests.cpp
+    frontend/pbrt/pbrt_tests.cpp
+    frontend/pbrt/scene_compiler_coated_tests.cpp
+    frontend/pbrt/scene_compiler_analytic_light_tests.cpp
+    frontend/pbrt/scene_compiler_disk_tests.cpp
+    frontend/pbrt/scene_compiler_environment_tests.cpp
+    frontend/pbrt/scene_compiler_envmap_degrade_tests.cpp
+    frontend/pbrt/scene_compiler_film_iso_tests.cpp
+    frontend/pbrt/scene_compiler_imagemap_degrade_tests.cpp
+    frontend/pbrt/scene_compiler_imagemap_exr_tests.cpp
+    frontend/pbrt/scene_compiler_input_validation_tests.cpp
+    frontend/pbrt/scene_compiler_interface_roughness_tests.cpp
+    frontend/pbrt/scene_compiler_loopsubdiv_tests.cpp
+    frontend/pbrt/scene_compiler_measured_tests.cpp
+    frontend/pbrt/scene_compiler_normal_map_tests.cpp
+    frontend/pbrt/scene_compiler_object_instance_tests.cpp
+    frontend/pbrt/scene_compiler_plymesh_degrade_tests.cpp
+    frontend/pbrt/scene_compiler_scale_texture_tests.cpp
+    frontend/pbrt/scene_compiler_sphere_tests.cpp
+    frontend/pbrt/scene_compiler_spectrum_spd_tests.cpp
+    frontend/pbrt/scene_compiler_subsurface_tests.cpp
+    frontend/pbrt/scene_compiler_tangent_tests.cpp
+    frontend/pbrt/scene_compiler_texture_tests.cpp
+    frontend/pbrt/scene_compiler_wrap_mode_tests.cpp
+    scene/camera_tests.cpp
+    scene/render_scene_tests.cpp
+    scene/render_scene_hash_tests.cpp
+    geometry/sphere_tests.cpp
+    accel/bvh_builder_tests.cpp
+    accel/bvh_parallel_builder_tests.cpp
+    accel/bvh_probe_tests.cpp
+    accel/bvh_traversal_tests.cpp
+    accel/two_level_bvh_tests.cpp
+    sampling/sampler_tests.cpp
+    shading/bsdf_dielectric_tests.cpp
+    shading/bsdf_diffuse_conductor_tests.cpp
+    shading/bssrdf_eval_tests.cpp
+    shading/bssrdf_exit_lobe_tests.cpp
+    shading/bssrdf_pdf_sp_tests.cpp
+    shading/bssrdf_sample_tests.cpp
+    shading/bssrdf_tests.cpp
+    shading/catmull_rom_2d_tests.cpp
+    shading/catmull_rom_tests.cpp
+    shading/layered_bsdf_eval_tests.cpp
+    shading/layered_bsdf_pdf_tests.cpp
+    shading/layered_bsdf_sample_tests.cpp
+    shading/material_evaluator_tests.cpp
+    shading/measured_brdf_tests.cpp
+    shading/measured_eval_tests.cpp
+    shading/measured_sample_tests.cpp
+    shading/piecewise_linear_2d_tests.cpp
+    shading/texture_tests.cpp
+    lighting/analytic_light_tests.cpp
+    lighting/environment_tests.cpp
+    lighting/light_sampling_tests.cpp
+    integrators/bssrdf_probe_tests.cpp
+    integrators/mis_tests.cpp
+    integrators/surface_query_tests.cpp
+    runtime/backend_tests.cpp
+    backends/cpu/cpu_debug_renderer_tests.cpp
+    backends/cpu/cpu_path_tracer_execution_tests.cpp
+    backends/cpu/cpu_path_tracer_lighting_tests.cpp
+    backends/cpu/cpu_subsurface_tests.cpp
+    backends/cpu/cpu_tile_scheduler_tests.cpp
+    film/exr_io_tests.cpp
+    film/film_tests.cpp
+    film/film_checkpoint_tests.cpp
+    film/image_writer_tests.cpp
+    film/tone_mapping_tests.cpp
+)
+target_include_directories(yaoray_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(yaoray_tests PRIVATE
+    yaoray_frontend_pbrt
+    yaoray_backend_factory
+)
+target_compile_definitions(yaoray_tests PRIVATE
+    YAORAY_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+)
+
+add_test(NAME yaoray_tests COMMAND yaoray_tests)
+set_tests_properties(yaoray_tests PROPERTIES LABELS "correctness")
+include(${CMAKE_CURRENT_SOURCE_DIR}/cli_tests.cmake)
